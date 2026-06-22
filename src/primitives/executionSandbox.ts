@@ -27,8 +27,7 @@ interface ESandboxInput { action: 'run' | 'result' | 'status' | 'capabilities'; 
 export class ExecutionSandboxTool extends BasePrimitive<ESandboxInput> {
     constructor() { super('execution-sandbox'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<ESandboxInput>, token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, language = 'javascript', code, test, timeout_sec = 30, memory_limit_mb = 64 } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         if (token.isCancellationRequested) return textResult(JSON.stringify({ error: 'cancelled', detail: 'Operation cancelled by user' }));

@@ -148,9 +148,7 @@ export class SwarmAutonomyV2Tool extends BasePrimitive<AutonomyInput> {
         options: vscode.LanguageModelToolInvocationOptions<AutonomyInput>,
         _token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelToolResult> {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
-
+        this.requireFields(options.input as any, ['action']);
         const { action, objective, plan_id, max_cost_usd = 1.0, max_steps = 10, max_runtime_seconds = 600 } = options.input;
         const root = workspaceRoot();
         if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));

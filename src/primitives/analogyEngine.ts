@@ -49,8 +49,7 @@ async function safeJsonParse(llmText: string, expectedSchema: string[], retryPro
 export class AnalogyEngineTool extends BasePrimitive<AnalogyEngineInput> {
     constructor(private readonly secrets: vscode.SecretStorage) { super('analogy-engine'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<AnalogyEngineInput>, token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, source_domain, target_domain, source_problem, mapping_hint, analogy_json, verification, insight, query_action, limit = 20 } = options.input;
         const root = workspaceRoot();
         const dir = root ? safeHarmonyDir(root, 'analogy-engine') : null;

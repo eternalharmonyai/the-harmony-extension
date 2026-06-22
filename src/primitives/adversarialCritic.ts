@@ -24,8 +24,7 @@ export interface HardenedCriticFinding { dimension: string; severity: 'critical'
 export class AdversarialCriticTool extends BasePrimitive<AdversarialCriticInput> {
     constructor(private readonly secrets: vscode.SecretStorage) { super('adversarial-critic'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<AdversarialCriticInput>, token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['target']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['target']);
         const { action = 'review', target, language = 'typescript', dimensions = ['security', 'logic', 'performance'], validate = true, invariants } = options.input;
         if (!target?.trim()) return textResult(JSON.stringify({ error: 'target required' }));
         
@@ -94,10 +93,10 @@ TARGET CODE:\n${target.slice(0, 4000)}\n\nINVARIANTS:\n${invariants.map((inv, i)
                 // Extract JSON array robustly — find the first [ and matching ]
                 let start = response.indexOf('[');
                 let end = response.lastIndexOf(']');
-                if (start === -1 || end === -1 || start >= end) throw new Error('no JSON array in critic response');
+                if (start === -1 || end === -1 || start >= end) throw new Error(JSON.stringify({ error: 'PARSE_FAILED', detail: 'no JSON array in critic response' }));
                 const jsonStr = response.slice(start, end + 1);
                 const parsed = JSON.parse(jsonStr);
-                if (!Array.isArray(parsed)) throw new Error('critic response is not an array');
+                if (!Array.isArray(parsed)) throw new Error(JSON.stringify({ error: 'PARSE_FAILED', detail: 'critic response is not an array' }));
                 // Schema validation: each finding must have required fields
                 const valid = parsed.filter((f: any) => {
                     if (!f || typeof f !== 'object') return false;

@@ -455,9 +455,7 @@ export class DebugDashboardTool extends BasePrimitive<DashboardInput> {
         options: vscode.LanguageModelToolInvocationOptions<DashboardInput>,
         _token: vscode.CancellationToken
     ) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
-
+        this.requireFields(options.input as any, ['action']);
         const { action, view = 'thought-graph', max_nodes = 50 } = options.input;
         const root = workspaceRoot();
         if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
