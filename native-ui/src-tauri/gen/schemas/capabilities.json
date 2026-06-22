@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default permissions for the Harmony native control shell.","local":true,"windows":["main"],"permissions":["core:default","opener:default"]}}

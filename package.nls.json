@@ -1,0 +1,8 @@
+{
+  "displayName": "The Harmony Extension",
+  "description": "Harmony: a standalone VS Code chat participant + agent that uses VS Code language models, workspace tools, and an optional local backend.",
+  "viewsContainers.harmony": "Harmony",
+  "views.controlPanel": "Control Panel",
+  "views.translationTools": "Translation Tools",
+  "configuration.title": "Harmony"
+}
