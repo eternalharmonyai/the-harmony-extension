@@ -1,0 +1,86 @@
+# ─────────────────────────────────────────────────────────────────────
+# Public .gitignore — generic build/dependency/secret hygiene only.
+# Identity-revealing patterns live in .git/info/exclude (local, private).
+# ─────────────────────────────────────────────────────────────────────
+
+# Build / dependencies
+node_modules/
+out/
+dist/
+build/
+*.vsix
+.vscode-test/
+*.tsbuildinfo
+exts.txt
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# Secrets & credentials
+.env
+.env.*
+*.env
+*.key
+*.pem
+*.pfx
+*.p12
+*.crt
+*.cer
+keys/
+credentials/
+secrets/
+auth/
+*.token
+
+# Memory / data stores
+vectordb/
+chroma_db/
+embeddings/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Harmony local tool state
+.harmony/
+.harmony-archive/
+.harmony-staging/
+.harmony-recipes/
+.harmony-repair/
+.fastembed_cache/
+.harmonyhub-test/
+
+# Local package/build artifacts
+bin/harmonyhub.exe
+_askView_*.js
+_backups/
+_backups_vsix/
+_comparison/
+_cmp*.zip
+*.backup*
+**/*.backup*
+
+# Generated media
+generated/
+*.wav
+*.mp3
+*.flac
+*.webm
+*.mp4
+*.mov
+
+# Test documents (may contain draft research)
+*.pdf
+jest.config.js

@@ -1,0 +1,8 @@
+{
+  "displayName": "The Harmony Extension",
+  "description": "Harmony：独立的 VS Code 对话参与者与智能体，使用 VS Code 语言模型、工作区工具及可选本地后端。",
+  "viewsContainers.harmony": "Harmony",
+  "views.controlPanel": "控制面板",
+  "views.translationTools": "翻译工具",
+  "configuration.title": "Harmony"
+}
