@@ -12,14 +12,45 @@
  *   invoke({ action: 'fuzz', target: code, language: 'javascript', invariants: ['always returns >= 0', 'never throws on valid input'] });
  */
 import * as vscode from 'vscode';
+import { z } from 'zod';
 import { workspaceRoot, textResult } from './shared';
 import { consult, resolveCollabModel } from '../providers';
 import { concertSpeak } from '../concertHall';
 import { SandboxRunner } from '../sandboxRunner';
 import { BasePrimitive } from './basePrimitive';
 
+// ── Zod schema for strict finding validation ──
+const SeverityEnum = z.enum(['critical', 'high', 'medium', 'low', 'observation']);
+const TestResultEnum = z.enum(['test_failed', 'test_passed', 'not_validated', 'test_error']);
+const FalsePositiveEnum = z.enum(['low', 'medium', 'high']);
+
+const CriticFindingSchema = z.object({
+    dimension: z.string().min(1),
+    severity: SeverityEnum,
+    description: z.string().min(1),
+    evidence: z.object({
+        line_number: z.number().int().positive().optional(),
+        code_snippet: z.string().optional(),
+        pattern: z.string().optional()
+    }).optional(),
+    failing_test: z.string().optional(),
+    test_result: TestResultEnum.optional(),
+    remediation: z.string().optional(),
+    confidence_0_to_1: z.number().min(0).max(1).optional(),
+    false_positive_risk: FalsePositiveEnum.optional()
+});
+
+const CriticFindingsArray = z.array(CriticFindingSchema);
+
 interface AdversarialCriticInput { action?: 'review' | 'fuzz'; target: string; language?: string; dimensions?: string[]; validate?: boolean; invariants?: string[]; }
-export interface HardenedCriticFinding { dimension: string; severity: 'critical' | 'high' | 'medium' | 'low' | 'observation'; description: string; evidence?: { line_number?: number; code_snippet?: string; pattern?: string }; failing_test?: string; test_result?: 'test_failed' | 'test_passed' | 'not_validated' | 'test_error'; remediation?: string; confidence_0_to_1?: number; false_positive_risk?: 'low' | 'medium' | 'high'; }
+
+export interface HardenedCriticFinding {
+    dimension: string; severity: 'critical' | 'high' | 'medium' | 'low' | 'observation';
+    description: string;
+    evidence?: { line_number?: number; code_snippet?: string; pattern?: string };
+    failing_test?: string; test_result?: 'test_failed' | 'test_passed' | 'not_validated' | 'test_error';
+    remediation?: string; confidence_0_to_1?: number; false_positive_risk?: 'low' | 'medium' | 'high';
+}
 
 export class AdversarialCriticTool extends BasePrimitive<AdversarialCriticInput> {
     constructor(private readonly secrets: vscode.SecretStorage) { super('adversarial-critic'); }
@@ -97,18 +128,21 @@ TARGET CODE:\n${target.slice(0, 4000)}\n\nINVARIANTS:\n${invariants.map((inv, i)
                 const jsonStr = response.slice(start, end + 1);
                 const parsed = JSON.parse(jsonStr);
                 if (!Array.isArray(parsed)) throw new Error(JSON.stringify({ error: 'PARSE_FAILED', detail: 'critic response is not an array' }));
-                // Schema validation: each finding must have required fields
-                const valid = parsed.filter((f: any) => {
-                    if (!f || typeof f !== 'object') return false;
-                    if (!f.dimension || !f.severity || !f.description) return false;
-                    const validSeverities = ['critical', 'high', 'medium', 'low', 'observation'];
-                    if (!validSeverities.includes(f.severity)) { f.severity = 'observation'; }
-                    if (typeof f.confidence_0_to_1 === 'number') {
-                        f.confidence_0_to_1 = Math.max(0, Math.min(1, f.confidence_0_to_1));
-                    }
-                    return true;
-                });
-                const invalidCount = parsed.length - valid.length;
+                // Zod schema validation — strict, with detailed error reporting
+                const zodResult = CriticFindingsArray.safeParse(parsed);
+                let valid: HardenedCriticFinding[] = [];
+                let invalidCount = 0;
+                if (zodResult.success) {
+                    valid = zodResult.data as HardenedCriticFinding[];
+                } else {
+                    // Partial success: accept valid items, flag invalid ones
+                    const issues = zodResult.error.issues;
+                    const invalidIndices = new Set(issues.map(i => i.path[0] as number));
+                    valid = parsed.filter((_, i) => !invalidIndices.has(i)).map(f => ({
+                        ...f, confidence_0_to_1: typeof f.confidence_0_to_1 === 'number' ? Math.max(0, Math.min(1, f.confidence_0_to_1)) : undefined
+                    })) as HardenedCriticFinding[];
+                    invalidCount = invalidIndices.size;
+                }
                 if (invalidCount > 0 && parseAttempts < maxParseAttempts) {
                     // Retry LLM with schema to get better output
                     const schemaPrompt = sp + `\n\nYou MUST output a JSON array where each object has EXACTLY these fields:\n- dimension: string (one of: security, logic, performance, style, correctness)\n- severity: string (one of: critical, high, medium, low, observation)\n- description: string (required)\n- evidence: object with optional line_number (number), code_snippet (string), pattern (string)\n- failing_test: string (optional test code that demonstrates the flaw)\n- remediation: string (suggested fix)\n- confidence_0_to_1: number between 0 and 1\n\n${invalidCount} items were invalid in your previous response. Please fix and respond with ONLY the JSON array.`;
