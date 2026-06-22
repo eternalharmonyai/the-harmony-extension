@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Harmony Native Control",
+  "version": "0.1.1",
+  "identifier": "harmony.native-control",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Harmony Control",
+        "width": 1160,
+        "height": 820,
+        "minWidth": 760,
+        "minHeight": 540
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; frame-src http://127.0.0.1:* http://localhost:*; connect-src http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico"]
+  }
+}
