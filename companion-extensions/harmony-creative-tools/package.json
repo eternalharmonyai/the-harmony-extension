@@ -1,0 +1,247 @@
+{
+  "name": "harmony-creative-tools",
+  "displayName": "Harmony Creative Tools",
+  "description": "Optional VS Code companion for managing the shared local Harmony Creative service.",
+  "version": "0.1.6",
+  "publisher": "eternal-harmony",
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "harmonyCreative",
+        "label": "Harmony Creative"
+      }
+    ],
+    "commands": [
+      {
+        "command": "harmonyCreative.startMcpServer",
+        "title": "Harmony Creative: Start MCP Server",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "harmonyCreative.health",
+        "title": "Harmony Creative: Show Health",
+        "icon": "$(heart)"
+      },
+      {
+        "command": "harmonyCreative.start",
+        "title": "Harmony Creative: Start Shared REST Service",
+        "icon": "$(play)"
+      },
+      {
+        "command": "harmonyCreative.selectDefaults",
+        "title": "Harmony Creative: Select Model Defaults",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "harmonyCreative.statusBarClick",
+        "title": "Harmony Creative: Open Panel and Choose Defaults"
+      },
+      {
+        "command": "harmonyCreative.revealPanel",
+        "title": "Harmony Creative: Reveal Side Panel"
+      },
+      {
+        "command": "harmonyCreative.selectImageQuality",
+        "title": "Harmony Creative: Select Image Quality"
+      },
+      {
+        "command": "harmonyCreative.selectLayerBackend",
+        "title": "Harmony Creative: Select Layer Backend"
+      },
+      {
+        "command": "harmonyCreative.selectVideoModel",
+        "title": "Harmony Creative: Select Video Model"
+      },
+      {
+        "command": "harmonyCreative.openServiceFolder",
+        "title": "Harmony Creative: Open Service Folder"
+      },
+      {
+        "command": "harmonyCreative.openGeneratedMedia",
+        "title": "Harmony Creative: Open Generated Media"
+      },
+      {
+        "command": "harmonyCreative.openHealthEndpoint",
+        "title": "Harmony Creative: Open Health Endpoint"
+      },
+      {
+        "command": "harmonyCreative.showStatus",
+        "title": "Harmony Creative: Show Companion Status"
+      },
+      {
+        "command": "harmonyCreative.showProviderKeys",
+        "title": "Harmony Creative: Show Provider Keys"
+      }
+    ],
+    "views": {
+      "harmony-sidebar": [
+        {
+          "id": "harmonyCreative.panel",
+          "name": "Creative Tools"
+        }
+      ]
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "harmonyCreative.startMcpServer"
+        },
+        {
+          "command": "harmonyCreative.selectDefaults"
+        },
+        {
+          "command": "harmonyCreative.showStatus"
+        },
+        {
+          "command": "harmonyCreative.showProviderKeys"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "harmonyCreative.startMcpServer",
+          "when": "view == harmonyCreative.panel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "harmonyCreative.selectDefaults",
+          "when": "view == harmonyCreative.panel",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "harmonyCreative.startMcpServer",
+          "when": "view == harmonyCreative.panel && viewItem == harmonyCreative.mcp",
+          "group": "inline@1"
+        },
+        {
+          "command": "harmonyCreative.selectDefaults",
+          "when": "view == harmonyCreative.panel && viewItem == harmonyCreative.defaults",
+          "group": "inline@1"
+        },
+        {
+          "command": "harmonyCreative.health",
+          "when": "view == harmonyCreative.panel && viewItem == harmonyCreative.rest",
+          "group": "inline@1"
+        },
+        {
+          "command": "harmonyCreative.openGeneratedMedia",
+          "when": "view == harmonyCreative.panel && viewItem == harmonyCreative.media",
+          "group": "inline@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "harmonyCreative.startMcpServer",
+          "when": "resourceScheme == file && (harmonyCreative.available || resourceFilename == harmony-creative || resourceDirname =~ /harmony-creative|mcp-servers/)",
+          "group": "harmonyCreative@1"
+        },
+        {
+          "command": "harmonyCreative.start",
+          "when": "resourceScheme == file && (harmonyCreative.available || resourceFilename == harmony-creative || resourceDirname =~ /harmony-creative|mcp-servers/)",
+          "group": "harmonyCreative@2"
+        },
+        {
+          "command": "harmonyCreative.selectDefaults",
+          "when": "resourceScheme == file && (harmonyCreative.available || resourceFilename == harmony-creative || resourceDirname =~ /harmony-creative|mcp-servers/)",
+          "group": "harmonyCreative@3"
+        },
+        {
+          "command": "harmonyCreative.openServiceFolder",
+          "when": "resourceScheme == file && (harmonyCreative.available || resourceFilename == harmony-creative || resourceDirname =~ /harmony-creative|mcp-servers/)",
+          "group": "harmonyCreative@4"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "harmonyCreative.startMcpServer",
+          "when": "resourceScheme == file && resourceDirname =~ /harmony-creative|mcp-servers/",
+          "group": "harmonyCreative@1"
+        },
+        {
+          "command": "harmonyCreative.selectDefaults",
+          "when": "resourceScheme == file && resourceDirname =~ /harmony-creative|mcp-servers/",
+          "group": "harmonyCreative@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Harmony Creative Tools",
+      "properties": {
+        "harmonyCreative.serviceUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8896",
+          "description": "Base URL of the shared local Harmony Creative REST service."
+        },
+        "harmonyCreative.servicePath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to the harmony-creative service folder containing rest_api.py, or to a root containing harmony-creative or mcp-servers/harmony-creative."
+        },
+        "harmonyCreative.centralHubPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to a local Harmony Central workspace. If blank, the companion tries HARMONY_CENTRAL_HUB, legacy env aliases, then ~/Documents/HarmonyCentral."
+        },
+        "harmonyCreative.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to Python for starting Harmony Creative. If blank, the companion tries the service .venv, owner .venv, then python on PATH."
+        },
+        "harmonyCreative.tokenFile": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to local_service.token. If blank, the companion tries HARMONY_CREATIVE_TOKEN_FILE or HARMONY_CREATIVE_HOME/local_service.token."
+        },
+        "harmonyCreative.imageQuality": {
+          "type": "string",
+          "enum": ["draft", "standard", "standard+", "pro", "premium"],
+          "default": "standard",
+          "description": "Default Harmony Creative image generation quality. This is separate from the main VS Code/Copilot chat model selector."
+        },
+        "harmonyCreative.layerBackend": {
+          "type": "string",
+          "enum": ["fast", "pro", "bfl:flux-kontext-pro"],
+          "default": "pro",
+          "description": "Default Harmony Creative layer-set backend. This is separate from the main VS Code/Copilot chat model selector."
+        },
+        "harmonyCreative.videoModel": {
+          "type": "string",
+          "enum": ["kling-pro", "omnihuman"],
+          "default": "kling-pro",
+          "description": "Default Harmony Creative video model. This is separate from the main VS Code/Copilot chat model selector."
+        },
+        "harmonyCreative.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a separate Harmony Creative model selector in the VS Code status bar."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "npm run compile && npx --yes @vscode/vsce package --allow-missing-repository --out harmony-creative-tools-0.1.6.vsix",
+    "install:vsix": "npm run package && node ../../scripts/install-vsix.js --editor vscode --vsix harmony-creative-tools-0.1.6.vsix",
+    "install:vsix:cursor": "npm run package && node ../../scripts/install-vsix.js --editor cursor --vsix harmony-creative-tools-0.1.6.vsix",
+    "install:vsix:both": "npm run package && node ../../scripts/install-vsix.js --editor both --vsix harmony-creative-tools-0.1.6.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.95.0",
+    "typescript": "^5.3.0"
+  }
+}
