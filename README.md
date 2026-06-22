@@ -21,7 +21,7 @@ Harmony is a VS Code/Cursor extension for `@harmony` chat, workspace tools, prov
 ┌─────────────────────────────────────────────────┐
 │  VS Code / Cursor                               │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │ @harmony │  │ Sidebar  │  │ 163+ Tools   │  │
+│  │ @harmony │  │ Sidebar  │  │ 175+ Tools   │  │
 │  │   Chat   │  │ Controls │  │ (primitives, │  │
 │  │Participant│  │ & Board  │  │ swarm, git,  │  │
 │  │          │  │          │  │ browser, ...) │  │
@@ -48,7 +48,7 @@ Harmony is a VS Code/Cursor extension for `@harmony` chat, workspace tools, prov
 └─────────────────────────────────────────────────┘
 ```
 
-The chat interface, sidebar, and 163+ workspace tools run inside VS Code. The 15 swarm primitives (convergence, memory, reasoning, planning, skills) form the cognitive foundation. AI model calls are routed through Harmony's own provider layer to external APIs via your API keys.
+The chat interface, sidebar, and 175+ workspace tools run inside VS Code. The 15 swarm primitives (convergence, memory, reasoning, planning, skills) form the cognitive foundation. AI model calls are routed through Harmony's own provider layer to external APIs via your API keys.
 
 ### Provider access — what makes Harmony different
 
@@ -425,6 +425,20 @@ All 15 primitives hardened through multiple rounds of security review:
 - **Atomic writes** — JSONL append operations are line-atomic by filesystem guarantee
 - **Sandbox isolation** — code verification only (compile/lint), no runtime execution of untrusted code
 - **Git safety** — isomorphic-git with merge conflict handling, no destructive operations
+
+### Beyond-100% Enhancements
+
+All 15 primitives passed multi-round quality upgrades to reach **10/10 production-ready** scores. Additionally, 7 "Beyond-100%" enhancements push key primitives beyond standard completeness:
+
+| Primitive | Enhancement |
+|:---|:---|
+| **Rigor (Thought Graph)** | Parallel DAG execution — independent nodes run concurrently |
+| **Aletheia (Uncertainty Fabric)** | Bayesian model averaging — evidence-weighted across distributions |
+| **Furies (Adversarial Critic)** | Differential testing — generates counterexample code to find edge cases |
+| **Kairos (Convergence Arbiter)** | Multi-dimensional convergence — consensus across multiple axes (score, confidence, temporal) |
+| **Ethos (Value Resolver)** | Multi-stakeholder value resolution — balances 3+ parties simultaneously |
+| **Metaphora (Analogy Engine)** | Cross-domain transfer learning — structural mapping to transfer insights |
+| **Mnemosyne (Episodic Memory)** | Episodic clustering — auto-groups related memories by semantic similarity |
 
 These primitives are internal tools invoked by Harmony's higher-level features. They are not directly user-facing, but their quality directly determines the reliability of DeepSwarm, Orchestration, and the Concert Board.
 
