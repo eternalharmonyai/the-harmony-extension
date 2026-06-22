@@ -102,8 +102,7 @@ export class ConvergenceArbiterTool extends BasePrimitive<ConvergenceArbiterInpu
             }
         }
         
-        const fieldErr = this.requireFields(options.input as any, []);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, []);
         let proposals = raw ?? [];
         if (room) { try { const result = await concertCheck([room]); const messages = result?.messages; if (messages && messages.length) proposals = messages.map(m => m.body); } catch {} }
         if (proposals.length < 2) return textResult(JSON.stringify({ signal: 'GO', metrics: { proposal_count: proposals.length, pairwise_similarity_mean: 0, information_gain: 1.0, rounds_elapsed: current_round }, reasoning: 'Need more proposals', recommendation: 'Continue generating' }, null, 2));

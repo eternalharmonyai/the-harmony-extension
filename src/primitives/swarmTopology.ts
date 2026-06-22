@@ -31,8 +31,7 @@ interface TopologyInput {
 export class SwarmTopologyTool extends BasePrimitive<TopologyInput> {
     constructor() { super('swarm-topology'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<TopologyInput>, _token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, topology = 'star', phase, reason, agent_id, capabilities, endpoint, task, top_n = 5 } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const dir = safeHarmonyDir(root, 'topology'); await ensureDir(dir);

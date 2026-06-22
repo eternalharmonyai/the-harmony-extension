@@ -25,8 +25,7 @@ function buildTree(nodes: DNode[], nid: string, prefix = '', last = true, depth 
 export class DecisionLogTool extends BasePrimitive<DLogInput> {
     constructor() { super('decision-log'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<DLogInput>, _token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, append, query, root_id, max_depth = 5 } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const dir = safeHarmonyDir(root, 'decision-log'); await ensureDir(dir);

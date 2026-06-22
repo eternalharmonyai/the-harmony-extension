@@ -21,8 +21,7 @@ interface ThoughtGraphInput { action: 'add' | 'query' | 'verify' | 'graph' | 'st
 export class ThoughtGraphTool extends BasePrimitive<ThoughtGraphInput> {
     constructor() { super('thought-graph'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<ThoughtGraphInput>, _token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, claim, evidence, dependencies, source, verify_id, verify_status, query_status, limit = 20, execute_id, counterexample } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const dir = safeHarmonyDir(root, 'thought-graph'); await ensureDir(dir);

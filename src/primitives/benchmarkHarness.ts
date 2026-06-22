@@ -297,9 +297,7 @@ export class BenchmarkHarnessTool extends BasePrimitive<BenchmarkInput> {
         options: vscode.LanguageModelToolInvocationOptions<BenchmarkInput>,
         _token: vscode.CancellationToken
     ) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
-
+        this.requireFields(options.input as any, ['action']);
         const { action, primitives, iterations = 50, format = 'json', baseline, current } = options.input;
         const root = workspaceRoot();
         if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));

@@ -251,9 +251,7 @@ export class CompositionEngineTool extends BasePrimitive<CompositionInput> {
         options: vscode.LanguageModelToolInvocationOptions<CompositionInput>,
         _token: vscode.CancellationToken
     ) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
-
+        this.requireFields(options.input as any, ['action']);
         const { action, task, context, template: forcedTemplate, max_steps = 15 } = options.input;
         const root = workspaceRoot();
         if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));

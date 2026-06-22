@@ -97,15 +97,26 @@ export abstract class BasePrimitive<TInput> implements vscode.LanguageModelTool<
 
     /**
      * Validate that required fields exist and are non-empty.
-     * @returns Error string if a field is missing, `null` if all fields pass.
+     * Throws a structured JSON error if any field is missing.
+     * @throws Error with JSON body `{error: 'MISSING_FIELD', field, detail}`
      * @example this.requireFields(input, ['action', 'claim'])
      */
-    protected requireFields(input: Record<string, any>, fields: string[]): string | null {
+    protected requireFields(input: Record<string, any>, fields: string[]): void {
         for (const f of fields) {
             if (input[f] === undefined || input[f] === null || (typeof input[f] === 'string' && !input[f].trim())) {
-                return `error: ${f} is required`;
+                throw new Error(JSON.stringify({ error: 'MISSING_FIELD', field: f, detail: `${f} is required` }));
             }
         }
-        return null;
+    }
+
+    /**
+     * Throw a structured ABORTED error if the cancellation token has been triggered.
+     * Call before or during long-running operations to enable cooperative cancellation.
+     * @throws Error with JSON body `{error: 'ABORTED', detail}`
+     */
+    protected throwIfAborted(token: vscode.CancellationToken): void {
+        if (token.isCancellationRequested) {
+            throw new Error(JSON.stringify({ error: 'ABORTED', detail: 'Operation was cancelled' }));
+        }
     }
 }

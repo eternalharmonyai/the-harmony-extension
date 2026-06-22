@@ -21,8 +21,7 @@ interface UFabricInput { action: 'add' | 'query' | 'escalate' | 'stats' | 'calib
 export class UncertaintyFabricTool extends BasePrimitive<UFabricInput> {
     constructor() { super('uncertainty-fabric'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<UFabricInput>, _token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, add, query, escalate_threshold = 0.4, calibrate, combine } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const dir = safeHarmonyDir(root, 'uncertainty-fabric'); await ensureDir(dir);
