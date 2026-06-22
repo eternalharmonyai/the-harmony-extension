@@ -12,6 +12,7 @@
  */
 
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import * as path from 'path';
 
 // ── Path hardening ──────────────────────────────────────────────────────
@@ -97,6 +98,39 @@ export async function readJsonl<T = unknown>(filePath: string): Promise<T[]> {
     } catch {
         return [];
     }
+}
+
+/** Stream-read JSONL entries with optional filter, limit, and offset.
+ *  Uses readline for O(1) memory — never loads the full file.
+ *  Returns { results, total } for pagination.
+ */
+export async function readJsonlStream<T = unknown>(
+    filePath: string,
+    opts?: { filter?: (entry: T) => boolean; limit?: number; offset?: number }
+): Promise<{ results: T[]; total: number }> {
+    const results: T[] = [];
+    let total = 0;
+    let skipped = 0;
+    const limit = opts?.limit ?? Infinity;
+    const offset = opts?.offset ?? 0;
+    try {
+        const rl = require('readline').createInterface({
+            input: fsSync.createReadStream(filePath, { encoding: 'utf8' }),
+            crlfDelay: Infinity
+        });
+        for await (const line of rl) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+                const entry = JSON.parse(trimmed) as T;
+                total++;
+                if (opts?.filter && !opts.filter(entry)) continue;
+                if (skipped < offset) { skipped++; continue; }
+                if (results.length < limit) results.push(entry);
+            } catch { /* skip malformed lines */ }
+        }
+    } catch { /* file doesn't exist */ }
+    return { results, total };
 }
 
 /** Write an array of JSON objects to a JSONL file. Thread-safe with rotation + atomic tmp/rename. */
