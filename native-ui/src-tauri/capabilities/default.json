@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default permissions for the Harmony native control shell.",
+  "windows": ["main"],
+  "permissions": ["core:default", "opener:default"]
+}
