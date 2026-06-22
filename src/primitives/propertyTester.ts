@@ -26,8 +26,7 @@ interface PropertyTesterInput { action: 'generate' | 'validate' | 'query' | 'sta
 export class PropertyTesterTool extends BasePrimitive<PropertyTesterInput> {
     constructor(private readonly secrets?: vscode.SecretStorage) { super('property-tester'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<PropertyTesterInput>, token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, name, invariant, language = 'typescript', target_code, test_code, query_language, limit = 20 } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const dir = safeHarmonyDir(root, 'property-tests'); await ensureDir(dir);

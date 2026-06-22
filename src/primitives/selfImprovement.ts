@@ -323,9 +323,7 @@ export class SelfImprovementTool extends BasePrimitive<SelfImprovementInput> {
         options: vscode.LanguageModelToolInvocationOptions<SelfImprovementInput>,
         _token: vscode.CancellationToken
     ) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
-
+        this.requireFields(options.input as any, ['action']);
         const { action, session_summary, session_id, proposal_id, force = false } = options.input;
         const root = workspaceRoot();
         if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));

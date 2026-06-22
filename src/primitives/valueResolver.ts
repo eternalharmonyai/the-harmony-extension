@@ -25,8 +25,7 @@ interface VResolverInput { action: 'define_hierarchy' | 'resolve_tension' | 'que
 export class ValueResolverTool extends BasePrimitive<VResolverInput> {
     constructor(private readonly secrets?: vscode.SecretStorage) { super('value-resolver'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<VResolverInput>, _token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, principles, tension } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const dir = safeHarmonyDir(root, 'value-resolver'); await ensureDir(dir);
@@ -41,7 +40,7 @@ export class ValueResolverTool extends BasePrimitive<VResolverInput> {
                 try {
                     await fs.writeFile(tmp, JSON.stringify({ principles }, null, 2), 'utf8');
                     await fs.rename(tmp, hp); // rename is atomic on same volume
-                } catch { try { await fs.unlink(tmp); } catch {} throw new Error('atomic write failed'); }
+                } catch { try { await fs.unlink(tmp); } catch {} throw new Error(JSON.stringify({ error: 'ATOMIC_WRITE_FAILED', detail: 'atomic write failed' })); }
                 return textResult(JSON.stringify({ status: 'defined', hierarchy: principles.sort((a, b) => a.priority - b.priority).map(p => 'P' + p.priority + '. ' + p.name + ': ' + p.description) }, null, 2));
             }
             case 'resolve_tension': {

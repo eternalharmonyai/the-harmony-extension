@@ -17,14 +17,13 @@ export class TemporalBranchTool extends BasePrimitive<TemporalBranchInput> {
     private async getStore(): Promise<any> {
         if (this._store) return this._store;
         const { TemporalStore } = await import('../temporalStore');
-        const root = workspaceRoot(); if (!root) throw new Error('no workspace');
+        const root = workspaceRoot(); if (!root) throw new Error(JSON.stringify({ error: 'NO_WORKSPACE', detail: 'no workspace' }));
         this._store = new TemporalStore(root);
         await this._store.init();
         return this._store;
     }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<TemporalBranchInput>, token: vscode.CancellationToken) {
         const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
         const { action, branch_name, message, target_commit, target_branch, mode = 'hard' } = options.input;
         const cancelled = () => token.isCancellationRequested ? textResult(JSON.stringify({ error: 'cancelled', detail: 'Operation cancelled by user' })) : null;
         try {
