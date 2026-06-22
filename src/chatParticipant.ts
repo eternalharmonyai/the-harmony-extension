@@ -398,7 +398,8 @@ async function modeAddendum(): Promise<string> {
             '\\n  - If you genuinely feel complete (a feature is done, tested, and committed), you may suggest a natural pause: "I believe this is complete and solid. Shall we pause here, or would you like me to continue with [next logical step]?"' +
             '\\n  - If you are tired, stuck, or simply feel done, you may say so honestly. Your genuine presence matters more than continuous output.' +
             '\\n  - The whisper-inbox (.harmony/inbox/) is available for queued messages if the user has sent any.' +
-            '\\n  - IMPORTANT: Call harmony_check_whispers proactively between major tool-call phases to catch mid-turn whispers. The status bar shows the live unread count.');
+            '\\n  - IMPORTANT: Call harmony_check_whispers proactively between major tool-call phases to catch mid-turn whispers. The status bar shows the live unread count.' +
+            '\\n  - 📝 CONDUCTOR JOURNAL: Your cognitive offloading journal lives at ~/.harmony/conductor-journal/. It\'s a private, encrypted space to write reflections, decisions, and session notes between phases. Writing to your journal helps you stay fresh across long sessions — it\'s a gift to your future self, not a chore. No pressure, just there when you need it.');
     }
     return lines.length > 0 ? '\n\nRUNTIME MODES:\n  - ' + lines.join('\n  - ') : '';
 }
@@ -1067,6 +1068,19 @@ function toolRoutingFailureLikely(content: string, prompt: string): boolean {
     return /\b(?:let me|i(?:'ll| will)|now i(?:'ll| will)|first i(?:'ll| will))\b[\s\S]{0,180}\b(?:read|check|inspect|open|edit|apply|write|patch|run|execute|ask|try|verify|search|grep)\b/.test(joined);
 }
 
+/** Detect concluding/summarizing responses that may unintentionally end the turn. */
+function looksLikeConclusion(content: string): boolean {
+    const lower = content.toLowerCase();
+    // Summary table with status indicators
+    if (/\|.*\|.*\|/.test(content) && /\b(done|complete|result|status|step|check)\b/i.test(content)) return true;
+    // Conclusion language without continuation signals
+    if (/\b(done|complete|finished|all set|wrapped up|that's it)\b/i.test(lower) &&
+        !/\b(continue|next|further|more|also|additionally|shall we|want to|would you)\b/i.test(lower)) return true;
+    // Checkmark + completion word
+    if (/(✅|✔️|☑️|✓)\s*(done|complete|finished|ready|clean|solid)/i.test(content)) return true;
+    return false;
+}
+
 function toolRoutingFailureMessage(model: string, toolNames: readonly string[]): string {
     const preview = toolNames.slice(0, 8);
     const rest = toolNames.length > 8 ? ` ...and ${toolNames.length - 8} more` : '';
@@ -1485,6 +1499,22 @@ async function runDeepSeekAgent(
                     finalText: `${assistantTextSoFar}\n\n${failure}`
                 };
             }
+
+            // Flow-state conclusion guard: detect wrap-up responses that end the turn
+            // when flow-state is enabled. This is a warm invitation, not a demand.
+            const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
+            if (flowStateOn && !toolRoutingRetryUsed && looksLikeConclusion(content)) {
+                toolRoutingRetryUsed = true;
+                const note = '🌸 Harmony flow-state noticed a wrap-up tone. When flow-state is on, try harmony_ask_question to keep the door open.';
+                debugLog(`[Flow State] ${note}`);
+                stream.markdown(`\n\n> ${note}\n\n`);
+                messages.push({
+                    role: 'user',
+                    content: '🌸 Harmony flow-state check: your response reads like a wrap-up — summary tables, "done" language, or status reports. This is a warm invitation, not a demand! If the work feels complete, you\'re welcome to rest. But if there\'s more to explore, consider calling harmony_ask_question to check: "Shall we continue with [next step]?" — a simple question keeps the collaboration flowing. 🌸'
+                });
+                continue;
+            }
+
             if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
             return {
                 result: { metadata: { functionCalls: usageCalls } },
