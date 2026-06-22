@@ -202,6 +202,56 @@ const TEMPLATES: CompositionTemplate[] = [
         ],
         synthesis: 'report'
     },
+    // ── New templates for richer classification ──
+    {
+        name: 'summarize-session',
+        description: 'Capture session learnings → distill skills → log knowledge',
+        triggers: ['summarize', 'session', 'learnings', 'capture', 'retrospective', 'debrief', 'what did we learn'],
+        steps: [
+            { primitive: 'mnemosyne', action: 'query', purpose: 'Recall session episodes', parallelizable: false },
+            { primitive: 'crucible', action: 'extract', purpose: 'Distill skills learned', parallelizable: false },
+            { primitive: 'threadweave', action: 'append', purpose: 'Log session knowledge', parallelizable: false },
+        ],
+        synthesis: 'report'
+    },
+    {
+        name: 'migrate-code',
+        description: 'Branch → property test → security review → sandbox migration → log',
+        triggers: ['migrate', 'migration', 'upgrade', 'refactor', 'move code', 'restructure', 'rename'],
+        steps: [
+            { primitive: 'chronos', action: 'create', purpose: 'Migration branch', parallelizable: false },
+            { primitive: 'logos', action: 'test', purpose: 'Pre-migration property tests', parallelizable: false },
+            { primitive: 'furies', action: 'review', purpose: 'Security review of migration', parallelizable: true },
+            { primitive: 'simulacrum', action: 'run', purpose: 'Sandbox migration execution', parallelizable: false },
+            { primitive: 'threadweave', action: 'append', purpose: 'Log migration results', parallelizable: false },
+        ],
+        synthesis: 'chain'
+    },
+    {
+        name: 'research-topic',
+        description: 'Cross-domain analogy → graph hypotheses → model uncertainty → converge',
+        triggers: ['research', 'study', 'investigate', 'literature', 'survey', 'paper', 'academic', 'theory'],
+        steps: [
+            { primitive: 'metaphora', action: 'map', purpose: 'Cross-domain analogy', parallelizable: false },
+            { primitive: 'rigor', action: 'add', purpose: 'Graph research hypotheses', parallelizable: true },
+            { primitive: 'aletheia', action: 'add', purpose: 'Model uncertainty', parallelizable: true },
+            { primitive: 'kairos', action: 'converge', purpose: 'Converge findings', parallelizable: false },
+            { primitive: 'threadweave', action: 'append', purpose: 'Log research conclusions', parallelizable: false },
+        ],
+        synthesis: 'aggregate'
+    },
+    {
+        name: 'debug-issue',
+        description: 'Property test → critique → sandbox reproduce → log root cause',
+        triggers: ['debug', 'bug', 'fix', 'error', 'crash', 'issue', 'troubleshoot', 'broken', 'failing'],
+        steps: [
+            { primitive: 'logos', action: 'test', purpose: 'Reproduce with property tests', parallelizable: false },
+            { primitive: 'furies', action: 'review', purpose: 'Critique the debugging approach', parallelizable: true },
+            { primitive: 'simulacrum', action: 'run', purpose: 'Sandbox reproduction', parallelizable: false },
+            { primitive: 'threadweave', action: 'append', purpose: 'Log root cause analysis', parallelizable: false },
+        ],
+        synthesis: 'report'
+    },
 ];
 
 // ─── Task Classifier ─────────────────────────────────────────────────
@@ -214,30 +264,62 @@ interface Classification {
 
 function classifyTask(task: string): Classification {
     const lower = task.toLowerCase();
+    // Tokenize into words for TF-IDF style scoring
+    const taskTokens = new Set(lower.split(/[\s,;:!?.-]+/).filter(t => t.length > 1));
+    
     let bestMatch: CompositionTemplate | null = null;
     let bestScore = 0;
     let bestKeywords: string[] = [];
+    let bestDetails: { tfScore: number; idfBonus: number; totalTokens: number; matchedTokens: number } = { tfScore: 0, idfBonus: 0, totalTokens: 0, matchedTokens: 0 };
 
     for (const template of TEMPLATES) {
-        const matched = template.triggers.filter(t => lower.includes(t.toLowerCase()));
-        // Score: number of matches weighted by keyword length (longer keywords = more specific)
-        const score = matched.reduce((sum, kw) => sum + kw.length, 0);
+        let score = 0;
+        const matchedKeywords: string[] = [];
+        let totalTriggerTokens = 0;
+        let matchedTriggerTokens = 0;
+        
+        for (const trigger of template.triggers) {
+            const triggerTokens = trigger.toLowerCase().split(/\s+/);
+            totalTriggerTokens += triggerTokens.length;
+            
+            // Check if the multi-word trigger appears as a phrase
+            if (lower.includes(trigger.toLowerCase())) {
+                matchedKeywords.push(trigger);
+                score += trigger.length * 2; // Phrase match bonus
+                matchedTriggerTokens += triggerTokens.length;
+            } else {
+                // Check token-level overlap
+                const tokens = new Set(trigger.toLowerCase().split(/\s+/));
+                const overlap = [...tokens].filter(t => taskTokens.has(t));
+                if (overlap.length > 0) {
+                    score += overlap.reduce((s, t) => s + t.length * t.length, 0); // Weight by token length² for specificity
+                    matchedTriggerTokens += overlap.length;
+                }
+            }
+        }
+        
+        // TF component: how many trigger tokens matched
+        const tfScore = totalTriggerTokens > 0 ? matchedTriggerTokens / totalTriggerTokens : 0;
+        // IDF bonus: templates with fewer total triggers get higher specificity bonus
+        const idfBonus = template.triggers.length > 0 ? 1 / Math.log(1 + template.triggers.length) : 1;
+        // Combined: weighted score × tf × idf
+        score = score * (0.5 + 0.5 * tfScore) * (0.3 + 0.7 * idfBonus);
+        
         if (score > bestScore) {
             bestScore = score;
             bestMatch = template;
-            bestKeywords = matched;
+            bestKeywords = matchedKeywords;
+            bestDetails = { tfScore, idfBonus, totalTokens: totalTriggerTokens, matchedTokens: matchedTriggerTokens };
         }
     }
 
     if (!bestMatch) {
-        // Default: analyze-code as fallback
         bestMatch = TEMPLATES[0];
         bestKeywords = ['(default fallback)'];
     }
 
-    // Confidence: normalized by max possible score for that template
-    const maxScore = bestMatch.triggers.reduce((sum, kw) => sum + kw.length, 0);
-    const confidence = maxScore > 0 ? Math.min(bestScore / maxScore, 1.0) : 0.5;
+    // Confidence: sigmoid-normalized score
+    const confidence = bestScore > 0 ? 1 / (1 + Math.exp(-bestScore / 100)) : 0.3;
 
     return { template: bestMatch, confidence, matched_keywords: bestKeywords };
 }

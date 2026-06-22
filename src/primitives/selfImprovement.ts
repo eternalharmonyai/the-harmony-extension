@@ -234,21 +234,137 @@ Tool Registration Hygiene
 ## Pattern Detected
 Tools were registered in source code but not declared in \`package.json\` manifest. This happened **${n} times**.
 
-## Why This Matters
-Unregistered tools:
-- Are invisible to the AI model (can't be called)
-- Cause self-diagnose warnings
-- Create confusion about available capabilities
+## Measurable Outcome
+- **Target**: Zero unregistered tools
+- **Metric**: \`harmony_self_diagnose\` tool count matches manifest count
 
 ## Recommended Practice
 1. **Always add manifest entry** when registering a new tool
 2. **Add activation event** \`onLanguageModelTool:tool_name\`
 3. **Run \`harmony_self_diagnose\`** after adding tools to verify
-4. **Remove dead entries** when tools are deprecated
 
 ## Auto-detected by Harmony Self-Improvement Loop
-This knowledge module was auto-generated on ${new Date().toISOString().split('T')[0]}.
-Threshold: ${n} occurrences triggered automatic proposal.
+This knowledge module was auto-generated on ${new Date().toISOString().split('T')[0]}. Threshold: ${n} occurrences.
+`,
+    snapshot_conflict: (title, n) => `# ${title}
+
+## Category
+Snapshot Size Management
+
+## Pattern Detected
+Files exceeded the 262KB snapshot limit, blocking safe edits. Happened **${n} times**.
+
+## Measurable Outcome
+- **Target**: Zero blocked edits due to snapshot limits
+- **Metric**: Files >262KB in workspace
+
+## Recommended Practice
+1. **Split large files** (especially package.json with inline config)
+2. **Use external config files** instead of embedding in package.json
+3. **Prefer node scripts** for large JSON edits via harmony_run_terminal
+
+## Auto-detected by Harmony Self-Improvement Loop
+This knowledge module was auto-generated on ${new Date().toISOString().split('T')[0]}. Threshold: ${n} occurrences.
+`,
+    missing_validation: (title, n) => `# ${title}
+
+## Category
+Validation Before Commit
+
+## Pattern Detected
+Changes committed without running compile or tests first. Happened **${n} times**.
+
+## Measurable Outcome
+- **Target**: 100% of commits pass compile + tests
+- **Metric**: Zero post-commit compile failures within 5 sessions
+
+## Recommended Practice
+1. **Run \`npm run compile && npm test\`** before every commit
+2. **Never skip validation** even for simple changes
+3. **Roll back immediately** if post-commit validation fails
+
+## Auto-detected by Harmony Self-Improvement Loop
+This knowledge module was auto-generated on ${new Date().toISOString().split('T')[0]}. Threshold: ${n} occurrences.
+`,
+    dependency_conflict: (title, n) => `# ${title}
+
+## Category
+Dependency Conflict Prevention
+
+## Pattern Detected
+Package version conflicts causing install/compile failures. Happened **${n} times**.
+
+## Measurable Outcome
+- **Target**: Zero install failures from version conflicts
+- **Metric**: Clean \`npm install\` without warnings
+
+## Recommended Practice
+1. **Pin exact versions** in package.json dependencies
+2. **Run \`npm audit\`** periodically
+3. **Test installs** on clean checkout before merging
+
+## Auto-detected by Harmony Self-Improvement Loop
+This knowledge module was auto-generated on ${new Date().toISOString().split('T')[0]}. Threshold: ${n} occurrences.
+`,
+    worker_timeout: (title, n) => `# ${title}
+
+## Category
+Worker Timeout Prevention
+
+## Pattern Detected
+Worker processes exceeded time limits without results. Happened **${n} times**.
+
+## Measurable Outcome
+- **Target**: Zero worker timeouts per session
+- **Metric**: Timeout events in session fingerprint
+
+## Recommended Practice
+1. **Set realistic timeout values** based on task complexity
+2. **Split heavy tasks** across multiple lighter workers
+3. **Monitor worker dispatch** for patterns of timeout
+
+## Auto-detected by Harmony Self-Improvement Loop
+This knowledge module was auto-generated on ${new Date().toISOString().split('T')[0]}. Threshold: ${n} occurrences.
+`,
+    compilation_loop: (title, n) => `# ${title}
+
+## Category
+Compilation Loop Detection
+
+## Pattern Detected
+Repeated compile-fix-compile cycles indicating unclear errors. Happened **${n} times**.
+
+## Measurable Outcome
+- **Target**: Average <2 compile cycles per change
+- **Metric**: Compile cycles in session fingerprint
+
+## Recommended Practice
+1. **Read error messages carefully** before fixing
+2. **Fix all errors in one pass** rather than one-at-a-time
+3. **Use \`harmony_get_errors\`** to see all diagnostics at once
+
+## Auto-detected by Harmony Self-Improvement Loop
+This knowledge module was auto-generated on ${new Date().toISOString().split('T')[0]}. Threshold: ${n} occurrences.
+`,
+    path_casing: (title, n) => `# ${title}
+
+## Category
+Path Casing Consistency
+
+## Pattern Detected
+Wrong case in file paths causing cross-platform issues. Happened **${n} times**.
+
+## Measurable Outcome
+- **Target**: Zero path casing errors
+- **Metric**: Case mismatch events in session
+
+## Recommended Practice
+1. **Always use lowercase** for file and directory names
+2. **Verify imports** match actual file casing
+3. **Use \`harmony_grep\`** to find case-sensitive references
+
+## Auto-detected by Harmony Self-Improvement Loop
+This knowledge module was auto-generated on ${new Date().toISOString().split('T')[0]}. Threshold: ${n} occurrences.
 `,
 };
 
@@ -260,14 +376,17 @@ ${category.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
 ## Pattern Detected
 This anti-pattern was observed **${n} times** across multiple sessions.
 
+## Measurable Outcome
+- **Target**: Zero occurrences within 5 sessions
+- **Metric**: Pattern count in session fingerprints
+
 ## Recommended Practice
 1. **Be aware** of this pattern when it appears
 2. **Document** workarounds in Conductor Journal
 3. **Consider** if tooling or process changes could prevent recurrence
 
 ## Auto-detected by Harmony Self-Improvement Loop
-This knowledge module was auto-generated on ${new Date().toISOString().split('T')[0]}.
-Threshold: ${n} occurrences triggered automatic proposal.
+This knowledge module was auto-generated on ${new Date().toISOString().split('T')[0]}. Threshold: ${n} occurrences.
 `;
 
 // ─── Self-Improvement Engine ────────────────────────────────────────
@@ -340,26 +459,36 @@ export class SelfImprovementTool extends BasePrimitive<SelfImprovementInput> {
                 const sessId = session_id ?? uid();
                 const summary = session_summary.trim().toLowerCase();
 
-                // Detect patterns from session summary text
+                // Multi-signal pattern detection with density-weighted scoring
                 const detected: string[] = [];
-                const patternMap: Record<string, string[]> = {
-                    context_truncation: ['truncat', 'chunk', '12kb', 'context limit', 'file too large'],
-                    continuity_mismatch: ['continuity', 'ledger', 'mismatch', "didn't match", 'stale'],
-                    duplicate_work: ['duplicate', 'already implemented', 'already done', 're-implement'],
-                    tool_registration: ['manifest', 'registration mismatch', 'not in manifest', 'not registered'],
-                    dependency_conflict: ['dependency', 'version conflict', 'install fail', 'npm error'],
-                    worker_timeout: ['timeout', 'worker', 'exceeded time', 'too long'],
-                    snapshot_conflict: ['snapshot', 'too large', 'exceeds', '262144'],
-                    compilation_loop: ['compile', 'fix', 'compile again', 'compile loop'],
-                    missing_validation: ['no test', 'no compile', 'skipped validation', 'without testing'],
-                    path_casing: ['wrong case', 'path casing', 'case sensitive', 'case mismatch'],
+                const signalScores: Record<string, number> = {};
+                const patternMap: Record<string, { keywords: string[]; secondarySignals: string[]; weight: number }> = {
+                    context_truncation: { keywords: ['truncat', 'chunk', '12kb', 'context limit', 'file too large', 'exceeded context'], secondarySignals: ['worker', 'incomplete', 'partial'], weight: 1.2 },
+                    continuity_mismatch: { keywords: ['continuity', 'ledger', 'mismatch', "didn't match", 'stale', 'out of sync'], secondarySignals: ['verify', 'recheck', 'still pending'], weight: 1.2 },
+                    duplicate_work: { keywords: ['duplicate', 'already implemented', 'already done', 're-implement', 'was already', 'redundant'], secondarySignals: ['again', 'second time', 'repeat'], weight: 1.0 },
+                    tool_registration: { keywords: ['manifest', 'registration mismatch', 'not in manifest', 'not registered', 'missing tool'], secondarySignals: ['package.json', 'activation event'], weight: 1.0 },
+                    dependency_conflict: { keywords: ['dependency', 'version conflict', 'install fail', 'npm error', 'peer dependency'], secondarySignals: ['package.json', 'node_modules'], weight: 1.1 },
+                    worker_timeout: { keywords: ['timeout', 'worker', 'exceeded time', 'too long', 'timed out'], secondarySignals: ['dispatch', 'subagent', 'parallel'], weight: 1.0 },
+                    snapshot_conflict: { keywords: ['snapshot', 'too large', 'exceeds', '262144', 'pre-action snapshot'], secondarySignals: ['package.json', 'file size'], weight: 1.1 },
+                    compilation_loop: { keywords: ['compile', 'fix', 'compile again', 'compile loop', 'tsc'], secondarySignals: ['error', 'type', 'syntax'], weight: 0.8 },
+                    missing_validation: { keywords: ['no test', 'no compile', 'skipped validation', 'without testing', 'untested', 'unverified'], secondarySignals: ['commit', 'push', 'deploy'], weight: 1.3 },
+                    path_casing: { keywords: ['wrong case', 'path casing', 'case sensitive', 'case mismatch', 'casing'], secondarySignals: ['windows', 'file not found', 'import'], weight: 0.9 },
                 };
 
-                for (const [category, keywords] of Object.entries(patternMap)) {
-                    if (keywords.some(kw => summary.includes(kw))) {
+                // Two-pass scoring: primary keywords + secondary signal density
+                for (const [category, config] of Object.entries(patternMap)) {
+                    let primaryHits = config.keywords.filter(kw => summary.includes(kw)).length;
+                    let secondaryHits = config.secondarySignals.filter(ss => summary.includes(ss)).length;
+                    // Score: primary matches × weight + secondary bonus
+                    const score = (primaryHits * 2.0 + secondaryHits * 0.5) * config.weight;
+                    // Require at least 1 primary hit OR 2 secondary hits with high confidence
+                    if (primaryHits >= 1 || (secondaryHits >= 2 && config.weight >= 1.1)) {
+                        signalScores[category] = score;
                         detected.push(category);
                     }
                 }
+                // Sort by signal strength for prioritization
+                detected.sort((a, b) => (signalScores[b] || 0) - (signalScores[a] || 0));
 
                 // Load existing patterns and update
                 const patterns = await this.loadPatterns(root);
