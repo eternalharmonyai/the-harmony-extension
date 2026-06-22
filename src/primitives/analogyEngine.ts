@@ -13,7 +13,16 @@ import { BasePrimitive } from './basePrimitive';
 interface AnalogyRecord { id: string; action: string; source_domain: string; target_domain: string; result: any; timestamp: number; }
 interface AnalogyEngineInput { action: 'map' | 'verify' | 'transfer' | 'query' | 'transfer_cross_domain'; source_domain?: string; target_domain?: string; source_problem?: string; mapping_hint?: string; analogy_json?: string; verification?: Array<{ hypothesis: string; status?: string }>; insight?: string; query_action?: string; limit?: number; }
 
+import { z } from 'zod';
+
+const AnalogySchema = z.object({
+    mapping_table: z.array(z.object({ source_concept: z.string(), target_concept: z.string(), rationale: z.string() })),
+    transferable_insights: z.array(z.string()),
+    verification: z.array(z.object({ hypothesis: z.string(), status: z.enum(['holds','partial','breaks']) }))
+});
+
 /** Schema-validated JSON parse with retry. Falls back through: direct parse → regex → raw text. */
+
 async function safeJsonParse(llmText: string, expectedSchema: string[], retryProvider?: (attempt: number) => Promise<string>): Promise<any> {
     const extractJson = (text: string): string | null => {
         // Try direct parse first
@@ -31,13 +40,14 @@ async function safeJsonParse(llmText: string, expectedSchema: string[], retryPro
         }
         try {
             const parsed = JSON.parse(jsonStr);
-            // Schema validation: check that expected keys exist
-            const missing = expectedSchema.filter(k => !(k in parsed));
-            if (missing.length > 0) {
+            // Schema validation: use Zod for runtime type checking
+            try {
+                const validated = AnalogySchema.strict().parse(parsed);
+                return validated;
+            } catch (zodErr: any) {
                 if (attempt < 3 && retryProvider) { llmText = await retryProvider(attempt); continue; }
-                return { ...parsed, parse_warning: `missing keys: ${missing.join(', ')}` };
+                return { raw: llmText.slice(0, 1000), parse_error: true, reason: `schema mismatch: ${zodErr.message?.slice(0, 200)}` };
             }
-            return parsed;
         } catch {
             if (attempt < 3 && retryProvider) { llmText = await retryProvider(attempt); continue; }
             return { raw: llmText.slice(0, 1000), parse_error: true, reason: 'JSON parse failed' };
