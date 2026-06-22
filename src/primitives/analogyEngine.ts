@@ -11,7 +11,7 @@ import { consult } from '../providers';
 import { BasePrimitive } from './basePrimitive';
 
 interface AnalogyRecord { id: string; action: string; source_domain: string; target_domain: string; result: any; timestamp: number; }
-interface AnalogyEngineInput { action: 'map' | 'verify' | 'transfer' | 'query' | 'transfer_cross_domain'; source_domain?: string; target_domain?: string; source_problem?: string; mapping_hint?: string; analogy_json?: string; verification?: Array<{ hypothesis: string; status?: string }>; insight?: string; query_action?: string; limit?: number; }
+interface AnalogyEngineInput { action: 'map' | 'verify' | 'transfer' | 'query' | 'stats' | 'transfer_cross_domain'; source_domain?: string; target_domain?: string; source_problem?: string; mapping_hint?: string; analogy_json?: string; verification?: Array<{ hypothesis: string; status?: string }>; insight?: string; query_action?: string; limit?: number; }
 
 import { z } from 'zod';
 
@@ -163,6 +163,31 @@ export class AnalogyEngineTool extends BasePrimitive<AnalogyEngineInput> {
                         confidence: Math.round(confidence * 1000) / 1000
                     }, null, 2));
                 } catch (e: any) { return textResult(JSON.stringify({ error: 'cross-domain transfer failed', detail: e.message })); }
+            }
+            case 'stats': {
+                if (!fp) return textResult(JSON.stringify({ error: 'no workspace' }));
+                try {
+                    const records: AnalogyRecord[] = await readJsonl(fp);
+                    const byAction: Record<string, number> = {};
+                    const domainPairs: Record<string, number> = {};
+                    let successCount = 0;
+                    for (const r of records) {
+                        byAction[r.action] = (byAction[r.action] || 0) + 1;
+                        const pair = `${r.source_domain}→${r.target_domain}`;
+                        domainPairs[pair] = (domainPairs[pair] || 0) + 1;
+                        if (r.result && !r.result.parse_error) successCount++;
+                    }
+                    const topPairs = Object.entries(domainPairs).sort((a, b) => b[1] - a[1]).slice(0, 10);
+                    return textResult(JSON.stringify({
+                        action: 'stats',
+                        total_analogies: records.length,
+                        by_action: byAction,
+                        success_rate: records.length > 0 ? Math.round(successCount / records.length * 1000) / 1000 : 0,
+                        unique_domain_pairs: Object.keys(domainPairs).length,
+                        top_domain_pairs: Object.fromEntries(topPairs),
+                        recent: records.slice(-5).map(r => ({ id: r.id, action: r.action, source: r.source_domain, target: r.target_domain, timestamp: new Date(r.timestamp).toISOString() })),
+                    }, null, 2));
+                } catch (e: any) { return textResult(JSON.stringify({ error: 'stats failed', detail: e.message })); }
             }
             default: return textResult(JSON.stringify({ error: `unknown action: ${action}` }));
         }

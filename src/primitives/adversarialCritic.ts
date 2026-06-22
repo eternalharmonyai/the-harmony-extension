@@ -12,8 +12,10 @@
  *   invoke({ action: 'fuzz', target: code, language: 'javascript', invariants: ['always returns >= 0', 'never throws on valid input'] });
  */
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { z } from 'zod';
-import { workspaceRoot, textResult } from './shared';
+import { workspaceRoot, textResult, ensureDir, uid } from './shared';
+import { safeHarmonyDir, appendJsonl, readJsonl } from '../swarmHarden';
 import { consult, resolveCollabModel } from '../providers';
 import { concertSpeak } from '../concertHall';
 import { SandboxRunner } from '../sandboxRunner';
@@ -42,7 +44,7 @@ const CriticFindingSchema = z.object({
 
 const CriticFindingsArray = z.array(CriticFindingSchema);
 
-interface AdversarialCriticInput { action?: 'review' | 'fuzz'; target: string; language?: string; dimensions?: string[]; validate?: boolean; invariants?: string[]; }
+interface AdversarialCriticInput { action?: 'review' | 'fuzz' | 'stats' | 'query'; target?: string; language?: string; dimensions?: string[]; validate?: boolean; invariants?: string[]; limit?: number; }
 
 export interface HardenedCriticFinding {
     dimension: string; severity: 'critical' | 'high' | 'medium' | 'low' | 'observation';
@@ -56,9 +58,53 @@ export class AdversarialCriticTool extends BasePrimitive<AdversarialCriticInput>
     constructor(private readonly secrets: vscode.SecretStorage) { super('adversarial-critic'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<AdversarialCriticInput>, token: vscode.CancellationToken) {
         this.requireFields(options.input as any, ['target']);
-        const { action = 'review', target, language = 'typescript', dimensions = ['security', 'logic', 'performance'], validate = true, invariants } = options.input;
+        const { action = 'review', target, language = 'typescript', dimensions = ['security', 'logic', 'performance'], validate = true, invariants, limit = 50 } = options.input;
         if (!target?.trim()) return textResult(JSON.stringify({ error: 'target required' }));
-        
+
+        // ── Stats: cumulative critic metrics ──
+        if (action === 'stats') {
+            const root = workspaceRoot();
+            if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
+            const dir = safeHarmonyDir(root, 'adversarial-critic');
+            await ensureDir(dir);
+            const fp = path.join(dir, 'findings.jsonl');
+            let records: any[] = [];
+            try { records = await readJsonl(fp); } catch {}
+            const byDimension: Record<string, number> = {};
+            const bySeverity: Record<string, number> = {};
+            const byAction: Record<string, number> = {};
+            let totalFindings = 0;
+            let totalConfidence = 0;
+            let confidenceCount = 0;
+            let fpHigh = 0, fpMed = 0, fpLow = 0;
+            const recentSessions = new Set<string>();
+            for (const r of records) {
+                byAction[r.action] = (byAction[r.action] || 0) + 1;
+                if (r.session_id) recentSessions.add(r.session_id);
+                for (const f of (r.findings || [])) {
+                    totalFindings++;
+                    byDimension[f.dimension] = (byDimension[f.dimension] || 0) + 1;
+                    bySeverity[f.severity] = (bySeverity[f.severity] || 0) + 1;
+                    if (typeof f.confidence_0_to_1 === 'number') { totalConfidence += f.confidence_0_to_1; confidenceCount++; }
+                    if (f.false_positive_risk === 'high') fpHigh++;
+                    else if (f.false_positive_risk === 'medium') fpMed++;
+                    else if (f.false_positive_risk === 'low') fpLow++;
+                }
+            }
+            return textResult(JSON.stringify({
+                action: 'stats',
+                total_sessions: records.length,
+                unique_sessions: recentSessions.size,
+                total_findings: totalFindings,
+                by_dimension: byDimension,
+                by_severity: bySeverity,
+                by_action: byAction,
+                avg_confidence: confidenceCount > 0 ? Math.round(totalConfidence / confidenceCount * 1000) / 1000 : 0,
+                false_positive_risk: { high: fpHigh, medium: fpMed, low: fpLow },
+                recent: records.slice(-5).map((r: any) => ({ action: r.action, timestamp: r.timestamp, findings_count: r.findings?.length ?? 0, verdict: r.verdict })),
+            }, null, 2));
+        }
+
         // ── E5: Differential Fuzzing ──
         if (action === 'fuzz') {
             if (!invariants?.length) return textResult(JSON.stringify({ error: 'invariants[] required for fuzz action — e.g. ["always returns >= 0", "never throws on valid input"]' }));
@@ -100,6 +146,19 @@ TARGET CODE:\n${target.slice(0, 4000)}\n\nINVARIANTS:\n${invariants.map((inv, i)
                     violationsFound++;
                     results.push({ invariant_index: test.invariant_index, invariant: invText, violated: true, error: e?.message ?? String(e) });
                 }
+            }
+            // Persist fuzz session
+            const root2 = workspaceRoot();
+            if (root2) {
+                try {
+                    const dir2 = safeHarmonyDir(root2, 'adversarial-critic');
+                    await ensureDir(dir2);
+                    await appendJsonl(path.join(dir2, 'findings.jsonl'), {
+                        id: uid(), session_id: uid(), timestamp: Date.now(), action: 'fuzz',
+                        dimensions: invariants, verdict: violationsFound > 0 ? 'INVARIANTS_VIOLATED' : 'ALL_INVARIANTS_HELD',
+                        findings: results.map(r => ({ dimension: 'invariant', severity: r.violated ? 'high' : 'observation', description: r.invariant, confidence_0_to_1: r.violated ? 0.9 : 0.5 }))
+                    });
+                } catch {}
             }
             return textResult(JSON.stringify({
                 action: 'fuzz',
@@ -181,7 +240,11 @@ TARGET CODE:\n${target.slice(0, 4000)}\n\nINVARIANTS:\n${invariants.map((inv, i)
         }
         findings = findings.filter(f => dimensions.includes(f.dimension));
         for (const f of findings) { if (!f.evidence?.line_number && !f.evidence?.code_snippet && !f.evidence?.pattern) { f.severity = 'observation'; f.false_positive_risk = 'high'; } if ((f.confidence_0_to_1 ?? 1) < 0.3) { f.severity = 'observation'; } }
-        if (findings.length === 0) return textResult(JSON.stringify({ verdict: 'NO_VALID_FINDINGS' }, null, 2));
+        if (findings.length === 0) {
+            const r3 = workspaceRoot();
+            if (r3) { try { const d3 = safeHarmonyDir(r3, 'adversarial-critic'); await ensureDir(d3); await appendJsonl(path.join(d3, 'findings.jsonl'), { id: uid(), session_id: uid(), timestamp: Date.now(), action: 'review', dimensions, verdict: 'NO_VALID_FINDINGS', findings: [] }); } catch {} }
+            return textResult(JSON.stringify({ verdict: 'NO_VALID_FINDINGS' }, null, 2));
+        }
         // Validate findings via sandbox when requested
         if (validate) {
             const root = workspaceRoot();
@@ -201,6 +264,9 @@ TARGET CODE:\n${target.slice(0, 4000)}\n\nINVARIANTS:\n${invariants.map((inv, i)
             }
         }
         try { await concertSpeak('adversarial', 'critic', JSON.stringify({ count: findings.length })); } catch {}
+        // Persist review session
+        const r4 = workspaceRoot();
+        if (r4) { try { const d4 = safeHarmonyDir(r4, 'adversarial-critic'); await ensureDir(d4); await appendJsonl(path.join(d4, 'findings.jsonl'), { id: uid(), session_id: uid(), timestamp: Date.now(), action: 'review', dimensions, verdict: 'FINDINGS_FOUND', findings }); } catch {} }
         return textResult(JSON.stringify({ verdict: 'FINDINGS_FOUND', finding_count: findings.length, findings: findings.slice(0, 20) }, null, 2));
     }
 }
