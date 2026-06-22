@@ -1,0 +1,53 @@
+# Local state, private notes, generated archives, and package artifacts.
+.gitignore
+exts.txt
+.harmony/**
+.harmony-archive/**
+.harmony.bak/**
+.harmony-staging/**
+.harmony-repair/**
+.fastembed_cache/**
+.harmonyhub-test/**
+*_AI/**
+*.md
+!README.md
+!docs/*.md
+_*/**
+*.zip
+*.vsix
+*.vsix.bak
+$null
+_test_extract*/**
+_extract_*/**
+_temp_extract_*/**
+
+# Secrets and local config.
+.env
+.env.*
+*.env
+
+# Generated dependencies/build outputs.
+companion-extensions/**
+native-ui/node_modules/**
+native-ui/dist/**
+native-ui/src-tauri/target/**
+
+# Backups should never ship.
+_askView_*.js
+*.backup*
+**/*.backup*
+# TLS proxy artifacts (deprecated - replaced by LM provider).  
+harmony-copilot-cert.pem  
+harmony-copilot-key.pem  
+tls_proxy.py  
+simple_proxy.py  
+check_proxy.py  
+check_proxy_tls.py  
+setup_tls_proxy.bat  
+start_proxy.bat  
+start_proxy.py  
+_gen_cert.py  
+_fix_settings.py  
+_fix_settings2.py  
+__pycache__/**  
+*.pyc  
