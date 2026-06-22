@@ -9750,7 +9750,8 @@
     "install:creative-tools:cursor": "node scripts/install-vsix.js --editor cursor --vsix companion-extensions/harmony-creative-tools/harmony-creative-tools-0.1.6.vsix",
     "install:creative-tools:both": "node scripts/install-vsix.js --editor both --vsix companion-extensions/harmony-creative-tools/harmony-creative-tools-0.1.6.vsix",
     "reload": "npm run package && code --install-extension harmony-extension.vsix --force",
-    "dev": "node scripts/dev-watch.js"
+    "dev": "node scripts/dev-watch.js",
+    "test": "node scripts/run-tests.js"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
