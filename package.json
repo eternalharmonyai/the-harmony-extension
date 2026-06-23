@@ -9475,12 +9475,12 @@
           "type": "string",
           "enum": [
             "auto",
-            "auto-qwen-first",
             "gemini",
+            "zhipu",
             "alibaba"
           ],
           "default": "auto",
-          "description": "Vision provider for Compose image analysis. auto=Gemini first, falls back to Alibaba. auto-qwen-first=Alibaba first, falls back to Gemini."
+          "description": "Vision provider. auto=configurable fallback order. Single-provider modes skip fallback."
         },
         "harmony.vision.qwenModel": {
           "type": "string",
@@ -9701,6 +9701,27 @@
           ],
           "default": "low",
           "description": "Furies minimum severity to report."
+        },
+        "harmony.vision.zhipuModel": {
+          "type": "string",
+          "default": "glm-5v-turbo"
+        },
+        "harmony.vision.fallbackOrder": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "gemini",
+              "zhipu",
+              "alibaba"
+            ]
+          },
+          "default": [
+            "gemini",
+            "zhipu",
+            "alibaba"
+          ],
+          "description": "Fallback order for vision auto mode. Reorder in sidebar or settings.json."
         }
       }
     }
