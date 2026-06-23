@@ -554,7 +554,7 @@ function rememberDeepSeekAssistantTrace(content: string, reasoning: string): voi
     const hiddenReasoning = reasoning.trim();
     if (!clean || !hiddenReasoning) return;
     deepSeekAssistantTraces.push({
-        content: clean,
+        content: sanitizeForJson(clean),
         reasoning: hiddenReasoning,
         timestamp: Date.now()
     });
@@ -888,6 +888,15 @@ interface DeepSeekToolCall {
     };
 }
 
+
+/** Sanitize string content for safe JSON serialization.
+ *  Handles lone surrogate pairs and control characters that can
+ *  produce malformed JSON hex escapes in JSON.stringify output. */
+function sanitizeForJson(str: string): string {
+    return str.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
 interface DeepSeekMessage {
     role: DeepSeekRole;
     content: string | null;
@@ -934,13 +943,13 @@ async function buildDeepSeekMessages(
         }
     }
 
-    const messages: DeepSeekMessage[] = [{ role: 'system', content: system }];
+    const messages: DeepSeekMessage[] = [{ role: 'system', content: sanitizeForJson(system) }];
     const historyMessages: DeepSeekMessage[] = [];
     const usedTraceIndexes = new Set<number>();
 
     for (const turn of chatContext.history) {
         if (turn instanceof vscode.ChatRequestTurn) {
-            historyMessages.push({ role: 'user', content: turn.prompt });
+            historyMessages.push({ role: 'user', content: sanitizeForJson(turn.prompt) });
         } else if (turn instanceof vscode.ChatResponseTurn) {
             const text = turn.response
                 .map(part => part instanceof vscode.ChatResponseMarkdownPart ? part.value.value : '')
@@ -950,7 +959,7 @@ async function buildDeepSeekMessages(
                 const reasoning = findDeepSeekReasoningForHistory(clean, usedTraceIndexes);
                 historyMessages.push({
                     role: 'assistant',
-                    content: clean,
+                    content: sanitizeForJson(clean),
                     reasoning_content: reasoning
                 });
             }
@@ -958,7 +967,7 @@ async function buildDeepSeekMessages(
     }
 
     messages.push(...trimDeepSeekHistoryMessages(historyMessages));
-    messages.push({ role: 'user', content: request.prompt });
+    messages.push({ role: 'user', content: sanitizeForJson(request.prompt) });
     return messages;
 }
 

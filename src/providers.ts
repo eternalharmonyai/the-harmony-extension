@@ -24,6 +24,10 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'kimi-latest': 8192,
     'hunyuan-pro': 8192,
     'hunyuan-turbos': 32768,
+    'glm-5.1': 131072,
+    'glm-5.2': 131072,
+    'glm-4-flash': 131072,
+    'glm-4-plus': 131072,
 };
 
 /** Fallback model max tokens when model not in the map. */
@@ -68,7 +72,7 @@ const OPENROUTER_FREE_FALLBACKS: string[] = [
  * primary model (Copilot / DeepSeek) is configured separately.
  */
 
-export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent';
+export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu';
 export type Tier = 'light' | 'mid' | 'heavy' | 'coding';
 export type CollabModelPreset = 'auto' | 'economy' | 'balanced' | 'power' | 'custom';
 export type CollabDirectProvider = ProviderId | 'auto';
@@ -81,9 +85,10 @@ const ALIBABA_INTERNATIONAL_BASE_URL = 'https://dashscope-intl.aliyuncs.com/comp
 const ALIBABA_MAINLAND_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const TENCENT_INTERNATIONAL_BASE_URL = 'https://api.hunyuan.cloud.tencent.com/v1';
 const TENCENT_MAINLAND_BASE_URL = 'https://hunyuan.tencentcloudapi.com/v1';
+const ZHIPU_DEFAULT_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
 
 export interface ProviderEndpointInfo {
-    provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent'>;
+    provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu'>;
     profile: ProviderEndpointProfile;
     label: string;
     baseUrl?: string;
@@ -154,6 +159,12 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         mid: 'claude-sonnet-4',
         heavy: 'claude-opus-4',
         coding: 'claude-sonnet-4'
+    },
+    zhipu: {
+        light: 'glm-5.1',
+        mid: 'glm-5.2',
+        heavy: 'glm-5.2',
+        coding: 'glm-5.2'
     }
 };
 
@@ -166,10 +177,11 @@ const SECRET_KEY: Record<ProviderId, string> = {
     openrouter: 'harmony.openrouter.apiKey',
     openai: 'harmony.openaiApiKey',
     claude: 'harmony.claudeApiKey',
-    tencent: 'harmony.tencent.apiKey'
+    tencent: 'harmony.tencent.apiKey',
+    zhipu: 'harmony.zhipu.apiKey'
 };
 
-export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude'];
+export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'zhipu'];
 const FREE_QUOTA_PROVIDER_IDS: ProviderId[] = ['gemini', 'deepseek', 'alibaba', 'moonshot', 'kimiCode', 'openrouter', 'openai', 'claude'];
 
 export function isProviderId(value: string | undefined): value is ProviderId {
@@ -188,6 +200,7 @@ export function providerDisplayName(provider: CollabDirectProvider): string {
         case 'openai': return 'OpenAI';
         case 'claude': return 'Anthropic (Claude models)';
         case 'tencent': return 'Tencent / Hunyuan';
+        case 'zhipu': return 'Zhipu (Z.AI / GLM)';
     }
 }
 
@@ -206,7 +219,7 @@ function configuredEndpointProfile(key: string, fallback: ProviderEndpointProfil
     return raw && allowed.includes(raw as ProviderEndpointProfile) ? raw as ProviderEndpointProfile : fallback;
 }
 
-export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent'>): ProviderEndpointInfo {
+export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu'>): ProviderEndpointInfo {
     if (provider === 'deepseek') {
         const profile = configuredEndpointProfile('deepseek.endpointProfile', 'default', ['default', 'custom']);
         const custom = explicitConfigString('deepseekBaseUrl');
@@ -335,10 +348,25 @@ export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 
             detail: 'Uses the international Hunyuan OpenAI-compatible endpoint. Accessible globally; uses Tencent Cloud API key authentication.'
         };
     }
+    // --- Zhipu (Z.AI / GLM) ---
+    if (provider === 'zhipu') {
+        const profile = configuredEndpointProfile('zhipu.endpointProfile', 'default', ['default', 'custom']);
+        const custom = explicitConfigString('zhipu.baseUrl');
+        const baseUrl = profile === 'custom' && custom.value ? custom.value : ZHIPU_DEFAULT_BASE_URL;
+        return {
+            provider,
+            profile,
+            label: profile === 'custom' ? 'Zhipu custom endpoint' : 'Zhipu default endpoint',
+            baseUrl: baseUrl.replace(/\/$/, ''),
+            baseUrlSetting: 'harmony.zhipu.baseUrl',
+            needsCustomBaseUrl: false,
+            detail: profile === 'custom' ? 'Uses harmony.zhipu.baseUrl.' : 'Uses the standard Zhipu (Z.AI) OpenAI-compatible endpoint.'
+        };
+    }
     throw new Error(`Unsupported endpoint provider: ${provider}`);
 }
 
-export function providerBaseUrlForCall(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent'>): string {
+export function providerBaseUrlForCall(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu'>): string {
     const endpoint = providerEndpointInfo(provider);
     if (!endpoint.baseUrl) {
         throw new Error(`${providerDisplayName(provider)} endpoint profile "${endpoint.profile}" needs a custom base URL. Set ${endpoint.baseUrlSetting} to the provider-issued regional URL.`);
@@ -543,6 +571,10 @@ export async function consult(
             case 'tencent': {
                 const baseUrl = providerBaseUrlForCall('tencent');
                 return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'tencent');
+            }
+            case 'zhipu': {
+                const baseUrl = providerBaseUrlForCall('zhipu');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'zhipu');
             }
             default:
                 throw new Error(`Unsupported provider: ${provider}`);
@@ -935,6 +967,13 @@ export async function discoverModels(
             case 'tencent': {
                 const cfg = vscode.workspace.getConfiguration('harmony');
                 const baseUrl = (cfg.get<string>('tencent.baseUrl') ?? 'https://api.hunyuan.cloud.tencent.com/v1').replace(/\/$/, '');
+                url = `${baseUrl}/models`;
+                headers['Authorization'] = `Bearer ${apiKey}`;
+                break;
+            }
+            case 'zhipu': {
+                const cfg = vscode.workspace.getConfiguration('harmony');
+                const baseUrl = (cfg.get<string>('zhipu.baseUrl') ?? ZHIPU_DEFAULT_BASE_URL).replace(/\/$/, '');
                 url = `${baseUrl}/models`;
                 headers['Authorization'] = `Bearer ${apiKey}`;
                 break;
