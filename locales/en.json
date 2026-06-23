@@ -125,8 +125,9 @@
 
   "visual.title": "Visual tools",
   "visual.visionModel": "Vision model (image analysis)",
-  "visual.autoGeminiFirst": "Auto (Gemini first, Alibaba fallback)",
-  "visual.autoAlibabaFirst": "Auto (Alibaba first, Gemini fallback)",
+  "visual.autoFallback": "Auto (configurable fallback order)",
+  "visual.fallbackOrder": "Fallback order:",
+  "visual.resetFallback": "Reset to default",
   "visual.autoGeminiModel": "Auto Gemini model",
   "visual.autoQwenModel": "Auto Qwen model",
   "visual.imgGenProvider": "Image generation provider",
