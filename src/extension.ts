@@ -66,6 +66,12 @@ const PROVIDER_ENV_IMPORTS: ProviderEnvImport[] = [
         label: 'KimiCode',
         secretKey: 'harmony.kimiCode.apiKey',
         envNames: ['HARMONY_KIMICODE_API_KEY', 'KIMICODE_AGENT_API_KEY', 'KIMICODE_EXTERNAL_API_KEY', 'KIMICODE_API_KEY']
+    },
+    {
+        provider: 'zhipu' as ProviderId,
+        label: 'Zhipu (Z.AI / GLM)',
+        secretKey: 'harmony.zhipu.apiKey',
+        envNames: ['HARMONY_ZHIPU_API_KEY', 'Z_API_KEY', 'Z_AGENT_API_KEY', 'Z_VISION_API_KEY', 'Z_EXTERNAL_API_KEY']
     }
 ];
 
