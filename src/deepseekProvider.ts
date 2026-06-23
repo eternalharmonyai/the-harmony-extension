@@ -65,6 +65,15 @@ function extractTextContent(msg: vscode.LanguageModelChatRequestMessage): string
 /**
  * Map VS Code message role to DeepSeek role string.
  */
+/**
+ * Sanitize content for safe JSON serialization.
+ * Handles lone surrogate pairs and control characters.
+ */
+function sanitizeContent(str: string): string {
+    return str.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
 function mapRole(role: vscode.LanguageModelChatMessageRole): string {
     switch (role) {
         case vscode.LanguageModelChatMessageRole.User: return 'user';
@@ -112,7 +121,7 @@ export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
                 .filter(m => m.role === vscode.LanguageModelChatMessageRole.User || m.role === vscode.LanguageModelChatMessageRole.Assistant)
                 .map(m => ({
                     role: mapRole(m.role),
-                    content: extractTextContent(m),
+                    content: sanitizeContent(extractTextContent(m)),
                 }));
 
             const requestBody = {
@@ -121,6 +130,19 @@ export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
                 stream: false,
                 max_tokens: 32768,
             };
+
+            // Safe JSON serialization with fallback for edge cases
+            let body: string;
+            try {
+                body = JSON.stringify(requestBody);
+            } catch (jsonErr) {
+                console.warn('[DeepSeek Provider] JSON.stringify failed, retrying with aggressive sanitization:', jsonErr);
+                const safeMessages = deepseekMessages.map(m => ({
+                    ...m,
+                    content: (m.content || '').replace(/[\x00-\x1F\x7F-\x9F]/g, ''),
+                }));
+                body = JSON.stringify({ ...requestBody, messages: safeMessages });
+            }
 
             const controller = new AbortController();
             const cancelSub = token.onCancellationRequested(() => controller.abort());
@@ -132,7 +154,7 @@ export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${apiKey}`,
                     },
-                    body: JSON.stringify(requestBody),
+                    body: body,
                     signal: controller.signal as AbortSignal,
                 });
 
