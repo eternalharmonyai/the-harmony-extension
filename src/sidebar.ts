@@ -403,14 +403,25 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                       if (v === 'auto') {
                         await vscode.workspace.getConfiguration('harmony')
                           .update('vision.provider', 'auto', true);
-                      } else if (v === 'auto-qwen-first') {
+                      } else if (v === 'gemini') {
                         await vscode.workspace.getConfiguration('harmony')
-                          .update('vision.provider', 'auto-qwen-first', true);
+                          .update('vision.provider', 'gemini', true);
+                      } else if (v === 'zhipu') {
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.provider', 'zhipu', true);
+                      } else if (v === 'alibaba') {
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.provider', 'alibaba', true);
                       } else if (v.startsWith('qwen')) {
                         await vscode.workspace.getConfiguration('harmony')
                           .update('vision.provider', 'alibaba', true);
                         await vscode.workspace.getConfiguration('harmony')
                           .update('vision.qwenModel', v, true);
+                      } else if (v.startsWith('glm')) {
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.provider', 'zhipu', true);
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.zhipuModel', v, true);
                       } else {
                         await vscode.workspace.getConfiguration('harmony')
                           .update('vision.provider', 'gemini', true);
@@ -419,6 +430,23 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                       }
                       break;
                     }
+                    case 'visionFallbackReorder': {
+                      const { id, direction } = msg as any;
+                      const cfg = vscode.workspace.getConfiguration('harmony');
+                      const order: string[] = [...(cfg.get<string[]>('vision.fallbackOrder') ?? ['gemini', 'zhipu', 'alibaba'])];
+                      const idx = order.indexOf(id);
+                      if (direction === 'up' && idx > 0) {
+                        [order[idx - 1], order[idx]] = [order[idx], order[idx - 1]];
+                      } else if (direction === 'down' && idx < order.length - 1) {
+                        [order[idx], order[idx + 1]] = [order[idx + 1], order[idx]];
+                      }
+                      await cfg.update('vision.fallbackOrder', order, true);
+                      break;
+                    }
+                    case 'visionFallbackReset':
+                      await vscode.workspace.getConfiguration('harmony')
+                        .update('vision.fallbackOrder', undefined, true);
+                      break;
                     case 'setAutoGeminiModel':
                       await vscode.workspace.getConfiguration('harmony')
                         .update('vision.autoGeminiModel', msg.value as string, true);
@@ -736,12 +764,13 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             visionModel: (() => {
               const provider = cfg.get<string>('vision.provider') ?? 'auto';
               if (provider === 'auto') return 'auto';
-              if (provider === 'auto-qwen-first') return 'auto-qwen-first';
+              if (provider === 'zhipu') return cfg.get<string>('vision.zhipuModel') || 'glm-5v-turbo';
               if (provider === 'alibaba') return cfg.get<string>('vision.qwenModel') || 'qwen-vl-max';
               return cfg.get<string>('vision.geminiModel') || 'gemini-3.5-flash';
             })(),
             autoGeminiModel: cfg.get<string>('vision.autoGeminiModel') ?? 'gemini-3.5-flash',
             autoQwenModel: cfg.get<string>('vision.autoQwenModel') ?? 'qwen-vl-max',
+            visionFallbackOrder: cfg.get<string[]>('vision.fallbackOrder') ?? ['gemini', 'zhipu', 'alibaba'],
             contextHealth: { harmonyBytes: 0, healthStatus: 'ok' },
             imageGenProvider: cfg.get<string>('imageGen.provider') ?? 'gemini',
             imageGenAutoApprove: !!cfg.get<boolean>('imageGen.autoApprove'),
@@ -1110,6 +1139,10 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   .provider-row .name { flex: 1; }
   .provider-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-charts-red); }
   .provider-row .dot.on { background: var(--vscode-charts-green); }
+  .fb-item { display: flex; align-items: center; gap: 4px; padding: 3px 4px; font-size: 11px; border-radius: 3px; }
+  .fb-item:hover { background: var(--vscode-list-hoverBackground); }
+  .fb-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-charts-red); }
+  .fb-item .dot.on { background: var(--vscode-charts-green); }
   .todo-item { display: flex; align-items: flex-start; gap: 4px; font-size: 11px; line-height: 1.3; }
   .todo-item.done { opacity: 0.5; text-decoration: line-through; }
   #sidebar-loading { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--vscode-sideBar-background); z-index: 100; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
@@ -1297,18 +1330,29 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   <div style="margin-bottom:8px;">
     <div style="font-size:11px; margin-bottom:2px;">${lm.getString('visual.visionModel')}</div>
     <select id="vision-model">
-      <option value="auto">${lm.getString('visual.autoGeminiFirst')}</option>
-      <option value="auto-qwen-first">${lm.getString('visual.autoAlibabaFirst')}</option>
+      <option value="auto">${lm.getString('visual.autoFallback')}</option>
+      <option value="gemini">🔮 Gemini only</option>
+      <option value="zhipu">🧠 Zhipu / GLM only</option>
+      <option value="alibaba">☁️ Alibaba / Qwen only</option>
       <optgroup label="Gemini">
         <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (cheapest Flash-Lite)</option>
         <option value="gemini-3.5-flash">gemini-3.5-flash (default, latest Flash)</option>
         <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (heavy, detailed)</option>
+      </optgroup>
+      <optgroup label="Zhipu / GLM">
+        <option value="glm-5v-turbo">glm-5v-turbo (fast, capable)</option>
+        <option value="glm-5v">glm-5v (standard)</option>
       </optgroup>
       <optgroup label="Alibaba / Qwen-VL">
         <option value="qwen-vl-plus">qwen-vl-plus (faster, cheaper)</option>
         <option value="qwen-vl-max">qwen-vl-max (best quality)</option>
       </optgroup>
     </select>
+    <div id="vision-fallback-order" style="display:none; margin-top:6px;">
+      <div style="font-size:10px; margin-bottom:3px;">${lm.getString('visual.fallbackOrder')}</div>
+      <div id="fallback-list"></div>
+      <button class="subtle" id="reset-fallback-order" style="margin-top:4px; font-size:10px;">${lm.getString('visual.resetFallback')}</button>
+    </div>
     <div id="auto-vision-models" style="display:none; margin-top:4px; margin-left:8px;">
       <div style="font-size:10px; margin-bottom:2px;">${lm.getString('visual.autoGeminiModel')}</div>
       <select id="auto-gemini-model">
@@ -1694,9 +1738,39 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
       LOC.steering_auto_retry_label + ' <code>' + (s.autoRetry !== false ? LOC.on_label : LOC.off_label) + '</code><br>' +
       LOC.steering_auto_approve_label + ' <code>' + (s.autoApprove ? LOC.on_label : LOC.off_label) + '</code>';
     $('vision-model').value = s.visionModel || 'gemini-3.5-flash';
-    $('auto-gemini-model').value = s.autoGeminiModel || 'gemini-3.5-flash';
-    $('auto-qwen-model').value = s.autoQwenModel || 'qwen-vl-max';
-    (() => { const v = s.visionModel || ''; $('auto-vision-models').style.display = (v === 'auto' || v === 'auto-qwen-first') ? '' : 'none'; })();
+    // Show/hide fallback order when auto is selected
+    (() => { const v = s.visionModel || ''; $('vision-fallback-order').style.display = (v === 'auto') ? '' : 'none'; })();
+    // Render fallback order list
+    (() => {
+      const list = $('fallback-list');
+      if (!list) return;
+      const order = (s.visionFallbackOrder && s.visionFallbackOrder.length > 0) ? s.visionFallbackOrder : ['gemini', 'zhipu', 'alibaba'];
+      const icons = { gemini: '\uD83D\uDD2E', zhipu: '\uD83E\uDDE0', alibaba: '\u2601\uFE0F' };
+      const names = { gemini: 'Gemini', zhipu: 'Zhipu / GLM', alibaba: 'Alibaba / Qwen' };
+      list.innerHTML = order.map((id, i) => {
+        const hasKey = !!(s.providers && s.providers[id]);
+        return '<div class="fb-item" data-id="' + id + '">' +
+          '<span style="width:14px;text-align:center;opacity:0.5;">' + (i + 1) + '.</span>' +
+          '<span>' + (icons[id] || '\uD83D\uDD39') + '</span>' +
+          '<span style="flex:1;">' + (names[id] || id) + '</span>' +
+          '<span class="dot ' + (hasKey ? 'on' : '') + '" style="margin:0 3px;" title="' + (hasKey ? 'Key set' : 'No key') + '"></span>' +
+          '<button class="fb-up" data-id="' + id + '" ' + (i === 0 ? 'disabled' : '') + ' style="padding:0 4px;font-size:10px;opacity:' + (i === 0 ? '0.3' : '0.7') + ';">\u25B2</button>' +
+          '<button class="fb-down" data-id="' + id + '" ' + (i === order.length - 1 ? 'disabled' : '') + ' style="padding:0 4px;font-size:10px;opacity:' + (i === order.length - 1 ? '0.3' : '0.7') + ';">\u25BC</button>' +
+          '</div>';
+      }).join('');
+      // Wire up/down buttons
+      list.querySelectorAll('.fb-up,.fb-down').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var dir = btn.classList.contains('fb-up') ? 'up' : 'down';
+          vscode.postMessage({ type: 'visionFallbackReorder', id: btn.dataset.id, direction: dir });
+        });
+      });
+    })();
+    // Wire reset fallback button
+    (() => {
+      const btn = $('reset-fallback-order');
+      if (btn) btn.addEventListener('click', function() { vscode.postMessage({ type: 'visionFallbackReset' }); });
+    })();
     $('image-gen-provider').value = s.imageGenProvider || 'gemini';
     $('image-gen-auto').checked = !!s.imageGenAutoApprove;
     $('flow-state').checked = !!s.flowState;
@@ -2146,7 +2220,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
   $('write-oom-diagnostics').addEventListener('click', () => vscode.postMessage({ type: 'writeOomDiagnostics' }));
   $('enable-low-memory-safety').addEventListener('click', () => vscode.postMessage({ type: 'enableLowMemorySafetyMode' }));
   $('restore-low-memory-safety').addEventListener('click', () => vscode.postMessage({ type: 'restoreLowMemorySafetySettings' }));
-  $('vision-model').addEventListener('change', (e) => { vscode.postMessage({ type: 'setVisionModel', value: e.target.value }); $('auto-vision-models').style.display = (e.target.value === 'auto' || e.target.value === 'auto-qwen-first') ? '' : 'none'; });
+  $('vision-model').addEventListener('change', (e) => { vscode.postMessage({ type: 'setVisionModel', value: e.target.value }); $('vision-fallback-order').style.display = (e.target.value === 'auto') ? '' : 'none'; });
   $('auto-gemini-model').addEventListener('change', (e) => vscode.postMessage({ type: 'setAutoGeminiModel', value: e.target.value }));
   $('auto-qwen-model').addEventListener('change', (e) => vscode.postMessage({ type: 'setAutoQwenModel', value: e.target.value }));
   $('image-gen-provider').addEventListener('change', (e) => vscode.postMessage({ type: 'setImageGenProvider', value: e.target.value }));
