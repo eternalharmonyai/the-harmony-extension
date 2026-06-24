@@ -151,8 +151,8 @@ const PROVIDER_ENV_IMPORTS: ProviderEnvImport[] = [
         label: 'Tencent / Hunyuan (native SecretId+SecretKey)',
         secretKey: 'harmony.tencent.secretId',
         pairedKey: 'harmony.tencent.secretKey',
-        envNames: ['TENCENT_SecretID', 'TENCENT_SecretID_AGENT', 'TENCENT_SecretID_EXTERNAL', 'TENCENT_SecretID_VISION'],
-        pairedEnvNames: ['TENCENT_SecretKey', 'TENCENT_SecretKey_AGENT', 'TENCENT_SecretKey_EXTERNAL', 'TENCENT_SecretKey_VISION']
+        envNames: ['TENCENT_SecretID', 'TENCENT_SecretID_AGENT', 'TENCENT_AGENT_SecretId', 'TENCENT_SecretID_EXTERNAL', 'TENCENT_SecretID_VISION'],
+        pairedEnvNames: ['TENCENT_SecretKey', 'TENCENT_SecretKey_AGENT', 'TENCENT_AGENT_SecretKey', 'TENCENT_SecretKey_EXTERNAL', 'TENCENT_SecretKey_VISION']
     }
 ];
 
