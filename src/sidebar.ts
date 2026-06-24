@@ -4,7 +4,7 @@ import * as path from 'path';
 import { recallMemory, currentWorkspaceFingerprint, memoryStats } from './memory';
 import { getOrchestrateSessionStats } from './orchestrateMode';
 import { loadTodos, onTodoChange } from './todoStore';
-import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, hasKey, modelFor, providerDisplayName, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier } from './providers';
+import { collabTierForPreset, countProviderKeys, getCollabDirectProvider, getCollabModelPreset, hasKey, modelFor, providerDisplayName, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier } from './providers';
 import { summarize as summarizeUsage, totalCalls, totalTokens, onUsageChange, getFallbackEvents, providerAccountingSummary } from './costTracker';
 import type { ProviderAccountingSummary } from './costTracker';
 import { listSessions } from './sessions';
@@ -120,6 +120,10 @@ const PRIMARY_MODEL_OPTIONS: Record<string, { value: string; label: string }[]> 
   tencent: [
     { value: 'hunyuan-turbos-latest', label: 'hunyuan-turbos-latest (latest)' },
     { value: 'hunyuan-lite', label: 'hunyuan-lite (fast, free tier)' },
+  ],
+  zhipu: [
+    { value: 'glm-5.1', label: 'glm-5.1 (fast, light)' },
+    { value: 'glm-5.2', label: 'glm-5.2 (balanced, capable)' },
   ],
 };
 
@@ -260,17 +264,10 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                         await vscode.commands.executeCommand('harmony.setDeepSeekApiKey');
                         break;
                     case 'setProviderKey':
-                        switch (msg.provider) {
-                            case 'openai': await vscode.commands.executeCommand('harmony.setOpenAIApiKey'); break;
-                            case 'gemini': await vscode.commands.executeCommand('harmony.setGeminiApiKey'); break;
-                            case 'claude': await vscode.commands.executeCommand('harmony.setClaudeApiKey'); break;
-                            case 'deepseek': await vscode.commands.executeCommand('harmony.setDeepSeekApiKey'); break;
-                            case 'openrouter': await vscode.commands.executeCommand('harmony.setOpenRouterApiKey'); break;
-                            case 'moonshot': await vscode.commands.executeCommand('harmony.setMoonshotApiKey'); break;
-                            case 'kimiCode': await vscode.commands.executeCommand('harmony.setKimiCodeApiKey'); break;
-                            case 'alibaba': await vscode.commands.executeCommand('harmony.setAlibabaApiKey'); break;
-                            case 'tencent': await vscode.commands.executeCommand('harmony.setTencentApiKey'); break;
-                        }
+                        await vscode.commands.executeCommand('harmony.editProviderSlots', msg.provider);
+                        break;
+                    case 'setProviderSlotKey':
+                        await vscode.commands.executeCommand('harmony.setProviderSlotKey', msg.provider, msg.slotIndex);
                         break;
                     case 'setBigGunsMode':
                         await vscode.workspace.getConfiguration('harmony')
@@ -737,6 +734,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                 ?? modelFor('kimiCode', 'coding'),
             tencentPrimaryModel: this.context.workspaceState.get<string>('harmony.primaryModel.tencent')
                 ?? modelFor('tencent', 'coding'),
+            zhipuModel: this.context.workspaceState.get<string>('harmony.primaryModel.zhipu')
+                ?? modelFor('zhipu', 'coding'),
             agentMaxSteps: cfg.get<number>('agentMaxSteps') ?? 1,
             autoApprove: !!cfg.get<boolean>('autoApproveTools'),
             planOnly: !!cfg.get<boolean>('planOnlyMode'),
@@ -868,6 +867,11 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                     await Promise.all(providers.map(async (p) => { try { s[p] = await hasKey(this.context.secrets, p); } catch (_err) { s[p] = false; } }));
                     return s;
                 })().catch(() => Object.fromEntries(providers.map(p => [p, false])) as Record<string, boolean>),
+                (async (): Promise<Record<string, number>> => {
+                    const s: Record<string, number> = {};
+                    await Promise.all(providers.map(async (p) => { try { s[p] = await countProviderKeys(this.context.secrets, p); } catch (_err) { s[p] = 0; } }));
+                    return s;
+                })().catch(() => Object.fromEntries(providers.map(p => [p, 0])) as Record<string, number>),
                 compactSidebar ? [] : listSessions().catch(() => []),
                 getContextHealthSize().catch(() => 0),
                 resolveCollabModel(this.context.secrets).catch(() => safeDefault),
@@ -890,7 +894,13 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                     } catch { /* daemon offline */ }
                     return { online: false };
                 })(),
-                this.context.secrets.get('harmony.tencent.apiKey'),
+                (async () => {
+                    const tk = await this.context.secrets.get('harmony.tencent.apiKey');
+                    if (tk) return tk;
+                    const sid = await this.context.secrets.get('harmony.tencent.secretId');
+                    const sk = await this.context.secrets.get('harmony.tencent.secretKey');
+                    return (sid && sk) ? 'native' : undefined;
+                })(),
                 // Concert Board and Custom Roles moved to Phase 4 (non-blocking) —
                 // concertCheck and file I/O are non-critical for sidebar display
                 // and should never block the loading spinner from dismissing.
@@ -912,6 +922,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         const [
             recent = [], memorySummary = { activeEntries: 0, preservedFiles: 0 }, todos = [],
             providerStates = Object.fromEntries(providers.map(p => [p, false])) as Record<string, boolean>,
+            providerSlotCounts = Object.fromEntries(providers.map(p => [p, 0])) as Record<string, number>,
             sessions = [], harmonyBytes = 0, resolvedCollab = safeDefault,
             whisperCount = 0, globalMemoryData = { totalPatterns: 0, uniqueWorkspaces: 0, topTags: [] as {tag: string; count: number}[] },
             hubStatus = { online: false },
@@ -939,6 +950,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             hasKey: providerStates.deepseek,
             primaryProviderKeys: providerStates,
             providers: providerStates,
+            providerSlotCounts,
             memoryCount: memorySummary.activeEntries,
             memoryStats: memorySummary,
             memory: this.memoryHiddenFromPanel || compactSidebar ? [] : recent.map((e: any) => ({
@@ -1259,6 +1271,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     <option value="alibaba">Alibaba / Qwen (direct)</option>
     <option value="tencent">Tencent / Hunyuan (direct)</option>
     <option value="moonshot">Moonshot / Kimi (direct)</option>
+    <option value="zhipu">Zhipu / GLM (direct)</option>
     <option value="kimiCode">KimiCode (direct)</option>
   </select>
   <div id="direct-primary-block" class="hint" style="display:none; margin-top:4px;"></div>
@@ -1679,8 +1692,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     // ── End dynamic injection ──
     $('profile').value = s.profile;
     $('provider').value = s.provider;
-    const primaryDirect = ['deepseek', 'alibaba', 'moonshot', 'kimiCode', 'tencent'].includes(s.provider);
-    const primaryModel = s.provider === 'deepseek' ? s.deepseekModel : (s.provider === 'alibaba' ? s.alibabaPrimaryModel : (s.provider === 'moonshot' ? s.moonshotPrimaryModel : (s.provider === 'kimiCode' ? s.kimiCodePrimaryModel : s.tencentPrimaryModel)));
+    const primaryDirect = ['deepseek', 'alibaba', 'moonshot', 'kimiCode', 'tencent', 'zhipu'].includes(s.provider);
+    const primaryModel = s.provider === 'deepseek' ? s.deepseekModel : (s.provider === 'alibaba' ? s.alibabaPrimaryModel : (s.provider === 'moonshot' ? s.moonshotPrimaryModel : (s.provider === 'kimiCode' ? s.kimiCodePrimaryModel : (s.provider === 'zhipu' ? s.zhipuModel : s.tencentPrimaryModel))));
     const primaryKeySaved = !!(s.primaryProviderKeys && s.primaryProviderKeys[s.provider]);
     const primarySecretKey = s.providerSecretKeys && s.providerSecretKeys[s.provider] ? s.providerSecretKeys[s.provider] : '';
     const primaryEndpoint = s.providerEndpoints && s.providerEndpoints[s.provider] ? s.providerEndpoints[s.provider] : null;
@@ -1701,7 +1714,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         LOC.sidebar_key + ' ' + (primaryKeySaved ? LOC.provider_key_set_in_vscode : '<em>' + LOC.provider_key_none_in_vscode + '</em>') +
         (primaryEndpoint ? '<br>' + LOC.provider_endpoint_label + ' <code>' + escapeHtml(primaryEndpoint.label) + '</code>' + (primaryEndpoint.baseUrl ? '<br>' + LOC.provider_base_label + ' <code>' + escapeHtml(primaryEndpoint.baseUrl) + '</code>' : '<br><em>' + escapeHtml(primaryEndpoint.detail) + '</em>') : '') +
         (primarySecretKey ? '<br>' + LOC.provider_secret_label + ' <code>' + escapeHtml(primarySecretKey) + '</code>' : '') +
-        (!primaryKeySaved && ['deepseek', 'alibaba', 'moonshot', 'tencent'].includes(s.provider) ? '<br>' + LOC.provider_import_hint : '')
+        (!primaryKeySaved && ['deepseek', 'alibaba', 'moonshot', 'tencent', 'zhipu'].includes(s.provider) ? '<br>' + LOC.provider_import_hint : '')
       : '';
     $('set-key').style.display = primaryDirect ? 'block' : 'none';
     $('agent-steps').value = String(s.agentMaxSteps ?? 1);
@@ -1963,24 +1976,48 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
     if (autoStartBtn) autoStartBtn.textContent = s.hubAutoStart ? LOC.hub_auto_start_on : LOC.hub_auto_start_off;
 
     const providers = $('providers');
-    const provList = s.providerOrder || ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude'];
+    const provList = s.providerOrder || ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'zhipu', 'gemini', 'openrouter', 'openai', 'claude'];
     const providerLabels = s.providerLabels || {};
+    const slotCounts = s.providerSlotCounts || {};
+    const slotLabels = ['C', 'A', 'E', 'V']; // Chat, Agents, External, Vision
+    const slotTitles = ['Chat key', 'Agents key', 'External key', 'Vision key'];
     providers.innerHTML = provList.map(p => {
       const on = !!(s.providers && s.providers[p]);
       const label = providerLabels[p] || p;
       const secret = s.providerSecretKeys && s.providerSecretKeys[p] ? s.providerSecretKeys[p] : '';
       const endpoint = s.providerEndpoints && s.providerEndpoints[p] ? s.providerEndpoints[p] : null;
+      const count = slotCounts[p] ?? (on ? 1 : 0);
+      const isTencent = p === 'tencent';
+      // Generate slot pills: clickable, green=set, blue=fallback, gray=missing
+      const slotPills = isTencent
+        ? '<span class="slot-pill tencent" title="Native SecretId+SecretKey dual auth">🔑</span>'
+        : slotLabels.map((letter, i) => {
+            const filled = i < count;
+            const color = filled ? (i === 0 ? 'var(--vscode-charts-green)' : 'var(--vscode-charts-blue)') : 'var(--vscode-descriptionForeground)';
+            const title = filled ? slotTitles[i] + ' set (click to change)' : slotTitles[i] + ' not set (click to add)';
+            return '<button class="slot-pill-btn" data-provider="' + p + '" data-slot="' + i + '" style="background:' + color + ';color:#fff;font-size:9px;padding:0 3px;border-radius:2px;margin:0 1px;border:none;cursor:pointer;font-family:monospace;" title="' + title + '">' + letter + '</button>';
+          }).join('');
       return '<div class="provider-row">' +
         '<span class="dot ' + (on ? 'on' : '') + '"></span>' +
         '<span class="name">' + escapeHtml(label) + '<br><span class="hint">' + LOC.provider_secret_storage + ' ' + escapeHtml(secret || LOC.provider_na) + '</span>' +
         (endpoint ? '<br><span class="hint">' + LOC.provider_endpoint_label + ' ' + escapeHtml(endpoint.label) + (endpoint.needsCustomBaseUrl ? ' ' + LOC.provider_needs_base_url : '') + '</span>' : '') +
         '</span>' +
+        '<span class="slot-indicators">' + slotPills + '</span>' +
         '<button class="subtle" data-provider="' + p + '" style="width:auto;padding:2px 6px;">' +
         (on ? LOC.provider_replace_key : LOC.provider_set_key_short) +
         '</button></div>';
     }).join('');
     providers.querySelectorAll('button[data-provider]').forEach(btn => {
       btn.addEventListener('click', () => vscode.postMessage({ type: 'setProviderKey', provider: btn.dataset.provider }));
+    });
+    // Wire slot pill clicks
+    providers.querySelectorAll('.slot-pill-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const provider = (btn as HTMLElement).dataset.provider;
+        const slotIndex = parseInt((btn as HTMLElement).dataset.slot || '0', 10);
+        vscode.postMessage({ type: 'setProviderSlotKey', provider, slotIndex });
+      });
     });
 
     const td = $('todos');

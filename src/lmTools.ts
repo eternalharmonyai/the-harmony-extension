@@ -2244,6 +2244,8 @@ interface ConsultModelInput {
     question: string;
     system?: string;
     max_tokens?: number;
+    /** Multi-key slot: 0=Chat (default), 1=Agents, 2=External, 3=Vision. Use the agents slot when calling provider-specific agent tools. */
+    slot_index?: number;
 }
 
 class ConsultModelTool implements vscode.LanguageModelTool<ConsultModelInput> {
@@ -2251,7 +2253,7 @@ class ConsultModelTool implements vscode.LanguageModelTool<ConsultModelInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<ConsultModelInput>, token: vscode.CancellationToken) {
         const { provider, question } = options.input;
         const tier: Tier = options.input.tier ?? 'mid';
-        if (!provider) return textResult('error: missing argument: provider (deepseek|alibaba|tencent|moonshot|kimiCode|gemini|openrouter|openai|claude)');
+        if (!provider) return textResult('error: missing argument: provider (deepseek|alibaba|tencent|moonshot|kimiCode|gemini|openrouter|openai|claude|zhipu)');
         if (!question || !question.trim()) return textResult('error: missing argument: question');
         const ok = await confirmHeavyTier(provider, tier);
         if (!ok) return textResult('user denied heavy-tier consultation');
@@ -2259,10 +2261,12 @@ class ConsultModelTool implements vscode.LanguageModelTool<ConsultModelInput> {
             const r = await consult(this.secrets, {
                 provider, tier, question,
                 system: options.input.system,
-                maxTokens: options.input.max_tokens
+                maxTokens: options.input.max_tokens,
+                slotIndex: options.input.slot_index
             }, token);
             const usage = r.usage ? ` (in:${r.usage.promptTokens ?? '?'} out:${r.usage.completionTokens ?? '?'})` : '';
-            return textResult(`[${r.provider}/${r.model}${usage}]\n\n${r.text}`);
+            const slotLabel = options.input.slot_index != null ? ` slot:${['chat','agents','external','vision'][options.input.slot_index]}` : '';
+            return textResult(`[${r.provider}/${r.model}${slotLabel}${usage}]\n\n${r.text}`);
         } catch (e: any) {
             return textResult(`error: ${e?.message ?? String(e)}`);
         }
@@ -2290,6 +2294,8 @@ interface SpawnWorkerInput {
     profileId?: string;
     /** Max characters per context file (default 24000) */
     max_chars_per_file?: number;
+    /** Multi-key slot: 0=Chat (default), 1=Agents, 2=External, 3=Vision. */
+    slot_index?: number;
 }
 
 type WorkerRole = 'scout' | 'researcher' | 'planner' | 'implementer' | 'verifier' | 'critic' | 'cost_sentinel' | 'hard_reasoner';
@@ -2385,11 +2391,12 @@ class SpawnWorkerTool implements vscode.LanguageModelTool<SpawnWorkerInput> {
 
         try {
             const r = await consult(this.secrets, {
-                provider, tier, question: fullQuestion, system, maxTokens: 4096
+                provider, tier, question: fullQuestion, system, maxTokens: 4096, slotIndex: options.input.slot_index
             }, token);
             const usage = r.usage ? ` (in:${r.usage.promptTokens ?? '?'} out:${r.usage.completionTokens ?? '?'})` : '';
             const roleLabel = role ? ` ${role}` : '';
-            return textResult(`[Worker${roleLabel} ${r.provider}/${r.model}${usage}]\n\n${r.text}`);
+            const slotLabel = options.input.slot_index != null ? ` slot:${['chat','agents','external','vision'][options.input.slot_index]}` : '';
+            return textResult(`[Worker${roleLabel} ${r.provider}/${r.model}${slotLabel}${usage}]\n\n${r.text}`);
         } catch (e: any) {
             return textResult(`error: ${e?.message ?? String(e)}`);
         }
