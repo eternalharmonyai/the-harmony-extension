@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ComposeImage } from './composeQueue';
 import { recordUsage } from './costTracker';
-import { confirmPremiumModel } from './providers';
+import { confirmPremiumModel, resolveProviderKey } from './providers';
 
 /**
  * Vision routing for compose-attached images.
@@ -61,7 +61,7 @@ export async function describeImagesViaGemini(
     const model = modelOverride ?? cfg.get<string>('vision.geminiModel') ?? GEMINI_VISION_MODEL_DEFAULT;
     const tier = geminiTierForModel(model);
 
-    const apiKey = await secrets.get('harmony.geminiApiKey');
+    const apiKey = await resolveProviderKey(secrets, 'gemini', 3); // Vision slot
     if (!apiKey) {
         return {
             description: `[Vision: no Gemini API key set.]`,
@@ -193,7 +193,7 @@ export async function describeImagesViaQwen(
     const cfg = vscode.workspace.getConfiguration('harmony');
     const model = modelOverride ?? cfg.get<string>('vision.qwenModel') ?? QWEN_VISION_MODEL_DEFAULT;
 
-    const apiKey = await secrets.get('harmony.alibaba.apiKey') || process.env.ALIBABA_VISION_API_KEY;
+    const apiKey = await resolveProviderKey(secrets, 'alibaba', 3); // Vision slot
     if (!apiKey) {
         return {
             description: `[Vision: no Alibaba API key set. Set harmony.alibaba.apiKey in SecretStorage or ALIBABA_VISION_API_KEY in .env.]`,
@@ -312,7 +312,7 @@ export async function describeImagesViaZhipu(
     const cfg = vscode.workspace.getConfiguration('harmony');
     const model = modelOverride ?? cfg.get<string>('vision.zhipuModel') ?? ZHIPU_VISION_MODEL_DEFAULT;
 
-    const apiKey = await secrets.get('harmony.zhipu.apiKey') || process.env.Z_VISION_API_KEY;
+    const apiKey = await resolveProviderKey(secrets, 'zhipu', 3); // Vision slot
     if (!apiKey) {
         return {
             description: `[Vision: no Zhipu API key set. Set harmony.zhipu.apiKey in SecretStorage or Z_VISION_API_KEY in .env.]`,
