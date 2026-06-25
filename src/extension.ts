@@ -24,7 +24,7 @@ import { registerHarmonyParticipant } from './chatParticipant';
 import { registerDeepSeekProvider } from './deepseekProvider';
 import { registerHarmonyView } from './sidebar';
 import { openComposeView } from './composeView';
-import { CollabDirectProvider, CollabModelPreset, collabTierForPreset, consult, discoverModels, getCollabDirectProvider, getCollabModelPreset, invalidateKeyCache, isProviderId, modelFor, providerDisplayName, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier } from './providers';
+import { CollabDirectProvider, CollabModelPreset, collabTierForPreset, consult, countProviderKeys, discoverModels, getCollabDirectProvider, getCollabModelPreset, getProviderKeys, invalidateKeyCache, isProviderId, KEY_SLOTS, migrateLegacyToSlots, modelFor, providerDisplayName, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, setProviderKeys, Tier } from './providers';
 import { clearUsage, onUsageChange, summarize as summarizeUsage, totalCalls, totalTokens } from './costTracker';
 import { listSessions, deleteSession } from './sessions';
 import { createHandoffPacket } from './memory';
@@ -40,6 +40,10 @@ type ProviderEnvImport = {
     label: string;
     secretKey: string;
     envNames: string[];
+    /** Multi-key slot mapping: {slotIndex: [envVarNames]}. 0=Chat, 1=Agents, 2=External, 3=Vision. */
+    slotEnvNames?: Record<number, string[]>;
+    pairedKey?: string;
+    pairedEnvNames?: string[];
 };
 
 const PROVIDER_ENV_IMPORTS: ProviderEnvImport[] = [
@@ -47,25 +51,108 @@ const PROVIDER_ENV_IMPORTS: ProviderEnvImport[] = [
         provider: 'deepseek',
         label: 'DeepSeek',
         secretKey: 'harmony.deepseekApiKey',
-        envNames: ['HARMONY_DEEPSEEK_API_KEY', 'DEEPSEEK_AGENT_API_KEY', 'DEEPSEEK_EXTERNAL_API_KEY', 'EXTERNAL_UI_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY']
+        envNames: ['HARMONY_DEEPSEEK_API_KEY', 'DEEPSEEK_AGENT_API_KEY', 'DEEPSEEK_EXTERNAL_API_KEY', 'EXTERNAL_UI_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY'],
+        slotEnvNames: {
+            0: ['DEEPSEEK_API_KEY'],
+            1: ['DEEPSEEK_AGENT_API_KEY'],
+            2: ['DEEPSEEK_EXTERNAL_API_KEY']
+        }
     },
     {
         provider: 'alibaba',
         label: 'Alibaba / Qwen',
         secretKey: 'harmony.alibaba.apiKey',
-        envNames: ['HARMONY_ALIBABA_API_KEY', 'ALIBABA_AGENT_API_KEY', 'ALIBABA_EXTERNAL_API_KEY', 'ALIBABA_API_KEY', 'ALIBABA_VISION_API_KEY', 'DASHSCOPE_API_KEY', 'Alibaba_API_KEY']
+        envNames: ['HARMONY_ALIBABA_API_KEY', 'ALIBABA_AGENT_API_KEY', 'ALIBABA_EXTERNAL_API_KEY', 'ALIBABA_API_KEY', 'ALIBABA_VISION_API_KEY', 'DASHSCOPE_API_KEY', 'Alibaba_API_KEY'],
+        slotEnvNames: {
+            0: ['ALIBABA_API_KEY'],
+            1: ['ALIBABA_AGENT_API_KEY'],
+            2: ['ALIBABA_EXTERNAL_API_KEY'],
+            3: ['ALIBABA_VISION_API_KEY']
+        }
     },
     {
         provider: 'moonshot',
         label: 'Moonshot / Kimi',
         secretKey: 'harmony.moonshot.apiKey',
-        envNames: ['HARMONY_MOONSHOT_API_KEY', 'MOONSHOT_AGENT_API_KEY', 'MOONSHOT_EXTERNAL_API_KEY', 'MOONSHOT_API_KEY', 'Moonshot_API_KEY']
+        envNames: ['HARMONY_MOONSHOT_API_KEY', 'MOONSHOT_AGENT_API_KEY', 'MOONSHOT_EXTERNAL_API_KEY', 'MOONSHOT_API_KEY', 'Moonshot_API_KEY'],
+        slotEnvNames: {
+            0: ['MOONSHOT_API_KEY'],
+            1: ['MOONSHOT_AGENT_API_KEY'],
+            2: ['MOONSHOT_EXTERNAL_API_KEY']
+        }
     },
     {
         provider: 'kimiCode' as ProviderId,
         label: 'KimiCode',
         secretKey: 'harmony.kimiCode.apiKey',
-        envNames: ['HARMONY_KIMICODE_API_KEY', 'KIMICODE_AGENT_API_KEY', 'KIMICODE_EXTERNAL_API_KEY', 'KIMICODE_API_KEY']
+        envNames: ['HARMONY_KIMICODE_API_KEY', 'KIMICODE_AGENT_API_KEY', 'KIMICODE_EXTERNAL_API_KEY', 'KIMICODE_API_KEY'],
+        slotEnvNames: {
+            0: ['KIMICODE_API_KEY'],
+            1: ['KIMICODE_AGENT_API_KEY'],
+            2: ['KIMICODE_EXTERNAL_API_KEY']
+        }
+    },
+    {
+        provider: 'zhipu' as ProviderId,
+        label: 'Zhipu (Z.AI / GLM)',
+        secretKey: 'harmony.zhipu.apiKey',
+        envNames: ['HARMONY_ZHIPU_API_KEY', 'Z_API_KEY', 'Z_AGENT_API_KEY', 'Z_VISION_API_KEY', 'Z_EXTERNAL_API_KEY'],
+        slotEnvNames: {
+            0: ['Z_API_KEY'],
+            1: ['Z_AGENT_API_KEY'],
+            2: ['Z_EXTERNAL_API_KEY'],
+            3: ['Z_VISION_API_KEY']
+        }
+    },
+    {
+        provider: 'gemini' as ProviderId,
+        label: 'Gemini',
+        secretKey: 'harmony.geminiApiKey',
+        envNames: ['GEMINI_API_KEY'],
+        slotEnvNames: {
+            0: ['GEMINI_API_KEY']
+        }
+    },
+    {
+        provider: 'openrouter' as ProviderId,
+        label: 'OpenRouter',
+        secretKey: 'harmony.openrouter.apiKey',
+        envNames: ['OPENROUTER_API_KEY'],
+        slotEnvNames: {
+            0: ['OPENROUTER_API_KEY']
+        }
+    },
+    {
+        provider: 'openai' as ProviderId,
+        label: 'OpenAI',
+        secretKey: 'harmony.openaiApiKey',
+        envNames: ['openai_api_key', 'OPENAI_API_KEY'],
+        slotEnvNames: {
+            0: ['openai_api_key', 'OPENAI_API_KEY']
+        }
+    },
+    {
+        provider: 'claude' as ProviderId,
+        label: 'Anthropic (Claude)',
+        secretKey: 'harmony.claudeApiKey',
+        envNames: ['Claude', 'CLAUDE_API_KEY', 'ANTHROPIC_API_KEY'],
+        slotEnvNames: {
+            0: ['Claude', 'CLAUDE_API_KEY']
+        }
+    },
+    {
+        provider: 'tencent' as ProviderId,
+        label: 'Tencent / Hunyuan (OpenAI-compatible)',
+        secretKey: 'harmony.tencent.apiKey',
+        envNames: ['HARMONY_TENCENT_API_KEY', 'TENCENT_API_KEY', 'TENCENT_AGENT_API_KEY', 'TENCENT_EXTERNAL_API_KEY', 'TENCENT_VISION_API_KEY']
+    },
+    {
+        provider: 'tencent' as ProviderId,
+        label: 'Tencent / Hunyuan (native SecretId+SecretKey)',
+        secretKey: 'harmony.tencent.secretId',
+        pairedKey: 'harmony.tencent.secretKey',
+        envNames: ['TENCENT_SecretID', 'TENCENT_SecretID_AGENT', 'TENCENT_AGENT_SecretId', 'TENCENT_SecretID_EXTERNAL', 'TENCENT_SecretID_VISION'],
+        pairedEnvNames: ['TENCENT_SecretKey', 'TENCENT_SecretKey_AGENT', 'TENCENT_AGENT_SecretKey', 'TENCENT_SecretKey_EXTERNAL', 'TENCENT_SecretKey_VISION']
     }
 ];
 
@@ -975,6 +1062,12 @@ export function activate(context: vscode.ExtensionContext) {
     initSecrets(context.secrets);
     initBundledCreativePath(context.extensionUri.fsPath);
     loadCreativeToken(context.secrets).catch(() => {});
+    
+    // 0b. One-time migration: legacy single keys → multi-key slot arrays.
+    // Idempotent — skips providers that already have slots.
+    for (const p of PROVIDER_IDS) {
+        migrateLegacyToSlots(context.secrets, p).catch(() => {});
+    }
     
     registerChatHistoryProvider(context);
 
@@ -2642,13 +2735,15 @@ export function activate(context: vscode.ExtensionContext) {
                     ? `Gemini uses the Google Generative Language / AI Studio API key stored as harmony.geminiApiKey; Vertex AI is separate. ${scopeDetail} Free-quota mode: ${freeQuota}. Current ${tier} model: ${modelFor(provider, tier)}.`
                     : provider === 'claude'
                     ? `Uses an Anthropic API key stored as harmony.claudeApiKey for Claude model calls. This is not a Claude.ai account login. ${scopeDetail} Current ${tier} model: ${modelFor(provider, tier)}.`
-                    : provider === 'alibaba' || provider === 'tencent' || provider === 'moonshot'
+                    : provider === 'alibaba' || provider === 'tencent' || provider === 'moonshot' || provider === 'zhipu'
                     ? `${scopeDetail} Import from .env supports uppercase aliases first plus legacy mixed-case aliases. Current ${tier} model: ${modelFor(provider, tier)}.${endpointDetail}`
                     : `${scopeDetail} Current ${tier} model: ${modelFor(provider, tier)}.${endpointDetail}`
             });
         }
-        rows.unshift({ label: 'Endpoint profiles', description: 'DeepSeek / Alibaba / Moonshot', detail: 'Choose regional provider endpoint profiles. Alibaba international covers Singapore/global and US/Virginia unless Alibaba issues a different custom base URL; mainland is China/Beijing.', command: 'harmony.selectProviderEndpointProfile' });
-        rows.unshift({ label: 'Import Provider Keys From .env', description: 'VS Code Secret Storage', detail: 'Imports DeepSeek, Alibaba/Qwen, and Moonshot/Kimi keys into the extension-side store without printing values.', command: 'harmony.importProviderKeysFromEnv' });
+        rows.unshift({ label: 'Endpoint profiles', description: 'DeepSeek / Alibaba / Moonshot / Zhipu', detail: 'Choose regional provider endpoint profiles. Alibaba international covers Singapore/global and US/Virginia unless Alibaba issues a different custom base URL; mainland is China/Beijing.', command: 'harmony.selectProviderEndpointProfile' });
+        rows.unshift({ label: 'Import Provider Keys From .env', description: 'VS Code Secret Storage', detail: 'Imports DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Tencent, and Zhipu/GLM keys into the extension-side store without printing values.', command: 'harmony.importProviderKeysFromEnv' });
+        rows.unshift({ label: 'Set Tencent / Hunyuan API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.tencent.apiKey for primary and Agents routes.', command: 'harmony.setTencentApiKey' });
+        rows.unshift({ label: 'Set Zhipu / GLM API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.zhipu.apiKey for primary and Agents routes.', command: 'harmony.setZhipuApiKey' });
         rows.unshift({ label: 'Set Moonshot / Kimi API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.moonshot.apiKey for primary and Agents routes.', command: 'harmony.setMoonshotApiKey' });
         rows.unshift({ label: 'Set KimiCode API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.kimiCode.apiKey for primary and Agents routes. Separate from Moonshot.', command: 'harmony.setKimiCodeApiKey' });
         rows.unshift({ label: 'Set Alibaba / Qwen API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.alibaba.apiKey for primary and Agents routes.', command: 'harmony.setAlibabaApiKey' });
@@ -2738,7 +2833,9 @@ export function activate(context: vscode.ExtensionContext) {
             const alibabaKeySaved = !!(await context.secrets.get('harmony.alibaba.apiKey'));
             const moonshotKeySaved = !!(await context.secrets.get('harmony.moonshot.apiKey'));
             const kimiCodeKeySaved = !!(await context.secrets.get('harmony.kimiCode.apiKey'));
-            const tencentKeySaved = !!(await context.secrets.get('harmony.tencent.apiKey'));
+            const tencentKeySaved = !!(await context.secrets.get('harmony.tencent.apiKey'))
+                || (!!(await context.secrets.get('harmony.tencent.secretId')) && !!(await context.secrets.get('harmony.tencent.secretKey')));
+            const zhipuKeySaved = !!(await context.secrets.get('harmony.zhipu.apiKey'));
             type AgentPick = vscode.QuickPickItem & { action: 'set' | 'custom' | 'status'; preset?: CollabModelPreset; provider?: CollabDirectProvider; tier?: Tier; modelOverride?: string };
             const picks: AgentPick[] = [
                 { label: 'Auto / Balanced', description: 'Recommended default', detail: 'Uses a coding-tier direct provider when Route needs Harmony. Prefers Gemini only when Gemini free-quota mode is enabled.', action: 'set', preset: 'auto', provider: 'auto', tier: 'coding', picked: currentPreset === 'auto' },
@@ -2753,6 +2850,8 @@ export function activate(context: vscode.ExtensionContext) {
                 { label: 'Alibaba / Qwen3 Max', description: alibabaKeySaved ? 'Alibaba key saved' : 'Alibaba key not saved', detail: 'Sets Agents to Alibaba heavy tier and uses qwen3-max. Premium/cost guards apply.', action: 'set', preset: 'custom', provider: 'alibaba', tier: 'heavy', modelOverride: 'qwen3-max', picked: currentPreset === 'custom' && currentProvider === 'alibaba' && currentTier === 'heavy' && modelFor('alibaba', 'heavy') === 'qwen3-max' },
                 { label: 'Tencent / Hunyuan Turbo', description: tencentKeySaved ? 'Tencent key saved' : 'Tencent key not saved', detail: 'Sets Agents to Tencent coding tier and uses hunyuan-turbos-latest. OpenAI-compatible, good for mainland China users.', action: 'set', preset: 'custom', provider: 'tencent', tier: 'coding', modelOverride: 'hunyuan-turbos-latest', picked: currentPreset === 'custom' && currentProvider === 'tencent' && currentTier === 'coding' && modelFor('tencent', 'coding') === 'hunyuan-turbos-latest' },
                 { label: 'Tencent / Hunyuan Pro', description: tencentKeySaved ? 'Tencent key saved' : 'Tencent key not saved', detail: 'Sets Agents to Tencent heavy tier and uses hunyuan-pro. Premium/cost guards apply.', action: 'set', preset: 'custom', provider: 'tencent', tier: 'heavy', modelOverride: 'hunyuan-pro', picked: currentPreset === 'custom' && currentProvider === 'tencent' && currentTier === 'heavy' && modelFor('tencent', 'heavy') === 'hunyuan-pro' },
+                { label: 'Zhipu / GLM-5.2 Coding', description: zhipuKeySaved ? 'Zhipu key saved' : 'Zhipu key not saved', detail: 'Sets Agents to Zhipu coding tier and uses GLM-5.2. OpenAI-compatible, great for mainland China users.', action: 'set', preset: 'custom', provider: 'zhipu', tier: 'coding', modelOverride: 'glm-5.2', picked: currentPreset === 'custom' && currentProvider === 'zhipu' && currentTier === 'coding' && modelFor('zhipu', 'coding') === 'glm-5.2' },
+                { label: 'Zhipu / GLM-5.2 Heavy', description: zhipuKeySaved ? 'Zhipu key saved' : 'Zhipu key not saved', detail: 'Sets Agents to Zhipu heavy tier and uses GLM-5.2. Premium/cost guards apply.', action: 'set', preset: 'custom', provider: 'zhipu', tier: 'heavy', modelOverride: 'glm-5.2', picked: currentPreset === 'custom' && currentProvider === 'zhipu' && currentTier === 'heavy' && modelFor('zhipu', 'heavy') === 'glm-5.2' },
                 { label: 'Moonshot / Kimi K2.6', description: moonshotKeySaved ? 'Moonshot key saved' : 'Moonshot key not saved', detail: 'Sets Agents to Moonshot coding tier and uses current Kimi K2.6.', action: 'set', preset: 'custom', provider: 'moonshot', tier: 'coding', modelOverride: 'kimi-k2.6', picked: currentPreset === 'custom' && currentProvider === 'moonshot' && currentTier === 'coding' && modelFor('moonshot', 'coding') === 'kimi-k2.6' },
                 { label: 'Custom provider / tier…', description: 'Pick exact provider and tier', detail: 'Use this for DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Gemini, OpenRouter, OpenAI, or Anthropic Claude models.', action: 'custom' },
                 { label: 'Show provider/key status…', description: 'Interactive status', detail: 'Shows which provider keys are saved and how Gemini/AI Studio is wired.', action: 'status' },
@@ -2809,6 +2908,9 @@ export function activate(context: vscode.ExtensionContext) {
             } else if (nextProvider === 'tencent' && !tencentKeySaved) {
                 const action = await vscode.window.showWarningMessage(`${summary} Set a Tencent / Hunyuan API key to enable this route.`, 'Set Tencent / Hunyuan API Key');
                 if (action) await vscode.commands.executeCommand('harmony.setTencentApiKey');
+            } else if (nextProvider === 'zhipu' && !zhipuKeySaved) {
+                const action = await vscode.window.showWarningMessage(`${summary} Set a Zhipu / GLM API key to enable this route.`, 'Set Zhipu / GLM API Key');
+                if (action) await vscode.commands.executeCommand('harmony.setZhipuApiKey');
             } else {
                 vscode.window.showInformationMessage(summary);
             }
@@ -3406,6 +3508,118 @@ export function activate(context: vscode.ExtensionContext) {
     registerProviderKeyCommand('OpenAI', 'harmony.openaiApiKey', 'harmony.setOpenAIApiKey');
     registerProviderKeyCommand('Anthropic API (Claude models)', 'harmony.claudeApiKey', 'harmony.setClaudeApiKey');
     registerProviderKeyCommand('Tencent / Hunyuan', 'harmony.tencent.apiKey', 'harmony.setTencentApiKey');
+    registerProviderKeyCommand('Zhipu / GLM', 'harmony.zhipu.apiKey', 'harmony.setZhipuApiKey');
+
+    // Tencent native auth (SecretId + SecretKey)
+    registerProviderKeyCommand('Tencent Native (SecretId)', 'harmony.tencent.secretId', 'harmony.setTencentSecretId');
+    registerProviderKeyCommand('Tencent Native (SecretKey)', 'harmony.tencent.secretKey', 'harmony.setTencentSecretKey');
+
+    // Multi-key slot setting: set an individual slot (C/A/E/V) for a provider.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('harmony.setProviderSlotKey', async (provider: ProviderId, slotIndex: number) => {
+            if (provider === 'tencent') {
+                vscode.window.showInformationMessage('Tencent uses native SecretId+SecretKey auth — not slot-based.');
+                return;
+            }
+            const slotLabels = ['Chat', 'Agents', 'External', 'Vision'];
+            const label = slotLabels[slotIndex] ?? 'Slot ' + slotIndex;
+            const currentSlots = await getProviderKeys(context.secrets, provider);
+            const currentValue = currentSlots[slotIndex] ?? '';
+            const apiKey = await vscode.window.showInputBox({
+                prompt: `${providerDisplayName(provider)} — ${label} Key (slot ${slotIndex}). Leave empty to clear.`,
+                password: true,
+                ignoreFocusOut: true,
+                value: currentValue ? '(stored — enter new key to replace)' : ''
+            });
+            if (apiKey === undefined) return; // user cancelled
+            const newSlots = [...currentSlots];
+            while (newSlots.length < 4) newSlots.push('');
+            newSlots[slotIndex] = apiKey.trim();
+            await setProviderKeys(context.secrets, provider, newSlots);
+            // Also update legacy key for backward compat if slot 0 changed
+            if (slotIndex === 0 && newSlots[0]) {
+                await context.secrets.store(secretKeyFor(provider), newSlots[0]);
+            }
+            invalidateKeyCache(provider);
+            vscode.window.showInformationMessage(
+                apiKey.trim()
+                    ? `${providerDisplayName(provider)} ${label} key saved.`
+                    : `${providerDisplayName(provider)} ${label} key cleared.`
+            );
+            view.refresh();
+        }),
+        // Multi-key slot editor: opens a webview panel to edit all 4 slots at once.
+        vscode.commands.registerCommand('harmony.editProviderSlots', async (provider: ProviderId) => {
+            if (provider === 'tencent') {
+                vscode.window.showInformationMessage('Tencent uses native SecretId+SecretKey auth — not slot-based.');
+                return;
+            }
+            const currentSlots = await getProviderKeys(context.secrets, provider);
+            const panel = vscode.window.createWebviewPanel(
+                'harmonySlotEditor',
+                `${providerDisplayName(provider)} — Key Slots`,
+                vscode.ViewColumn.One,
+                { enableScripts: true, retainContextWhenHidden: true }
+            );
+            const slotLabels = ['Chat', 'Agents', 'External', 'Vision'];
+            const hasValueFlags = currentSlots.map(s => !!s);
+            panel.webview.html = `<!DOCTYPE html>
+<html><head><style>
+  body { font-family: var(--vscode-font-family); padding: 16px; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+  h2 { margin: 0 0 12px; }
+  .hint { opacity: 0.7; font-size: 12px; margin-bottom: 16px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 4px; }
+  .field input { width: 100%; padding: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 3px; font-family: monospace; }
+  .field .status { font-size: 11px; margin-top: 2px; }
+  .set { color: var(--vscode-charts-green); }
+  .empty { color: var(--vscode-descriptionForeground); }
+  .actions { margin-top: 16px; display: flex; gap: 8px; }
+  button { padding: 6px 14px; border: none; border-radius: 3px; cursor: pointer; }
+  .save { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .save:hover { background: var(--vscode-button-hoverBackground); }
+  .cancel { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+</style></head><body>
+<h2>${providerDisplayName(provider)} — Key Slots</h2>
+<div class="hint">Paste API keys for each slot. Leave a field empty to clear it. Slot 0 (Chat) is the default key all others fall back to.</div>
+${slotLabels.map((label, i) => `
+<div class="field">
+  <label>Slot ${i}: ${label} Key</label>
+  <input type="password" id="slot${i}" placeholder="${hasValueFlags[i] ? '(stored — enter new key to replace)' : 'Paste ' + label + ' key\u2026'}" autocomplete="off">
+  <div class="status ${hasValueFlags[i] ? 'set' : 'empty'}">${hasValueFlags[i] ? '\u2713 Key set' : '\u25CB Not set (falls back to Chat key)'}</div>
+</div>`).join('')}
+<div class="actions">
+  <button class="save" id="save">Save All Slots</button>
+  <button class="cancel" id="cancel">Cancel</button>
+</div>
+<script>
+const vscode = acquireVsCodeApi();
+document.getElementById('save').addEventListener('click', () => {
+  const keys = [0,1,2,3].map(i => document.getElementById('slot'+i).value.trim());
+  vscode.postMessage({ type: 'saveSlots', provider: '${provider}', keys });
+});
+document.getElementById('cancel').addEventListener('click', () => {
+  vscode.postMessage({ type: 'cancel' });
+});
+<\/script>
+</body></html>`;
+            panel.webview.onDidReceiveMessage(async (msg) => {
+                if (msg.type === 'cancel') {
+                    panel.dispose();
+                } else if (msg.type === 'saveSlots' && msg.provider === provider) {
+                    const keys: string[] = Array.isArray(msg.keys) ? msg.keys : [];
+                    await setProviderKeys(context.secrets, provider, keys);
+                    if (keys[0]) {
+                        await context.secrets.store(secretKeyFor(provider as ProviderId), keys[0]);
+                    }
+                    invalidateKeyCache(provider as ProviderId);
+                    panel.dispose();
+                    vscode.window.showInformationMessage(`${providerDisplayName(provider as ProviderId)} key slots saved.`);
+                    view.refresh();
+                }
+            });
+        })
+    );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.importProviderKeysFromEnv', async () => {
@@ -3446,22 +3660,62 @@ export function activate(context: vscode.ExtensionContext) {
             const imported: string[] = [];
             const missing: string[] = [];
             for (const spec of PROVIDER_ENV_IMPORTS) {
+                // ── Multi-key slot import (new system) ──
+                if (spec.slotEnvNames && spec.provider !== 'tencent') {
+                    const slots: string[] = ['', '', '', ''];
+                    let anySlotFilled = false;
+                    for (const [slotIdx, envVars] of Object.entries(spec.slotEnvNames)) {
+                        const idx = Number(slotIdx);
+                        if (idx >= 0 && idx < 4) {
+                            const envName = (envVars as string[]).find(name => entries.has(name));
+                            if (envName && entries.get(envName)) {
+                                slots[idx] = entries.get(envName)!;
+                                anySlotFilled = true;
+                            }
+                        }
+                    }
+                    if (anySlotFilled) {
+                        await setProviderKeys(context.secrets, spec.provider, slots);
+                        // Also store legacy single key for backward compat
+                        if (slots[0]) {
+                            await context.secrets.store(spec.secretKey, slots[0]);
+                        }
+                        const slotLabels = slots.map((v, i) => v ? `${['Chat','Agents','External','Vision'][i]}: ${v.slice(0,8)}…` : '').filter(Boolean);
+                        imported.push(`${spec.label} (${slotLabels.length} keys: ${slotLabels.join(', ')})`);
+                        continue;
+                    }
+                }
+                // ── Legacy single-key import ──
                 const envName = spec.envNames.find(name => entries.has(name));
                 const value = envName ? entries.get(envName) : undefined;
                 if (envName && value) {
                     await context.secrets.store(spec.secretKey, value);
+                    // Handle paired key (e.g. Tencent SecretId + SecretKey)
+                    if (spec.pairedKey && spec.pairedEnvNames) {
+                        const pairedEnvName = spec.pairedEnvNames.find(name => entries.has(name));
+                        const pairedValue = pairedEnvName ? entries.get(pairedEnvName) : undefined;
+                        if (pairedEnvName && pairedValue) {
+                            await context.secrets.store(spec.pairedKey, pairedValue);
+                            imported.push(`${spec.label} (${envName} + ${pairedEnvName})`);
+                            continue;
+                        }
+                    }
                     imported.push(`${spec.label} (${envName})`);
                 } else {
-                    missing.push(`${spec.label}: ${spec.envNames.join(', ')}`);
+                    const label = spec.pairedEnvNames
+                        ? `${spec.label}: ${spec.envNames.join(', ')} | paired: ${spec.pairedEnvNames.join(', ')}`
+                        : `${spec.label}: ${spec.envNames.join(', ')}`;
+                    missing.push(label);
                 }
             }
 
+            invalidateKeyCache();
             view.refresh();
             if (imported.length) {
                 vscode.window.showInformationMessage(`Harmony imported ${imported.join(' and ')} into VS Code Secret Storage. Values were not printed.`);
             }
             if (!imported.length) {
-                vscode.window.showWarningMessage(`Harmony did not find DeepSeek, Alibaba/Qwen, or Moonshot/Kimi keys in ${selected.fsPath}. Looked for: ${missing.join(' | ')}`);
+                vscode.window.showWarningMessage(`Harmony did not find any provider keys in ${selected.fsPath}. Looked for: ${missing.join(' | ')}`);
             }
             return { status: imported.length ? 'imported' : 'missing', filePath: selected.fsPath, imported, missing };
         })

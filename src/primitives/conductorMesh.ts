@@ -205,9 +205,7 @@ export class ConductorMeshTool extends BasePrimitive<MeshInput> {
         options: vscode.LanguageModelToolInvocationOptions<MeshInput>,
         _token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelToolResult> {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
-
+        this.requireFields(options.input as any, ['action']);
         const { action, mesh_name, project_path, min_confidence = 0.3, max_age_days = 90, query, conflict_resolution, export_format = 'json' } = options.input;
         const root = workspaceRoot();
         if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));

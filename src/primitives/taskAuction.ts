@@ -25,8 +25,7 @@ interface TAuctionInput { action: 'bid' | 'record' | 'stats'; task_type?: string
 export class TaskAuctionTool extends BasePrimitive<TAuctionInput> {
     constructor() { super('task-auction'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<TAuctionInput>, _token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, task_type, bids, record, min_bid_threshold = 3 } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const dir = safeHarmonyDir(root, 'task-auction'); await ensureDir(dir);
