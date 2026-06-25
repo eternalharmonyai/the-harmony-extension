@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
 import { recordUsage, recordFallbackEvent, evaluateProviderPolicy, recordProviderPolicyBlock } from './costTracker';
 import { recordHealth, rankProviders, isHealthy } from './providerHealth';
 
@@ -24,6 +25,10 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'kimi-latest': 8192,
     'hunyuan-pro': 8192,
     'hunyuan-turbos': 32768,
+    'glm-5.1': 131072,
+    'glm-5.2': 131072,
+    'glm-4-flash': 131072,
+    'glm-4-plus': 131072,
 };
 
 /** Fallback model max tokens when model not in the map. */
@@ -68,7 +73,7 @@ const OPENROUTER_FREE_FALLBACKS: string[] = [
  * primary model (Copilot / DeepSeek) is configured separately.
  */
 
-export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent';
+export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu';
 export type Tier = 'light' | 'mid' | 'heavy' | 'coding';
 export type CollabModelPreset = 'auto' | 'economy' | 'balanced' | 'power' | 'custom';
 export type CollabDirectProvider = ProviderId | 'auto';
@@ -81,9 +86,10 @@ const ALIBABA_INTERNATIONAL_BASE_URL = 'https://dashscope-intl.aliyuncs.com/comp
 const ALIBABA_MAINLAND_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const TENCENT_INTERNATIONAL_BASE_URL = 'https://api.hunyuan.cloud.tencent.com/v1';
 const TENCENT_MAINLAND_BASE_URL = 'https://hunyuan.tencentcloudapi.com/v1';
+const ZHIPU_DEFAULT_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
 
 export interface ProviderEndpointInfo {
-    provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent'>;
+    provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu'>;
     profile: ProviderEndpointProfile;
     label: string;
     baseUrl?: string;
@@ -154,6 +160,12 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         mid: 'claude-sonnet-4',
         heavy: 'claude-opus-4',
         coding: 'claude-sonnet-4'
+    },
+    zhipu: {
+        light: 'glm-5.1',
+        mid: 'glm-5.2',
+        heavy: 'glm-5.2',
+        coding: 'glm-5.2'
     }
 };
 
@@ -166,10 +178,11 @@ const SECRET_KEY: Record<ProviderId, string> = {
     openrouter: 'harmony.openrouter.apiKey',
     openai: 'harmony.openaiApiKey',
     claude: 'harmony.claudeApiKey',
-    tencent: 'harmony.tencent.apiKey'
+    tencent: 'harmony.tencent.apiKey',
+    zhipu: 'harmony.zhipu.apiKey'
 };
 
-export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude'];
+export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'zhipu'];
 const FREE_QUOTA_PROVIDER_IDS: ProviderId[] = ['gemini', 'deepseek', 'alibaba', 'moonshot', 'kimiCode', 'openrouter', 'openai', 'claude'];
 
 export function isProviderId(value: string | undefined): value is ProviderId {
@@ -188,6 +201,7 @@ export function providerDisplayName(provider: CollabDirectProvider): string {
         case 'openai': return 'OpenAI';
         case 'claude': return 'Anthropic (Claude models)';
         case 'tencent': return 'Tencent / Hunyuan';
+        case 'zhipu': return 'Zhipu (Z.AI / GLM)';
     }
 }
 
@@ -206,7 +220,7 @@ function configuredEndpointProfile(key: string, fallback: ProviderEndpointProfil
     return raw && allowed.includes(raw as ProviderEndpointProfile) ? raw as ProviderEndpointProfile : fallback;
 }
 
-export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent'>): ProviderEndpointInfo {
+export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu'>): ProviderEndpointInfo {
     if (provider === 'deepseek') {
         const profile = configuredEndpointProfile('deepseek.endpointProfile', 'default', ['default', 'custom']);
         const custom = explicitConfigString('deepseekBaseUrl');
@@ -335,10 +349,25 @@ export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 
             detail: 'Uses the international Hunyuan OpenAI-compatible endpoint. Accessible globally; uses Tencent Cloud API key authentication.'
         };
     }
+    // --- Zhipu (Z.AI / GLM) ---
+    if (provider === 'zhipu') {
+        const profile = configuredEndpointProfile('zhipu.endpointProfile', 'default', ['default', 'custom']);
+        const custom = explicitConfigString('zhipu.baseUrl');
+        const baseUrl = profile === 'custom' && custom.value ? custom.value : ZHIPU_DEFAULT_BASE_URL;
+        return {
+            provider,
+            profile,
+            label: profile === 'custom' ? 'Zhipu custom endpoint' : 'Zhipu default endpoint',
+            baseUrl: baseUrl.replace(/\/$/, ''),
+            baseUrlSetting: 'harmony.zhipu.baseUrl',
+            needsCustomBaseUrl: false,
+            detail: profile === 'custom' ? 'Uses harmony.zhipu.baseUrl.' : 'Uses the standard Zhipu (Z.AI) OpenAI-compatible endpoint.'
+        };
+    }
     throw new Error(`Unsupported endpoint provider: ${provider}`);
 }
 
-export function providerBaseUrlForCall(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent'>): string {
+export function providerBaseUrlForCall(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu'>): string {
     const endpoint = providerEndpointInfo(provider);
     if (!endpoint.baseUrl) {
         throw new Error(`${providerDisplayName(provider)} endpoint profile "${endpoint.profile}" needs a custom base URL. Set ${endpoint.baseUrlSetting} to the provider-issued regional URL.`);
@@ -403,6 +432,99 @@ export function modelFor(provider: ProviderId, tier: Tier): string {
     return PROVIDER_DEFAULTS[provider][tier];
 }
 
+// ── Multi-Key Slot Architecture ──────────────────────────────────────────
+// Each provider stores one JSON array under harmony.{provider}.keys.
+// Slots: 0=Chat, 1=Agents, 2=External, 3=Vision.
+// One SecretStorage read per provider lookup — not 4 separate IPC calls.
+// Tencent is excluded from slots (native SecretId+SecretKey dual-auth).
+
+export const KEY_SLOTS = ['chat', 'agents', 'external', 'vision'] as const;
+const KEY_SLOT_COUNT = 4;
+
+/** SecretStorage key for the multi-key JSON blob. */
+function slotStorageKey(provider: ProviderId): string {
+    return `harmony.${provider}.keys`;
+}
+
+/** Read all 4 slots for a provider. Returns empty array if nothing stored. */
+export async function getProviderKeys(secrets: vscode.SecretStorage, provider: ProviderId): Promise<string[]> {
+    const raw = await secrets.get(slotStorageKey(provider));
+    if (!raw) return [];
+    try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+            const trimmed = parsed.map((v: unknown) => typeof v === 'string' ? v.trim() : '');
+            while (trimmed.length < KEY_SLOT_COUNT) trimmed.push('');
+            return trimmed.slice(0, KEY_SLOT_COUNT);
+        }
+    } catch { /* corrupt JSON — treat as missing */ }
+    return [];
+}
+
+/** Store the 4-slot array for a provider. */
+export async function setProviderKeys(secrets: vscode.SecretStorage, provider: ProviderId, keys: string[]): Promise<void> {
+    const trimmed = keys.map(k => (k ?? '').trim());
+    while (trimmed.length < KEY_SLOT_COUNT) trimmed.push('');
+    await secrets.store(slotStorageKey(provider), JSON.stringify(trimmed.slice(0, KEY_SLOT_COUNT)));
+}
+
+/**
+ * Resolve a single key for a provider with the full fallback chain:
+ *   1. Specific slot (if index given and non-empty)
+ *   2. Default slot [0]
+ *   3. Legacy single key (harmony.{provider}ApiKey)
+ *   4. .env (process.env)
+ * Returns empty string if nothing found. Tencent is handled separately.
+ */
+export async function resolveProviderKey(
+    secrets: vscode.SecretStorage, provider: ProviderId, slotIndex?: number
+): Promise<string> {
+    if (provider === 'tencent') {
+        // Tencent uses native dual-auth — not slot-based
+        return (await secrets.get(SECRET_KEY.tencent)) ?? '';
+    }
+    const slots = await getProviderKeys(secrets, provider);
+    // 1. Specific slot
+    if (slotIndex !== undefined && slotIndex >= 0 && slotIndex < KEY_SLOT_COUNT && slots[slotIndex]) {
+        return slots[slotIndex];
+    }
+    // 2. Default slot
+    if (slots[0]) return slots[0];
+    // 3. Legacy key
+    const legacy = await secrets.get(SECRET_KEY[provider]);
+    if (legacy) return legacy.trim();
+    // 4. .env fallback
+    return '';
+}
+
+/** Count non-empty slots for a provider. Used by sidebar indicators. */
+export async function countProviderKeys(secrets: vscode.SecretStorage, provider: ProviderId): Promise<number> {
+    if (provider === 'tencent') {
+        const sid = await secrets.get('harmony.tencent.secretId');
+        const sk = await secrets.get('harmony.tencent.secretKey');
+        return (sid && sk) ? 1 : 0;
+    }
+    const slots = await getProviderKeys(secrets, provider);
+    let count = 0;
+    for (const s of slots) { if (s) count++; }
+    return count;
+}
+
+/**
+ * Migrate a legacy single-key SecretStorage entry into the multi-key slot array.
+ * Runs once per provider on activate. Idempotent — skips if slots already exist.
+ * The legacy key becomes slot[0] (default); it is NOT deleted for safety.
+ */
+export async function migrateLegacyToSlots(secrets: vscode.SecretStorage, provider: ProviderId): Promise<boolean> {
+    if (provider === 'tencent') return false; // Tencent excluded
+    const existingSlots = await getProviderKeys(secrets, provider);
+    if (existingSlots.length > 0 && existingSlots.some(s => s)) return false; // already migrated
+    const legacy = await secrets.get(SECRET_KEY[provider]);
+    if (!legacy) return false;
+    await setProviderKeys(secrets, provider, [legacy.trim(), '', '', '']);
+    return true;
+}
+
 // ── Provider key caching ─────────────────────────────────────────────────
 // OS keychain reads (especially on Windows) are expensive (~50-200ms each).
 // Cache results for 30s to prevent re-reading keys on every sidebar refresh.
@@ -414,10 +536,27 @@ export async function hasKey(secrets: vscode.SecretStorage, provider: ProviderId
     if (cached && Date.now() - cached.ts < KEY_CACHE_TTL_MS) {
         return cached.value;
     }
+    // Check multi-key slots first (new system)
+    if (provider !== 'tencent') {
+        const slots = await getProviderKeys(secrets, provider);
+        if (slots.some(s => !!s)) {
+            keyCache.set(provider, { value: true, ts: Date.now() });
+            return true;
+        }
+    }
+    // Fall back to legacy single key
     const k = await secrets.get(SECRET_KEY[provider]);
-    const value = !!k;
-    keyCache.set(provider, { value, ts: Date.now() });
-    return value;
+    if (k) { keyCache.set(provider, { value: true, ts: Date.now() }); return true; }
+    // Tencent dual auth: also check native SecretId+SecretKey
+    if (provider === 'tencent') {
+        const sid = await secrets.get('harmony.tencent.secretId');
+        const sk = await secrets.get('harmony.tencent.secretKey');
+        const hasNative = !!(sid && sk);
+        keyCache.set(provider, { value: hasNative, ts: Date.now() });
+        return hasNative;
+    }
+    keyCache.set(provider, { value: false, ts: Date.now() });
+    return false;
 }
 
 /** Invalidate the key cache (call after user sets/changes a provider key). */
@@ -443,6 +582,8 @@ export interface ConsultRequest {
     system?: string;
     /** Hard cap on output tokens. */
     maxTokens?: number;
+    /** Multi-key slot index: 0=Chat (default), 1=Agents, 2=External, 3=Vision. */
+    slotIndex?: number;
 }
 
 export interface ConsultResponse {
@@ -472,11 +613,22 @@ export async function consult(
         recordProviderPolicyBlock(req.provider, tier, model, reason);
         throw new Error(`Provider policy blocked ${req.provider}/${tier}/${model}: ${reason}`);
     }
-    const apiKey = await secrets.get(SECRET_KEY[req.provider]);
+    const apiKey = await resolveProviderKey(secrets, req.provider, req.slotIndex);
+    // Tencent supports dual auth: single API key OR native SecretId+SecretKey
     if (!apiKey) {
-        throw new Error(
-            `No API key for ${req.provider}. Run "Harmony: Set ${capitalize(req.provider)} API Key" from the Command Palette.`
-        );
+        if (req.provider === 'tencent') {
+            const tkSid = await secrets.get('harmony.tencent.secretId');
+            const tkSkey = await secrets.get('harmony.tencent.secretKey');
+            if (!tkSid || !tkSkey) {
+                throw new Error(
+                    `No Tencent credentials found. Set harmony.tencent.apiKey (OpenAI-compatible) or harmony.tencent.secretId + harmony.tencent.secretKey (native auth).`
+                );
+            }
+        } else {
+            throw new Error(
+                `No API key for ${req.provider}. Run "Harmony: Set ${capitalize(req.provider)} API Key" from the Command Palette.`
+            );
+        }
     }
     
     const system = req.system ?? 'You are a helpful assistant. Be concise and direct.';
@@ -491,9 +643,18 @@ export async function consult(
     const startedAt = Date.now();
     
     const attemptCall = async (provider: ProviderId, fallbackModel?: string): Promise<ConsultResponse> => {
-        const pKey = await secrets.get(SECRET_KEY[provider]);
-        if (!pKey) throw new Error(`No API key for ${provider}. Run "Harmony: Set ${capitalize(provider)} API Key" from the Command Palette.`);
-        const pModel = fallbackModel ?? modelFor(provider, tier);
+        const rawKey = await resolveProviderKey(secrets, provider);
+        // Tencent dual auth: key may be missing but native creds may exist
+        if (!rawKey && provider !== 'tencent') {
+            throw new Error(`No API key for ${provider}. Run "Harmony: Set ${capitalize(provider)} API Key" from the Command Palette.`);
+        }
+        if (!rawKey && provider === 'tencent') {
+            const tkSid2 = await secrets.get('harmony.tencent.secretId');
+            const tkSkey2 = await secrets.get('harmony.tencent.secretKey');
+            if (!tkSid2 || !tkSkey2) throw new Error(`No Tencent credentials for fallback.`);
+        }
+        const pKey = rawKey!; // Narrowed by the guards above
+        const pModel: string = fallbackModel ?? modelFor(provider, tier);
         const pPolicy = evaluateProviderPolicy(provider, tier, pModel, { includeModelFilters: provider !== 'openrouter' });
         if (!pPolicy.allowed) {
             const reason = pPolicy.reason ?? 'Provider policy blocked this call.';
@@ -541,8 +702,22 @@ export async function consult(
                 return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'alibaba');
             }
             case 'tencent': {
-                const baseUrl = providerBaseUrlForCall('tencent');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'tencent');
+                // Try OpenAI-compatible single-key first, fall back to native SecretId+SecretKey
+                const tkCompat = await secrets.get('harmony.tencent.apiKey');
+                if (tkCompat) {
+                    const baseUrl = providerBaseUrlForCall('tencent');
+                    return await openaiCompat(tkCompat, baseUrl, pModel, system, req.question, maxTokens, token, 'tencent');
+                }
+                const tkSid = await secrets.get('harmony.tencent.secretId');
+                const tkSkey = await secrets.get('harmony.tencent.secretKey');
+                if (tkSid && tkSkey) {
+                    return await tencentNativeCall(tkSid, tkSkey, pModel, system, req.question, maxTokens, token);
+                }
+                throw new Error(`No Tencent credentials found. Set harmony.tencent.apiKey for OpenAI-compatible or harmony.tencent.secretId + harmony.tencent.secretKey for native auth.`);
+            }
+            case 'zhipu': {
+                const baseUrl = providerBaseUrlForCall('zhipu');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'zhipu');
             }
             default:
                 throw new Error(`Unsupported provider: ${provider}`);
@@ -939,6 +1114,13 @@ export async function discoverModels(
                 headers['Authorization'] = `Bearer ${apiKey}`;
                 break;
             }
+            case 'zhipu': {
+                const cfg = vscode.workspace.getConfiguration('harmony');
+                const baseUrl = (cfg.get<string>('zhipu.baseUrl') ?? ZHIPU_DEFAULT_BASE_URL).replace(/\/$/, '');
+                url = `${baseUrl}/models`;
+                headers['Authorization'] = `Bearer ${apiKey}`;
+                break;
+            }
         }
         const r = await fetch(url, { method: 'GET', headers, signal: controller.signal as any });
         const text = await r.text();
@@ -957,4 +1139,163 @@ export async function discoverModels(
         clearTimeout(timer);
         sub.dispose();
     }
+}
+
+// ── Tencent Cloud API v3 Native Auth (HMAC-SHA256) ──
+
+const TENCENT_NATIVE_HOST = 'hunyuan.tencentcloudapi.com';
+const TENCENT_NATIVE_SERVICE = 'hunyuan';
+const TENCENT_NATIVE_REGION = 'ap-guangzhou';
+const TENCENT_NATIVE_VERSION = '2023-09-01';
+
+function sha256Hex(data: string): string {
+    return crypto.createHash('sha256').update(data, 'utf8').digest('hex');
+}
+
+function hmacSha256(key: Buffer | string, data: string): Buffer {
+    return crypto.createHmac('sha256', key).update(data, 'utf8').digest();
+}
+
+function tencentSignV3(secretId: string, secretKey: string, payload: string, timestamp: number): { authorization: string; headers: Record<string, string> } {
+    const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
+    const algorithm = 'TC3-HMAC-SHA256';
+
+    // Step 1: Canonical Request
+    const httpRequestMethod = 'POST';
+    const canonicalUri = '/';
+    const canonicalQueryString = '';
+    const canonicalHeaders = `content-type:application/json\nhost:${TENCENT_NATIVE_HOST}\n`;
+    const signedHeaders = 'content-type;host';
+    const hashedRequestPayload = sha256Hex(payload);
+    const canonicalRequest = [
+        httpRequestMethod,
+        canonicalUri,
+        canonicalQueryString,
+        canonicalHeaders,
+        signedHeaders,
+        hashedRequestPayload
+    ].join('\n');
+
+    // Step 2: String to Sign
+    const credentialScope = `${date}/${TENCENT_NATIVE_SERVICE}/tc3_request`;
+    const hashedCanonicalRequest = sha256Hex(canonicalRequest);
+    const stringToSign = [
+        algorithm,
+        String(timestamp),
+        credentialScope,
+        hashedCanonicalRequest
+    ].join('\n');
+
+    // Step 3: Signature
+    const secretDate = hmacSha256(`TC3${secretKey}`, date);
+    const secretService = hmacSha256(secretDate, TENCENT_NATIVE_SERVICE);
+    const secretSigning = hmacSha256(secretService, 'tc3_request');
+    const signature = hmacSha256(secretSigning, stringToSign).toString('hex');
+
+    // Step 4: Authorization header
+    const authorization = `${algorithm} Credential=${secretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+    return {
+        authorization,
+        headers: {
+            'Authorization': authorization,
+            'Content-Type': 'application/json',
+            'Host': TENCENT_NATIVE_HOST,
+            'X-TC-Action': 'ChatCompletions',
+            'X-TC-Version': TENCENT_NATIVE_VERSION,
+            'X-TC-Region': TENCENT_NATIVE_REGION,
+            'X-TC-Timestamp': String(timestamp)
+        }
+    };
+}
+
+/**
+ * Call Tencent Hunyuan via native Cloud API v3 (SecretId + SecretKey HMAC signing).
+ * Endpoint: POST https://hunyuan.tencentcloudapi.com/
+ * This is the non-OpenAI-compatible path for mainland/international Tencent accounts.
+ */
+async function tencentNativeCall(
+    secretId: string,
+    secretKey: string,
+    model: string,
+    system: string,
+    question: string,
+    maxTokens: number,
+    token: vscode.CancellationToken
+): Promise<ConsultResponse> {
+    const controller = new AbortController();
+    const sub = token.onCancellationRequested(() => controller.abort());
+    const timeoutMs = computeTimeout(maxTokens);
+    const timeoutId = setTimeout(() => controller.abort(new Error(`Tencent native request timed out after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
+    try {
+        const payload = JSON.stringify({
+            Model: model,
+            Messages: [
+                { Role: 'system', Content: system },
+                { Role: 'user', Content: question }
+            ],
+            Stream: true
+        });
+        const timestamp = Math.floor(Date.now() / 1000);
+        const { headers } = tencentSignV3(secretId, secretKey, payload, timestamp);
+
+        const url = `https://${TENCENT_NATIVE_HOST}/`;
+        const r = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: payload,
+            signal: controller.signal as any
+        });
+        if (!r.ok) {
+            const errText = await r.text();
+            throw new Error(`Tencent native HTTP ${r.status}: ${errText.slice(0, 1200)}`);
+        }
+        // Parse SSE stream (Tencent native also uses SSE)
+        const rawStream = await r.text();
+        const lines = rawStream.split('\n');
+        let content = '';
+        let usage: any = undefined;
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data:')) continue;
+            const data = trimmed.slice(5).trim();
+            if (data === '[DONE]') continue;
+            try {
+                const chunk = JSON.parse(data);
+                // Tencent native response format: Choices[0].Delta.Content
+                const delta = chunk?.Response?.Choices?.[0]?.Delta?.Content
+                    ?? chunk?.Choices?.[0]?.Delta?.Content
+                    ?? chunk?.choices?.[0]?.delta?.content;
+                if (typeof delta === 'string') content += delta;
+                // Try native usage format first, then OpenAI-compatible
+                const u = chunk?.Response?.Usage ?? chunk?.Usage ?? chunk?.usage;
+                if (u) usage = u;
+            } catch { /* skip malformed SSE chunks */ }
+        }
+        return {
+            provider: 'tencent',
+            model,
+            text: content,
+            usage: usage ? {
+                promptTokens: usage.PromptTokens ?? usage.prompt_tokens ?? usage.InputTokens ?? 0,
+                completionTokens: usage.CompletionTokens ?? usage.completion_tokens ?? usage.OutputTokens ?? 0
+            } : undefined
+        };
+    } finally {
+        clearTimeout(timeoutId);
+        sub.dispose();
+    }
+}
+
+/**
+ * Get the Tencent auth method to use based on available credentials.
+ * Returns 'openai-compat' for single API key, 'native' for SecretId+SecretKey, or 'none'.
+ */
+async function tencentAuthMethod(secrets: vscode.SecretStorage): Promise<'openai-compat' | 'native' | 'none'> {
+    const apiKey = await secrets.get('harmony.tencent.apiKey');
+    if (apiKey) return 'openai-compat';
+    const secretId = await secrets.get('harmony.tencent.secretId');
+    const secretKey = await secrets.get('harmony.tencent.secretKey');
+    if (secretId && secretKey) return 'native';
+    return 'none';
 }

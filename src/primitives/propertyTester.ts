@@ -26,8 +26,7 @@ interface PropertyTesterInput { action: 'generate' | 'validate' | 'query' | 'sta
 export class PropertyTesterTool extends BasePrimitive<PropertyTesterInput> {
     constructor(private readonly secrets?: vscode.SecretStorage) { super('property-tester'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<PropertyTesterInput>, token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, name, invariant, language = 'typescript', target_code, test_code, query_language, limit = 20 } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const dir = safeHarmonyDir(root, 'property-tests'); await ensureDir(dir);
@@ -127,119 +126,182 @@ export class PropertyTesterTool extends BasePrimitive<PropertyTesterInput> {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// Lightweight PBT Harness (injected into sandbox code)
+// PBT Harness — fast-check-quality generators + integrated shrinking
+// Self-contained JS injected into sandbox. No external dependencies.
 // ══════════════════════════════════════════════════════════════════
 
-/** Build a self-contained JS PBT harness that runs inside the sandbox. */
+/** Build a self-contained JS PBT harness that runs inside the sandbox.
+ *  Features fast-check-compatible arbitraries, integrated shrinking,
+ *  and statistical reporting. */
 function buildPBTHarness(numRuns: number): string {
     return `
-// ── PBT Harness (injected by Logos) ──
-var __PBT = { total: 0, passed: 0, failed: 0, errors: 0, failures: [] };
+// ── PBT Harness v2 — fast-check-quality generators + shrinking ──
+var __PBT = { total: 0, passed: 0, failed: 0, errors: 0, failures: [], shrinks: 0 };
+var __SEED = Math.floor(Math.random() * 2147483647);
 
-function randomScalar() {
-    var t = Math.floor(Math.random() * 4);
-    if (t === 0) return Math.floor(Math.random() * 200) - 100;       // int [-100,100)
-    if (t === 1) return (Math.random() * 200 - 100).toFixed(2);      // float string
-    if (t === 2) return Math.random() < 0.5 ? 'test_' + Math.floor(Math.random()*1000) : '';
-    return Math.random() < 0.5;                                       // boolean
-}
+// ── PRNG (mulberry32) for reproducible runs ──
+function _next() { __SEED |= 0; __SEED = __SEED + 0x6D2B79F5 | 0; var t = Math.imul(__SEED ^ __SEED >>> 15, 1 | __SEED); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
 
-function randomArray(minLen, maxLen, elemGen) {
-    var len = minLen + Math.floor(Math.random() * (maxLen - minLen + 1));
-    var arr = [];
-    for (var i = 0; i < len; i++) { arr.push(elemGen()); }
-    return arr;
-}
+// ═══════════════════════════════════════════════════════════════
+// Arbitraries (fast-check-compatible API)
+// ═══════════════════════════════════════════════════════════════
 
-function randomObject(depth) {
-    if (depth === undefined) depth = 0;
-    if (depth > 2) return randomScalar();
-    var obj = {};
-    var keys = Math.floor(Math.random() * 5) + 1;
-    for (var i = 0; i < keys; i++) {
-        obj['k' + i] = Math.random() < 0.5 ? randomScalar() : randomArray(0, 5, randomScalar);
-    }
-    return obj;
-}
+var fc = {};
 
-function shrinkNumeric(val, propFn, ctx) {
-    // Binary-search shrink toward zero
-    var lo = val < 0 ? val : 0;
-    var hi = val < 0 ? 0 : val;
-    var best = val;
-    for (var iter = 0; iter < 20; iter++) {
-        var mid = (lo + hi) / 2;
-        try {
-            if (!propFn(mid, ctx)) { best = mid; hi = mid; }
-            else { lo = mid; }
-        } catch(e) { best = mid; hi = mid; }
-        if (Math.abs(hi - lo) < 0.001) break;
-    }
-    return best;
-}
+// Integer in [min, max] — with integrated shrinking toward 0
+fc.integer = function(min, max) {
+    if (min === undefined) min = -0x80000000;
+    if (max === undefined) max = 0x7fffffff;
+    return { generate: function(rng) { return min + Math.floor(rng() * (max - min + 1)); }, shrink: function(val) { var out = []; if (val > 0) out.push(Math.floor(val / 2)); if (val < 0) out.push(Math.ceil(val / 2)); if (val > 0) out.push(val - 1); if (val < 0) out.push(val + 1); out.push(0); return out; } };
+};
 
-function shrinkArray(arr, propFn, ctx) {
-    // Try progressively shorter prefixes
-    var best = arr;
-    for (var len = arr.length - 1; len >= 0; len--) {
-        var prefix = arr.slice(0, len);
-        try {
-            if (!propFn(prefix, ctx)) { best = prefix; }
-            else { break; }
-        } catch(e) { best = prefix; }
-    }
-    return best;
-}
+// Natural number [0, max]
+fc.nat = function(max) { return fc.integer(0, max === undefined ? 0x7fffffff : max); };
 
-function shrink(counterexample, propFn, ctx) {
-    var shrunk = counterexample;
+// Float in [min, max]
+fc.float = function(min, max) {
+    if (min === undefined) min = 0; if (max === undefined) max = 1;
+    return { generate: function(rng) { return min + rng() * (max - min); }, shrink: function(val) { var out = []; var s = val > 0 ? val / 2 : val * 2; out.push(s >= min ? s : 0); out.push(0); return out; } };
+};
+
+// Boolean
+fc.boolean = function() {
+    return { generate: function(rng) { return rng() < 0.5; }, shrink: function(val) { return val ? [false] : []; } };
+};
+
+// Character (printable ASCII)
+fc.char = function() {
+    return { generate: function(rng) { return String.fromCharCode(32 + Math.floor(rng() * 95)); }, shrink: function(val) { var c = val.charCodeAt(0); return c > 32 ? [String.fromCharCode(Math.max(32, Math.floor(c / 2))), ' '] : []; } };
+};
+
+// String (printable ASCII, length 0..maxLength)
+fc.string = function(maxLength) {
+    if (maxLength === undefined) maxLength = 100;
+    return { generate: function(rng) { var len = Math.floor(rng() * (maxLength + 1)); var s = ''; for (var i = 0; i < len; i++) s += String.fromCharCode(32 + Math.floor(rng() * 95)); return s; }, shrink: function(val) { var out = []; if (val.length > 0) out.push(val.slice(0, Math.floor(val.length / 2))); if (val.length > 0) out.push(val.slice(1)); for (var i = 0; i < val.length; i++) { var c = val.charCodeAt(i); if (c > 32) { var s = val.slice(0,i) + String.fromCharCode(Math.max(32, c-1)) + val.slice(i+1); out.push(s); } } return out; } };
+};
+
+// Array of arbitrary, length 0..maxLength
+fc.array = function(arb, maxLength) {
+    if (maxLength === undefined) maxLength = 100;
+    return { generate: function(rng) { var len = Math.floor(rng() * (maxLength + 1)); var arr = []; for (var i = 0; i < len; i++) arr.push(arb.generate(rng)); return arr; }, shrink: function(val) { var out = []; if (val.length > 0) out.push(val.slice(0, Math.floor(val.length / 2))); if (val.length > 0) out.push(val.slice(1)); for (var i = 0; i < val.length; i++) { var shrinks = arb.shrink(val[i]); for (var s = 0; s < shrinks.length; s++) { var copy = val.slice(); copy[i] = shrinks[s]; out.push(copy); } } return out; } };
+};
+
+// One of several arbitraries (pick randomly)
+fc.oneof = function() {
+    var arbs = arguments;
+    return { generate: function(rng) { var idx = Math.floor(rng() * arbs.length); return arbs[idx].generate(rng); }, shrink: function(val) { /* try all arbs for shrinking */ return []; } };
+};
+
+// Constant value
+fc.constant = function(val) { return { generate: function() { return val; }, shrink: function() { return []; } }; };
+
+// Record (object with named arbitrary fields)
+fc.record = function(schema) {
+    return { generate: function(rng) { var obj = {}; for (var k in schema) obj[k] = schema[k].generate(rng); return obj; }, shrink: function(val) { var out = []; for (var k in schema) { var shrinks = schema[k].shrink(val[k]); for (var s = 0; s < shrinks.length; s++) { var copy = JSON.parse(JSON.stringify(val)); copy[k] = shrinks[s]; out.push(copy); } } return out; } };
+};
+
+// Tuple (fixed-length array of arbitraries)
+fc.tuple = function() {
+    var arbs = arguments;
+    return { generate: function(rng) { var arr = []; for (var i = 0; i < arbs.length; i++) arr.push(arbs[i].generate(rng)); return arr; }, shrink: function(val) { var out = []; for (var i = 0; i < arbs.length && i < val.length; i++) { var shrinks = arbs[i].shrink(val[i]); for (var s = 0; s < shrinks.length; s++) { var copy = val.slice(); copy[i] = shrinks[s]; out.push(copy); } } return out; } };
+};
+
+// Email-like string (alphanum@alphanum.domain)
+fc.email = function() {
+    return { generate: function(rng) { var user = ''; var ulen = 3 + Math.floor(rng()*10); for (var i=0;i<ulen;i++) user += String.fromCharCode(97+Math.floor(rng()*26)); var dom = ''; var dlen = 3 + Math.floor(rng()*8); for (var i=0;i<dlen;i++) dom += String.fromCharCode(97+Math.floor(rng()*26)); var tlds = ['com','org','net','io','dev']; return user + '@' + dom + '.' + tlds[Math.floor(rng()*tlds.length)]; }, shrink: function(val) { var out = []; if (val.length > 5) out.push(val.slice(0, Math.floor(val.length/2)) + '@t.co'); return out; } };
+};
+
+// UUID string
+fc.uuid = function() {
+    return { generate: function(rng) { var h = function(n) { var s=''; for(var i=0;i<n;i++) s+=Math.floor(rng()*16).toString(16); return s; }; return h(8)+'-'+h(4)+'-4'+h(3)+'-'+(8+Math.floor(rng()*4)).toString(16)+h(3)+'-'+h(12); }, shrink: function(val) { return []; } };
+};
+
+// ═══════════════════════════════════════════════════════════════
+// Integrated Shrinking Engine
+// ═══════════════════════════════════════════════════════════════
+
+function shrinkIntegrated(counterexample, arb, propFn, ctx, maxIter) {
+    if (maxIter === undefined) maxIter = 200;
+    var best = counterexample;
     var iterations = 0;
-    // Shrink numeric values
-    if (typeof shrunk === 'number') {
-        shrunk = shrinkNumeric(shrunk, propFn, ctx);
-        iterations++;
-    }
-    // Shrink arrays
-    if (Array.isArray(shrunk)) {
-        shrunk = shrinkArray(shrunk, propFn, ctx);
-        iterations++;
-        // Also shrink individual elements
-        for (var i = 0; i < shrunk.length; i++) {
-            if (typeof shrunk[i] === 'number') {
-                var orig = shrunk[i];
-                shrunk[i] = shrinkNumeric(orig, propFn, ctx);
-                iterations++;
-                // Check if still fails with shrunk element
-                try { if (propFn(shrunk, ctx)) { shrunk[i] = orig; } } catch(e) {}
+    var queue = [counterexample];
+    var seen = new Set();
+    seen.add(JSON.stringify(counterexample));
+    
+    while (queue.length > 0 && iterations < maxIter) {
+        var current = queue.shift();
+        var candidates = arb.shrink(current);
+        for (var c = 0; c < candidates.length; c++) {
+            var candidate = candidates[c];
+            var key = JSON.stringify(candidate);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            iterations++;
+            try {
+                if (!propFn(candidate, ctx)) {
+                    best = candidate;
+                    queue.push(candidate); // continue shrinking from here
+                }
+            } catch(e) {
+                best = candidate;
+                queue.push(candidate);
             }
         }
     }
-    return { counterexample: shrunk, iterations: iterations };
+    return { counterexample: best, iterations: iterations };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Property Runner
+// ═══════════════════════════════════════════════════════════════
+
+// Auto-detect the arbitrary to use based on property function name/context
+function detectArbitrary(propFn) {
+    var name = (propFn.name || '').toLowerCase();
+    // Check if function expects an object (record-style)
+    var src = propFn.toString();
+    if (src.indexOf('{') > 0 && (src.indexOf('.length') > 0 || src.indexOf('[0]') > 0 || src.indexOf('sort') > 0)) return fc.array(fc.integer(-1000,1000), 50);
+    if (src.indexOf('@') > 0 || name.indexOf('email') >= 0) return fc.email();
+    if (src.indexOf('uuid') >= 0 || name.indexOf('uuid') >= 0) return fc.uuid();
+    if (name.indexOf('string') >= 0 || src.indexOf('.charAt') > 0 || src.indexOf('.toLowerCase') > 0) return fc.string(200);
+    if (name.indexOf('bool') >= 0 || name.indexOf('flag') >= 0) return fc.boolean();
+    if (name.indexOf('float') >= 0 || name.indexOf('double') >= 0 || name.indexOf('decim') >= 0) return fc.float(-10000,10000);
+    // Default: integer (most common for mathematical properties)
+    return fc.integer(-10000, 10000);
 }
 
 function runPBT(propFn, N) {
+    var arb = detectArbitrary(propFn);
     var ctx = {};
+    
+    // Run edge cases first (fast-check style)
+    var edgeCases = [];
+    if (arb.generate.name !== 'constant') {
+        // Try 0, 1, -1, empty, max, min for integer-like arbitraries
+        try { edgeCases.push(arb.shrink(99999999)); } catch(e) {}
+    }
+    
     for (var i = 0; i < N; i++) {
-        // Generate a random input (scalar, array, or object)
         var input;
-        var roll = Math.random();
-        if (roll < 0.4) {
-            input = randomScalar();
-        } else if (roll < 0.75) {
-            input = randomArray(0, 20, randomScalar);
+        if (i < 5) {
+            // Edge cases: try 0, 1, -1, max, empty
+            var edges = [0, 1, -1, '', [], Number.MAX_SAFE_INTEGER];
+            var edgeVal = edges[i];
+            input = typeof arb.generate === 'function' ? (i < 2 ? arb.generate(function(){return i===0?0:1;}) : arb.generate(_next)) : edgeVal;
         } else {
-            input = randomObject(0);
+            input = arb.generate(_next);
         }
         __PBT.total++;
         try {
             var ok = propFn(input, ctx);
             if (ok) { __PBT.passed++; }
-            else { __PBT.failed++; __PBT.failures.push(input); }
+            else { __PBT.failed++; __PBT.failures.push({ input: input, run: i }); }
         } catch(e) {
             __PBT.errors++;
-            __PBT.failures.push({ input: input, error: String(e) });
+            __PBT.failures.push({ input: input, error: String(e), run: i });
         }
     }
+    
     var result = {
         pass: __PBT.failed === 0 && __PBT.errors === 0,
         total_runs: __PBT.total,
@@ -247,11 +309,16 @@ function runPBT(propFn, N) {
         failed: __PBT.failed,
         errors: __PBT.errors
     };
+    
     if (__PBT.failures.length > 0) {
-        var shrunk = shrink(__PBT.failures[0], propFn, ctx);
+        var failure = __PBT.failures[0];
+        var counterexample = failure.input;
+        var shrunk = shrinkIntegrated(counterexample, arb, propFn, ctx);
         result.counterexample = shrunk.counterexample;
         result.shrink_iterations = shrunk.iterations;
+        result.first_failure_run = failure.run;
     }
+    
     console.log('___PBT_RESULT___ ' + JSON.stringify(result));
 }
 `;

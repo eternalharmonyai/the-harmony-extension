@@ -26,7 +26,7 @@ export class EpisodicMemoryTool extends BasePrimitive<EMemInput> {
     private async getStore(): Promise<any> {
         if (this._store) return this._store;
         const { EpisodicStore } = await import('../episodicStore');
-        const root = workspaceRoot(); if (!root) throw new Error('no workspace');
+        const root = workspaceRoot(); if (!root) throw new Error(JSON.stringify({ error: 'NO_WORKSPACE', detail: 'no workspace' }));
         this._store = new EpisodicStore(root);
         await this._store.init();
         return this._store;
@@ -34,7 +34,6 @@ export class EpisodicMemoryTool extends BasePrimitive<EMemInput> {
     
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<EMemInput>, _token: vscode.CancellationToken) {
         const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
         const { action, store, query, decay_half_life_hours = 72, graph_root_id, graph_max_depth = 3 } = options.input;
         try {
             const es = await this.getStore();
