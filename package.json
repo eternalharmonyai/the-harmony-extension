@@ -9475,12 +9475,12 @@
           "type": "string",
           "enum": [
             "auto",
-            "auto-qwen-first",
             "gemini",
+            "zhipu",
             "alibaba"
           ],
           "default": "auto",
-          "description": "Vision provider for Compose image analysis. auto=Gemini first, falls back to Alibaba. auto-qwen-first=Alibaba first, falls back to Gemini."
+          "description": "Vision provider. auto=configurable fallback order. Single-provider modes skip fallback."
         },
         "harmony.vision.qwenModel": {
           "type": "string",
@@ -9701,6 +9701,27 @@
           ],
           "default": "low",
           "description": "Furies minimum severity to report."
+        },
+        "harmony.vision.zhipuModel": {
+          "type": "string",
+          "default": "glm-5v-turbo"
+        },
+        "harmony.vision.fallbackOrder": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "gemini",
+              "zhipu",
+              "alibaba"
+            ]
+          },
+          "default": [
+            "gemini",
+            "zhipu",
+            "alibaba"
+          ],
+          "description": "Fallback order for vision auto mode. Reorder in sidebar or settings.json."
         }
       }
     }
@@ -9750,9 +9771,11 @@
     "install:creative-tools:cursor": "node scripts/install-vsix.js --editor cursor --vsix companion-extensions/harmony-creative-tools/harmony-creative-tools-0.1.6.vsix",
     "install:creative-tools:both": "node scripts/install-vsix.js --editor both --vsix companion-extensions/harmony-creative-tools/harmony-creative-tools-0.1.6.vsix",
     "reload": "npm run package && code --install-extension harmony-extension.vsix --force",
-    "dev": "node scripts/dev-watch.js"
+    "dev": "node scripts/dev-watch.js",
+    "test": "node scripts/run-tests.js"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.95.0",
     "@vscode/test-electron": "^2.5.2",
@@ -9769,9 +9792,12 @@
     "url": "https://github.com/eternalharmonyai/the-harmony-extension"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "duckdb": "^1.1.3",
+    "fast-check": "^4.8.0",
+    "isolated-vm": "^5.0.3",
     "isomorphic-git": "^1.38.5",
     "pdf-parse": "^2.4.5",
-    "isolated-vm": "^5.0.3",
-    "duckdb": "^1.1.3"
+    "zod": "^4.4.3"
   }
 }

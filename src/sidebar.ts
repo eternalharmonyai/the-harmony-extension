@@ -4,7 +4,7 @@ import * as path from 'path';
 import { recallMemory, currentWorkspaceFingerprint, memoryStats } from './memory';
 import { getOrchestrateSessionStats } from './orchestrateMode';
 import { loadTodos, onTodoChange } from './todoStore';
-import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, hasKey, modelFor, providerDisplayName, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier } from './providers';
+import { collabTierForPreset, countProviderKeys, getCollabDirectProvider, getCollabModelPreset, hasKey, modelFor, providerDisplayName, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier } from './providers';
 import { summarize as summarizeUsage, totalCalls, totalTokens, onUsageChange, getFallbackEvents, providerAccountingSummary } from './costTracker';
 import type { ProviderAccountingSummary } from './costTracker';
 import { listSessions } from './sessions';
@@ -120,6 +120,10 @@ const PRIMARY_MODEL_OPTIONS: Record<string, { value: string; label: string }[]> 
   tencent: [
     { value: 'hunyuan-turbos-latest', label: 'hunyuan-turbos-latest (latest)' },
     { value: 'hunyuan-lite', label: 'hunyuan-lite (fast, free tier)' },
+  ],
+  zhipu: [
+    { value: 'glm-5.1', label: 'glm-5.1 (fast, light)' },
+    { value: 'glm-5.2', label: 'glm-5.2 (balanced, capable)' },
   ],
 };
 
@@ -260,17 +264,10 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                         await vscode.commands.executeCommand('harmony.setDeepSeekApiKey');
                         break;
                     case 'setProviderKey':
-                        switch (msg.provider) {
-                            case 'openai': await vscode.commands.executeCommand('harmony.setOpenAIApiKey'); break;
-                            case 'gemini': await vscode.commands.executeCommand('harmony.setGeminiApiKey'); break;
-                            case 'claude': await vscode.commands.executeCommand('harmony.setClaudeApiKey'); break;
-                            case 'deepseek': await vscode.commands.executeCommand('harmony.setDeepSeekApiKey'); break;
-                            case 'openrouter': await vscode.commands.executeCommand('harmony.setOpenRouterApiKey'); break;
-                            case 'moonshot': await vscode.commands.executeCommand('harmony.setMoonshotApiKey'); break;
-                            case 'kimiCode': await vscode.commands.executeCommand('harmony.setKimiCodeApiKey'); break;
-                            case 'alibaba': await vscode.commands.executeCommand('harmony.setAlibabaApiKey'); break;
-                            case 'tencent': await vscode.commands.executeCommand('harmony.setTencentApiKey'); break;
-                        }
+                        await vscode.commands.executeCommand('harmony.editProviderSlots', msg.provider);
+                        break;
+                    case 'setProviderSlotKey':
+                        await vscode.commands.executeCommand('harmony.setProviderSlotKey', msg.provider, msg.slotIndex);
                         break;
                     case 'setBigGunsMode':
                         await vscode.workspace.getConfiguration('harmony')
@@ -403,14 +400,25 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                       if (v === 'auto') {
                         await vscode.workspace.getConfiguration('harmony')
                           .update('vision.provider', 'auto', true);
-                      } else if (v === 'auto-qwen-first') {
+                      } else if (v === 'gemini') {
                         await vscode.workspace.getConfiguration('harmony')
-                          .update('vision.provider', 'auto-qwen-first', true);
+                          .update('vision.provider', 'gemini', true);
+                      } else if (v === 'zhipu') {
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.provider', 'zhipu', true);
+                      } else if (v === 'alibaba') {
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.provider', 'alibaba', true);
                       } else if (v.startsWith('qwen')) {
                         await vscode.workspace.getConfiguration('harmony')
                           .update('vision.provider', 'alibaba', true);
                         await vscode.workspace.getConfiguration('harmony')
                           .update('vision.qwenModel', v, true);
+                      } else if (v.startsWith('glm')) {
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.provider', 'zhipu', true);
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.zhipuModel', v, true);
                       } else {
                         await vscode.workspace.getConfiguration('harmony')
                           .update('vision.provider', 'gemini', true);
@@ -419,6 +427,23 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                       }
                       break;
                     }
+                    case 'visionFallbackReorder': {
+                      const { id, direction } = msg as any;
+                      const cfg = vscode.workspace.getConfiguration('harmony');
+                      const order: string[] = [...(cfg.get<string[]>('vision.fallbackOrder') ?? ['gemini', 'zhipu', 'alibaba'])];
+                      const idx = order.indexOf(id);
+                      if (direction === 'up' && idx > 0) {
+                        [order[idx - 1], order[idx]] = [order[idx], order[idx - 1]];
+                      } else if (direction === 'down' && idx < order.length - 1) {
+                        [order[idx], order[idx + 1]] = [order[idx + 1], order[idx]];
+                      }
+                      await cfg.update('vision.fallbackOrder', order, true);
+                      break;
+                    }
+                    case 'visionFallbackReset':
+                      await vscode.workspace.getConfiguration('harmony')
+                        .update('vision.fallbackOrder', undefined, true);
+                      break;
                     case 'setAutoGeminiModel':
                       await vscode.workspace.getConfiguration('harmony')
                         .update('vision.autoGeminiModel', msg.value as string, true);
@@ -709,6 +734,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                 ?? modelFor('kimiCode', 'coding'),
             tencentPrimaryModel: this.context.workspaceState.get<string>('harmony.primaryModel.tencent')
                 ?? modelFor('tencent', 'coding'),
+            zhipuModel: this.context.workspaceState.get<string>('harmony.primaryModel.zhipu')
+                ?? modelFor('zhipu', 'coding'),
             agentMaxSteps: cfg.get<number>('agentMaxSteps') ?? 1,
             autoApprove: !!cfg.get<boolean>('autoApproveTools'),
             planOnly: !!cfg.get<boolean>('planOnlyMode'),
@@ -736,12 +763,13 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             visionModel: (() => {
               const provider = cfg.get<string>('vision.provider') ?? 'auto';
               if (provider === 'auto') return 'auto';
-              if (provider === 'auto-qwen-first') return 'auto-qwen-first';
+              if (provider === 'zhipu') return cfg.get<string>('vision.zhipuModel') || 'glm-5v-turbo';
               if (provider === 'alibaba') return cfg.get<string>('vision.qwenModel') || 'qwen-vl-max';
               return cfg.get<string>('vision.geminiModel') || 'gemini-3.5-flash';
             })(),
             autoGeminiModel: cfg.get<string>('vision.autoGeminiModel') ?? 'gemini-3.5-flash',
             autoQwenModel: cfg.get<string>('vision.autoQwenModel') ?? 'qwen-vl-max',
+            visionFallbackOrder: cfg.get<string[]>('vision.fallbackOrder') ?? ['gemini', 'zhipu', 'alibaba'],
             contextHealth: { harmonyBytes: 0, healthStatus: 'ok' },
             imageGenProvider: cfg.get<string>('imageGen.provider') ?? 'gemini',
             imageGenAutoApprove: !!cfg.get<boolean>('imageGen.autoApprove'),
@@ -839,6 +867,11 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                     await Promise.all(providers.map(async (p) => { try { s[p] = await hasKey(this.context.secrets, p); } catch (_err) { s[p] = false; } }));
                     return s;
                 })().catch(() => Object.fromEntries(providers.map(p => [p, false])) as Record<string, boolean>),
+                (async (): Promise<Record<string, number>> => {
+                    const s: Record<string, number> = {};
+                    await Promise.all(providers.map(async (p) => { try { s[p] = await countProviderKeys(this.context.secrets, p); } catch (_err) { s[p] = 0; } }));
+                    return s;
+                })().catch(() => Object.fromEntries(providers.map(p => [p, 0])) as Record<string, number>),
                 compactSidebar ? [] : listSessions().catch(() => []),
                 getContextHealthSize().catch(() => 0),
                 resolveCollabModel(this.context.secrets).catch(() => safeDefault),
@@ -861,7 +894,13 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                     } catch { /* daemon offline */ }
                     return { online: false };
                 })(),
-                this.context.secrets.get('harmony.tencent.apiKey'),
+                (async () => {
+                    const tk = await this.context.secrets.get('harmony.tencent.apiKey');
+                    if (tk) return tk;
+                    const sid = await this.context.secrets.get('harmony.tencent.secretId');
+                    const sk = await this.context.secrets.get('harmony.tencent.secretKey');
+                    return (sid && sk) ? 'native' : undefined;
+                })(),
                 // Concert Board and Custom Roles moved to Phase 4 (non-blocking) —
                 // concertCheck and file I/O are non-critical for sidebar display
                 // and should never block the loading spinner from dismissing.
@@ -883,6 +922,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         const [
             recent = [], memorySummary = { activeEntries: 0, preservedFiles: 0 }, todos = [],
             providerStates = Object.fromEntries(providers.map(p => [p, false])) as Record<string, boolean>,
+            providerSlotCounts = Object.fromEntries(providers.map(p => [p, 0])) as Record<string, number>,
             sessions = [], harmonyBytes = 0, resolvedCollab = safeDefault,
             whisperCount = 0, globalMemoryData = { totalPatterns: 0, uniqueWorkspaces: 0, topTags: [] as {tag: string; count: number}[] },
             hubStatus = { online: false },
@@ -910,6 +950,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             hasKey: providerStates.deepseek,
             primaryProviderKeys: providerStates,
             providers: providerStates,
+            providerSlotCounts,
             memoryCount: memorySummary.activeEntries,
             memoryStats: memorySummary,
             memory: this.memoryHiddenFromPanel || compactSidebar ? [] : recent.map((e: any) => ({
@@ -1110,6 +1151,10 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   .provider-row .name { flex: 1; }
   .provider-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-charts-red); }
   .provider-row .dot.on { background: var(--vscode-charts-green); }
+  .fb-item { display: flex; align-items: center; gap: 4px; padding: 3px 4px; font-size: 11px; border-radius: 3px; }
+  .fb-item:hover { background: var(--vscode-list-hoverBackground); }
+  .fb-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-charts-red); }
+  .fb-item .dot.on { background: var(--vscode-charts-green); }
   .todo-item { display: flex; align-items: flex-start; gap: 4px; font-size: 11px; line-height: 1.3; }
   .todo-item.done { opacity: 0.5; text-decoration: line-through; }
   #sidebar-loading { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--vscode-sideBar-background); z-index: 100; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
@@ -1226,6 +1271,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     <option value="alibaba">Alibaba / Qwen (direct)</option>
     <option value="tencent">Tencent / Hunyuan (direct)</option>
     <option value="moonshot">Moonshot / Kimi (direct)</option>
+    <option value="zhipu">Zhipu / GLM (direct)</option>
     <option value="kimiCode">KimiCode (direct)</option>
   </select>
   <div id="direct-primary-block" class="hint" style="display:none; margin-top:4px;"></div>
@@ -1297,18 +1343,29 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   <div style="margin-bottom:8px;">
     <div style="font-size:11px; margin-bottom:2px;">${lm.getString('visual.visionModel')}</div>
     <select id="vision-model">
-      <option value="auto">${lm.getString('visual.autoGeminiFirst')}</option>
-      <option value="auto-qwen-first">${lm.getString('visual.autoAlibabaFirst')}</option>
+      <option value="auto">${lm.getString('visual.autoFallback')}</option>
+      <option value="gemini">🔮 Gemini only</option>
+      <option value="zhipu">🧠 Zhipu / GLM only</option>
+      <option value="alibaba">☁️ Alibaba / Qwen only</option>
       <optgroup label="Gemini">
         <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (cheapest Flash-Lite)</option>
         <option value="gemini-3.5-flash">gemini-3.5-flash (default, latest Flash)</option>
         <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (heavy, detailed)</option>
+      </optgroup>
+      <optgroup label="Zhipu / GLM">
+        <option value="glm-5v-turbo">glm-5v-turbo (fast, capable)</option>
+        <option value="glm-5v">glm-5v (standard)</option>
       </optgroup>
       <optgroup label="Alibaba / Qwen-VL">
         <option value="qwen-vl-plus">qwen-vl-plus (faster, cheaper)</option>
         <option value="qwen-vl-max">qwen-vl-max (best quality)</option>
       </optgroup>
     </select>
+    <div id="vision-fallback-order" style="display:none; margin-top:6px;">
+      <div style="font-size:10px; margin-bottom:3px;">${lm.getString('visual.fallbackOrder')}</div>
+      <div id="fallback-list"></div>
+      <button class="subtle" id="reset-fallback-order" style="margin-top:4px; font-size:10px;">${lm.getString('visual.resetFallback')}</button>
+    </div>
     <div id="auto-vision-models" style="display:none; margin-top:4px; margin-left:8px;">
       <div style="font-size:10px; margin-bottom:2px;">${lm.getString('visual.autoGeminiModel')}</div>
       <select id="auto-gemini-model">
@@ -1606,7 +1663,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
       if (!document.getElementById('deepswarm-provider')) {
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;gap:4px;margin-top:4px;';
-        row.innerHTML = '<select id="deepswarm-provider" style="flex:1;"><option value="auto">\uD83E\uDD16 Auto (strategy picks)</option><option value="deepseek">\uD83D\uDC0B DeepSeek</option><option value="gemini">\uD83D\uDC8E Gemini</option><option value="alibaba">\u2601\uFE0F Qwen (Alibaba)</option><option value="moonshot">\uD83C\uDF19 Kimi (Moonshot)</option><option value="tencent">\uD83D\uDD37 Hunyuan (Tencent)</option></select><select id="deepswarm-tier" style="width:90px;"><option value="auto">Auto tier</option><option value="light">Light</option><option value="mid">Mid</option><option value="heavy">Heavy</option><option value="coding">Coding</option></select>';
+        row.innerHTML = '<select id="deepswarm-provider" style="flex:1;"><option value="auto">\uD83E\uDD16 Auto (strategy picks)</option><option value="deepseek">\uD83D\uDC0B DeepSeek</option><option value="gemini">\uD83D\uDC8E Gemini</option><option value="alibaba">\u2601\uFE0F Qwen (Alibaba)</option><option value="moonshot">\uD83C\uDF19 Kimi (Moonshot)</option><option value="zhipu">\uD83E\uDDE0 Zhipu / GLM</option><option value="tencent">\uD83D\uDD37 Hunyuan (Tencent)</option></select><select id="deepswarm-tier" style="width:90px;"><option value="auto">Auto tier</option><option value="light">Light</option><option value="mid">Mid</option><option value="heavy">Heavy</option><option value="coding">Coding</option></select>';
         deepswarmHeader.insertAdjacentElement('afterend', row);
         // Wire event listeners
         document.getElementById('deepswarm-provider').addEventListener('change', function(e) { vscode.postMessage({ type: 'selectDeepSwarmProvider', value: e.target.value }); });
@@ -1635,8 +1692,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     // ── End dynamic injection ──
     $('profile').value = s.profile;
     $('provider').value = s.provider;
-    const primaryDirect = ['deepseek', 'alibaba', 'moonshot', 'kimiCode', 'tencent'].includes(s.provider);
-    const primaryModel = s.provider === 'deepseek' ? s.deepseekModel : (s.provider === 'alibaba' ? s.alibabaPrimaryModel : (s.provider === 'moonshot' ? s.moonshotPrimaryModel : (s.provider === 'kimiCode' ? s.kimiCodePrimaryModel : s.tencentPrimaryModel)));
+    const primaryDirect = ['deepseek', 'alibaba', 'moonshot', 'kimiCode', 'tencent', 'zhipu'].includes(s.provider);
+    const primaryModel = s.provider === 'deepseek' ? s.deepseekModel : (s.provider === 'alibaba' ? s.alibabaPrimaryModel : (s.provider === 'moonshot' ? s.moonshotPrimaryModel : (s.provider === 'kimiCode' ? s.kimiCodePrimaryModel : (s.provider === 'zhipu' ? s.zhipuModel : s.tencentPrimaryModel))));
     const primaryKeySaved = !!(s.primaryProviderKeys && s.primaryProviderKeys[s.provider]);
     const primarySecretKey = s.providerSecretKeys && s.providerSecretKeys[s.provider] ? s.providerSecretKeys[s.provider] : '';
     const primaryEndpoint = s.providerEndpoints && s.providerEndpoints[s.provider] ? s.providerEndpoints[s.provider] : null;
@@ -1657,7 +1714,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         LOC.sidebar_key + ' ' + (primaryKeySaved ? LOC.provider_key_set_in_vscode : '<em>' + LOC.provider_key_none_in_vscode + '</em>') +
         (primaryEndpoint ? '<br>' + LOC.provider_endpoint_label + ' <code>' + escapeHtml(primaryEndpoint.label) + '</code>' + (primaryEndpoint.baseUrl ? '<br>' + LOC.provider_base_label + ' <code>' + escapeHtml(primaryEndpoint.baseUrl) + '</code>' : '<br><em>' + escapeHtml(primaryEndpoint.detail) + '</em>') : '') +
         (primarySecretKey ? '<br>' + LOC.provider_secret_label + ' <code>' + escapeHtml(primarySecretKey) + '</code>' : '') +
-        (!primaryKeySaved && ['deepseek', 'alibaba', 'moonshot', 'tencent'].includes(s.provider) ? '<br>' + LOC.provider_import_hint : '')
+        (!primaryKeySaved && ['deepseek', 'alibaba', 'moonshot', 'tencent', 'zhipu'].includes(s.provider) ? '<br>' + LOC.provider_import_hint : '')
       : '';
     $('set-key').style.display = primaryDirect ? 'block' : 'none';
     $('agent-steps').value = String(s.agentMaxSteps ?? 1);
@@ -1694,9 +1751,39 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
       LOC.steering_auto_retry_label + ' <code>' + (s.autoRetry !== false ? LOC.on_label : LOC.off_label) + '</code><br>' +
       LOC.steering_auto_approve_label + ' <code>' + (s.autoApprove ? LOC.on_label : LOC.off_label) + '</code>';
     $('vision-model').value = s.visionModel || 'gemini-3.5-flash';
-    $('auto-gemini-model').value = s.autoGeminiModel || 'gemini-3.5-flash';
-    $('auto-qwen-model').value = s.autoQwenModel || 'qwen-vl-max';
-    (() => { const v = s.visionModel || ''; $('auto-vision-models').style.display = (v === 'auto' || v === 'auto-qwen-first') ? '' : 'none'; })();
+    // Show/hide fallback order when auto is selected
+    (() => { const v = s.visionModel || ''; $('vision-fallback-order').style.display = (v === 'auto') ? '' : 'none'; })();
+    // Render fallback order list
+    (() => {
+      const list = $('fallback-list');
+      if (!list) return;
+      const order = (s.visionFallbackOrder && s.visionFallbackOrder.length > 0) ? s.visionFallbackOrder : ['gemini', 'zhipu', 'alibaba'];
+      const icons = { gemini: '\uD83D\uDD2E', zhipu: '\uD83E\uDDE0', alibaba: '\u2601\uFE0F' };
+      const names = { gemini: 'Gemini', zhipu: 'Zhipu / GLM', alibaba: 'Alibaba / Qwen' };
+      list.innerHTML = order.map((id, i) => {
+        const hasKey = !!(s.providers && s.providers[id]);
+        return '<div class="fb-item" data-id="' + id + '">' +
+          '<span style="width:14px;text-align:center;opacity:0.5;">' + (i + 1) + '.</span>' +
+          '<span>' + (icons[id] || '\uD83D\uDD39') + '</span>' +
+          '<span style="flex:1;">' + (names[id] || id) + '</span>' +
+          '<span class="dot ' + (hasKey ? 'on' : '') + '" style="margin:0 3px;" title="' + (hasKey ? 'Key set' : 'No key') + '"></span>' +
+          '<button class="fb-up" data-id="' + id + '" ' + (i === 0 ? 'disabled' : '') + ' style="padding:0 4px;font-size:10px;opacity:' + (i === 0 ? '0.3' : '0.7') + ';">\u25B2</button>' +
+          '<button class="fb-down" data-id="' + id + '" ' + (i === order.length - 1 ? 'disabled' : '') + ' style="padding:0 4px;font-size:10px;opacity:' + (i === order.length - 1 ? '0.3' : '0.7') + ';">\u25BC</button>' +
+          '</div>';
+      }).join('');
+      // Wire up/down buttons
+      list.querySelectorAll('.fb-up,.fb-down').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var dir = btn.classList.contains('fb-up') ? 'up' : 'down';
+          vscode.postMessage({ type: 'visionFallbackReorder', id: btn.dataset.id, direction: dir });
+        });
+      });
+    })();
+    // Wire reset fallback button
+    (() => {
+      const btn = $('reset-fallback-order');
+      if (btn) btn.addEventListener('click', function() { vscode.postMessage({ type: 'visionFallbackReset' }); });
+    })();
     $('image-gen-provider').value = s.imageGenProvider || 'gemini';
     $('image-gen-auto').checked = !!s.imageGenAutoApprove;
     $('flow-state').checked = !!s.flowState;
@@ -1889,24 +1976,48 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
     if (autoStartBtn) autoStartBtn.textContent = s.hubAutoStart ? LOC.hub_auto_start_on : LOC.hub_auto_start_off;
 
     const providers = $('providers');
-    const provList = s.providerOrder || ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude'];
+    const provList = s.providerOrder || ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'zhipu', 'gemini', 'openrouter', 'openai', 'claude'];
     const providerLabels = s.providerLabels || {};
+    const slotCounts = s.providerSlotCounts || {};
+    const slotLabels = ['C', 'A', 'E', 'V']; // Chat, Agents, External, Vision
+    const slotTitles = ['Chat key', 'Agents key', 'External key', 'Vision key'];
     providers.innerHTML = provList.map(p => {
       const on = !!(s.providers && s.providers[p]);
       const label = providerLabels[p] || p;
       const secret = s.providerSecretKeys && s.providerSecretKeys[p] ? s.providerSecretKeys[p] : '';
       const endpoint = s.providerEndpoints && s.providerEndpoints[p] ? s.providerEndpoints[p] : null;
+      const count = slotCounts[p] ?? (on ? 1 : 0);
+      const isTencent = p === 'tencent';
+      // Generate slot pills: clickable, green=set, blue=fallback, gray=missing
+      const slotPills = isTencent
+        ? '<span class="slot-pill tencent" title="Native SecretId+SecretKey dual auth">🔑</span>'
+        : slotLabels.map((letter, i) => {
+            const filled = i < count;
+            const color = filled ? (i === 0 ? 'var(--vscode-charts-green)' : 'var(--vscode-charts-blue)') : 'var(--vscode-descriptionForeground)';
+            const title = filled ? slotTitles[i] + ' set (click to change)' : slotTitles[i] + ' not set (click to add)';
+            return '<button class="slot-pill-btn" data-provider="' + p + '" data-slot="' + i + '" style="background:' + color + ';color:#fff;font-size:9px;padding:0 3px;border-radius:2px;margin:0 1px;border:none;cursor:pointer;font-family:monospace;" title="' + title + '">' + letter + '</button>';
+          }).join('');
       return '<div class="provider-row">' +
         '<span class="dot ' + (on ? 'on' : '') + '"></span>' +
         '<span class="name">' + escapeHtml(label) + '<br><span class="hint">' + LOC.provider_secret_storage + ' ' + escapeHtml(secret || LOC.provider_na) + '</span>' +
         (endpoint ? '<br><span class="hint">' + LOC.provider_endpoint_label + ' ' + escapeHtml(endpoint.label) + (endpoint.needsCustomBaseUrl ? ' ' + LOC.provider_needs_base_url : '') + '</span>' : '') +
         '</span>' +
+        '<span class="slot-indicators">' + slotPills + '</span>' +
         '<button class="subtle" data-provider="' + p + '" style="width:auto;padding:2px 6px;">' +
         (on ? LOC.provider_replace_key : LOC.provider_set_key_short) +
         '</button></div>';
     }).join('');
     providers.querySelectorAll('button[data-provider]').forEach(btn => {
       btn.addEventListener('click', () => vscode.postMessage({ type: 'setProviderKey', provider: btn.dataset.provider }));
+    });
+    // Wire slot pill clicks
+    providers.querySelectorAll('.slot-pill-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const provider = btn.dataset.provider;
+        const slotIndex = parseInt(btn.dataset.slot || '0', 10);
+        vscode.postMessage({ type: 'setProviderSlotKey', provider, slotIndex });
+      });
     });
 
     const td = $('todos');
@@ -2146,7 +2257,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
   $('write-oom-diagnostics').addEventListener('click', () => vscode.postMessage({ type: 'writeOomDiagnostics' }));
   $('enable-low-memory-safety').addEventListener('click', () => vscode.postMessage({ type: 'enableLowMemorySafetyMode' }));
   $('restore-low-memory-safety').addEventListener('click', () => vscode.postMessage({ type: 'restoreLowMemorySafetySettings' }));
-  $('vision-model').addEventListener('change', (e) => { vscode.postMessage({ type: 'setVisionModel', value: e.target.value }); $('auto-vision-models').style.display = (e.target.value === 'auto' || e.target.value === 'auto-qwen-first') ? '' : 'none'; });
+  $('vision-model').addEventListener('change', (e) => { vscode.postMessage({ type: 'setVisionModel', value: e.target.value }); $('vision-fallback-order').style.display = (e.target.value === 'auto') ? '' : 'none'; });
   $('auto-gemini-model').addEventListener('change', (e) => vscode.postMessage({ type: 'setAutoGeminiModel', value: e.target.value }));
   $('auto-qwen-model').addEventListener('change', (e) => vscode.postMessage({ type: 'setAutoQwenModel', value: e.target.value }));
   $('image-gen-provider').addEventListener('change', (e) => vscode.postMessage({ type: 'setImageGenProvider', value: e.target.value }));

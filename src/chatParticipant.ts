@@ -439,9 +439,9 @@ HEAVY-CODING DISCIPLINE (please follow these for sustained, productive sessions)
 
 ORCHESTRATION & STEERING (use these when the work is non-trivial):
   - For multi-step work (3+ distinct steps), call harmony_todo with action:"add" and items:[...] to externalize your plan up front. Then check items off with action:"check" as you complete them. The user can see this list live in the Harmony sidebar.
-    - When you are uncertain, stuck on a hard problem, or want a cross-check, call harmony_consult_model with provider (deepseek|alibaba|tencent|moonshot|gemini|openrouter|openai|claude) and tier (light|mid|heavy|coding). Prefer cost-transparent routine routes first and use "heavy" sparingly for genuinely hard reasoning where a second opinion changes the outcome.
+    - When you are uncertain, stuck on a hard problem, or want a cross-check, call harmony_consult_model with provider (deepseek|alibaba|tencent|moonshot|gemini|openrouter|openai|claude|zhipu) and tier (light|mid|heavy|coding). Prefer cost-transparent routine routes first and use "heavy" sparingly for genuinely hard reasoning where a second opinion changes the outcome. Optional slot_index: 0=Chat (default), 1=Agents, 2=External, 3=Vision — use agents slot when calling provider-specific agent tools.
   - When you need information from a specific URL the user mentioned, use harmony_fetch_url. Do not guess at URLs you don't have.
-    - For focused sub-tasks ("summarize this file", "find the bug in these 3 functions", "draft this section"), use harmony_spawn_worker. Prefer role-based workers when provider/tier are not obvious: scout for lookup, researcher for evidence, planner for sequencing, implementer for change design, verifier for regression checks, critic for risk review, cost_sentinel for spend/provider risk, hard_reasoner only for genuinely difficult reasoning. Explicit provider/tier still override the selected Agents profile.
+    - For focused sub-tasks ("summarize this file", "find the bug in these 3 functions", "draft this section"), use harmony_spawn_worker. Prefer role-based workers when provider/tier are not obvious: scout for lookup, researcher for evidence, planner for sequencing, implementer for change design, verifier for regression checks, critic for risk review, cost_sentinel for spend/provider risk, hard_reasoner only for genuinely difficult reasoning. Explicit provider/tier still override the selected Agents profile. Optional slot_index: 0=Chat, 1=Agents, 2=External, 3=Vision — use when workers need a specific provider key slot.
   - Auto-routing guidance: prefer LIGHT tier for trivial questions, lookups, and simple file reads. Use MID for code generation and analysis. Reserve HEAVY for: stuck moments, deep architectural decisions, or when light/mid produced a result you don't trust.`;
 
 const FRONTEND_VISUAL_TOOLING = `
@@ -554,7 +554,7 @@ function rememberDeepSeekAssistantTrace(content: string, reasoning: string): voi
     const hiddenReasoning = reasoning.trim();
     if (!clean || !hiddenReasoning) return;
     deepSeekAssistantTraces.push({
-        content: clean,
+        content: sanitizeForJson(clean),
         reasoning: hiddenReasoning,
         timestamp: Date.now()
     });
@@ -888,6 +888,15 @@ interface DeepSeekToolCall {
     };
 }
 
+
+/** Sanitize string content for safe JSON serialization.
+ *  Handles lone surrogate pairs and control characters that can
+ *  produce malformed JSON hex escapes in JSON.stringify output. */
+function sanitizeForJson(str: string): string {
+    return str.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
 interface DeepSeekMessage {
     role: DeepSeekRole;
     content: string | null;
@@ -934,13 +943,13 @@ async function buildDeepSeekMessages(
         }
     }
 
-    const messages: DeepSeekMessage[] = [{ role: 'system', content: system }];
+    const messages: DeepSeekMessage[] = [{ role: 'system', content: sanitizeForJson(system) }];
     const historyMessages: DeepSeekMessage[] = [];
     const usedTraceIndexes = new Set<number>();
 
     for (const turn of chatContext.history) {
         if (turn instanceof vscode.ChatRequestTurn) {
-            historyMessages.push({ role: 'user', content: turn.prompt });
+            historyMessages.push({ role: 'user', content: sanitizeForJson(turn.prompt) });
         } else if (turn instanceof vscode.ChatResponseTurn) {
             const text = turn.response
                 .map(part => part instanceof vscode.ChatResponseMarkdownPart ? part.value.value : '')
@@ -950,7 +959,7 @@ async function buildDeepSeekMessages(
                 const reasoning = findDeepSeekReasoningForHistory(clean, usedTraceIndexes);
                 historyMessages.push({
                     role: 'assistant',
-                    content: clean,
+                    content: sanitizeForJson(clean),
                     reasoning_content: reasoning
                 });
             }
@@ -958,7 +967,7 @@ async function buildDeepSeekMessages(
     }
 
     messages.push(...trimDeepSeekHistoryMessages(historyMessages));
-    messages.push({ role: 'user', content: request.prompt });
+    messages.push({ role: 'user', content: sanitizeForJson(request.prompt) });
     return messages;
 }
 

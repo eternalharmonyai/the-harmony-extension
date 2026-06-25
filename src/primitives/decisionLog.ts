@@ -7,7 +7,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { workspaceRoot, textResult, ensureDir, uid } from './shared';
-import { safeHarmonyDir, appendJsonl, readJsonl } from '../swarmHarden';
+import { safeHarmonyDir, appendJsonl, readJsonl, readJsonlStream } from '../swarmHarden';
 import { concertSpeak } from '../concertHall';
 import { BasePrimitive } from './basePrimitive';
 
@@ -25,24 +25,18 @@ function buildTree(nodes: DNode[], nid: string, prefix = '', last = true, depth 
 export class DecisionLogTool extends BasePrimitive<DLogInput> {
     constructor() { super('decision-log'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<DLogInput>, _token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, append, query, root_id, max_depth = 5 } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const dir = safeHarmonyDir(root, 'decision-log'); await ensureDir(dir);
         const fp = path.join(dir, 'decisions.jsonl');
-        const readAll = async (): Promise<DNode[]> => { return await readJsonl(fp); };
-        // Filtered read: iterates all entries, applies filters in single pass (memory-efficient for time-based queries)
+        const readAll = async (): Promise<DNode[]> => { const { results } = await readJsonlStream<DNode>(fp); return results; };
+        // Streaming filtered read: O(1) memory, single pass with line-by-line filtering
         const readFiltered = async (filter: (n: DNode) => boolean, maxAgeHours?: number): Promise<DNode[]> => {
-            const results: DNode[] = [];
             const cutoff = maxAgeHours ? Date.now() - maxAgeHours * 3600 * 1000 : 0;
-            try {
-                const raw = await readJsonl<DNode>(fp);
-                for (const node of raw) {
-                    if (maxAgeHours && node.timestamp < cutoff) continue;
-                    if (filter(node)) results.push(node);
-                }
-            } catch { /* file doesn't exist yet */ }
+            const { results } = await readJsonlStream<DNode>(fp, {
+                filter: (n) => (!maxAgeHours || n.timestamp >= cutoff) && filter(n)
+            });
             return results;
         };
         switch (action) {
@@ -56,19 +50,25 @@ export class DecisionLogTool extends BasePrimitive<DLogInput> {
                 return textResult(JSON.stringify({ status: 'appended', id: n.id, decision: n.decision, timestamp: new Date(n.timestamp).toISOString() }, null, 2));
             }
             case 'query': {
-                const q = query ?? {}; let nodes = await readAll();
-                if (q.parent_id) nodes = nodes.filter(n => n.parent_ids.includes(q.parent_id!));
-                if (q.agent) nodes = nodes.filter(n => n.agent === q.agent);
-                if (q.status) nodes = nodes.filter(n => n.status === q.status);
-                if (q.since_hours !== undefined) nodes = nodes.filter(n => n.timestamp >= Date.now() - q.since_hours! * 3600 * 1000);
-                if (q.keyword) { const kw = q.keyword.toLowerCase(); nodes = nodes.filter(n => n.decision.toLowerCase().includes(kw) || n.rationale.toLowerCase().includes(kw)); }
-                nodes.sort((a, b) => b.timestamp - a.timestamp);
-                const r = nodes.slice(0, q.limit ?? 20);
-                return textResult(JSON.stringify({ count: r.length, total: nodes.length, decisions: r.map(n => ({ id: n.id, timestamp: new Date(n.timestamp).toISOString(), agent: n.agent, decision: n.decision.slice(0, 200), status: n.status })) }, null, 2));
+                const q = query ?? {};
+                const { results, total } = await readJsonlStream<DNode>(fp, {
+                    filter: (n) => {
+                        if (q.parent_id && !n.parent_ids.includes(q.parent_id!)) return false;
+                        if (q.agent && n.agent !== q.agent) return false;
+                        if (q.status && n.status !== q.status) return false;
+                        if (q.since_hours !== undefined && n.timestamp < Date.now() - q.since_hours! * 3600 * 1000) return false;
+                        if (q.keyword) { const kw = q.keyword.toLowerCase(); if (!n.decision.toLowerCase().includes(kw) && !n.rationale.toLowerCase().includes(kw)) return false; }
+                        return true;
+                    },
+                    limit: q.limit ?? 20,
+                    offset: 0
+                });
+                results.sort((a, b) => b.timestamp - a.timestamp);
+                return textResult(JSON.stringify({ count: results.length, total, decisions: results.map(n => ({ id: n.id, timestamp: new Date(n.timestamp).toISOString(), agent: n.agent, decision: n.decision.slice(0, 200), status: n.status })) }, null, 2));
             }
             case 'graph': {
                 try {
-                    const nodes = await readAll();
+                    const { results: nodes } = await readJsonlStream<DNode>(fp);
                     const rid = root_id ?? nodes[0]?.id;
                     if (!rid) return textResult(JSON.stringify({ error: 'no decisions' }));
                     const tree = buildTree(nodes, rid, '', true, 0, max_depth ?? 5);
@@ -77,7 +77,7 @@ export class DecisionLogTool extends BasePrimitive<DLogInput> {
             }
             case 'stats': {
                 try {
-                    const nodes = await readAll();
+                    const { results: nodes } = await readJsonlStream<DNode>(fp);
                     const byStatus: Record<string, number> = {}; for (const n of nodes) { byStatus[n.status] = (byStatus[n.status] || 0) + 1; }
                     const byAgent: Record<string, number> = {}; for (const n of nodes) { byAgent[n.agent] = (byAgent[n.agent] || 0) + 1; }
                     const avgPremises = nodes.length > 0 ? nodes.reduce((s, n) => s + n.premises.length, 0) / nodes.length : 0;

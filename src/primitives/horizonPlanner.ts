@@ -17,8 +17,7 @@ interface HorizonPlannerInput { action: 'plan' | 'query' | 'align' | 'stats' | '
 export class HorizonPlannerTool extends BasePrimitive<HorizonPlannerInput> {
     constructor() { super('horizon-planner'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<HorizonPlannerInput>, _token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, goal, next_step, blockers, estimated_impact, timeline = 'tactical', parent_id, query_timeline, query_parent_id, update_id, update_status, update_next_step, update_blockers, limit = 20 } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const dir = safeHarmonyDir(root, 'horizon-planner'); await ensureDir(dir);

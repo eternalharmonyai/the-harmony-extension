@@ -57,8 +57,7 @@ export class SkillDistillerTool extends BasePrimitive<SkillDistillerInput> {
     constructor() { super('skill-distiller'); }
 
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<SkillDistillerInput>, _token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, name, description, preconditions, invariants, failure_modes, solution_pattern, language = 'typescript', extracted_from, query_language, query_name, limit = 20 } = options.input;
         const root = workspaceRoot(); if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
         const db = await getSharedDuckDB(root);

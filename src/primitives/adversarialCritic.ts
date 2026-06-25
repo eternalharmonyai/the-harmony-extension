@@ -12,23 +12,99 @@
  *   invoke({ action: 'fuzz', target: code, language: 'javascript', invariants: ['always returns >= 0', 'never throws on valid input'] });
  */
 import * as vscode from 'vscode';
-import { workspaceRoot, textResult } from './shared';
+import * as path from 'path';
+import { z } from 'zod';
+import { workspaceRoot, textResult, ensureDir, uid } from './shared';
+import { safeHarmonyDir, appendJsonl, readJsonl } from '../swarmHarden';
 import { consult, resolveCollabModel } from '../providers';
 import { concertSpeak } from '../concertHall';
 import { SandboxRunner } from '../sandboxRunner';
 import { BasePrimitive } from './basePrimitive';
 
-interface AdversarialCriticInput { action?: 'review' | 'fuzz'; target: string; language?: string; dimensions?: string[]; validate?: boolean; invariants?: string[]; }
-export interface HardenedCriticFinding { dimension: string; severity: 'critical' | 'high' | 'medium' | 'low' | 'observation'; description: string; evidence?: { line_number?: number; code_snippet?: string; pattern?: string }; failing_test?: string; test_result?: 'test_failed' | 'test_passed' | 'not_validated' | 'test_error'; remediation?: string; confidence_0_to_1?: number; false_positive_risk?: 'low' | 'medium' | 'high'; }
+// ── Zod schema for strict finding validation ──
+const SeverityEnum = z.enum(['critical', 'high', 'medium', 'low', 'observation']);
+const TestResultEnum = z.enum(['test_failed', 'test_passed', 'not_validated', 'test_error']);
+const FalsePositiveEnum = z.enum(['low', 'medium', 'high']);
+
+const CriticFindingSchema = z.object({
+    dimension: z.string().min(1),
+    severity: SeverityEnum,
+    description: z.string().min(1),
+    evidence: z.object({
+        line_number: z.number().int().positive().optional(),
+        code_snippet: z.string().optional(),
+        pattern: z.string().optional()
+    }).optional(),
+    failing_test: z.string().optional(),
+    test_result: TestResultEnum.optional(),
+    remediation: z.string().optional(),
+    confidence_0_to_1: z.number().min(0).max(1).optional(),
+    false_positive_risk: FalsePositiveEnum.optional()
+});
+
+const CriticFindingsArray = z.array(CriticFindingSchema);
+
+interface AdversarialCriticInput { action?: 'review' | 'fuzz' | 'stats' | 'query'; target?: string; language?: string; dimensions?: string[]; validate?: boolean; invariants?: string[]; limit?: number; }
+
+export interface HardenedCriticFinding {
+    dimension: string; severity: 'critical' | 'high' | 'medium' | 'low' | 'observation';
+    description: string;
+    evidence?: { line_number?: number; code_snippet?: string; pattern?: string };
+    failing_test?: string; test_result?: 'test_failed' | 'test_passed' | 'not_validated' | 'test_error';
+    remediation?: string; confidence_0_to_1?: number; false_positive_risk?: 'low' | 'medium' | 'high';
+}
 
 export class AdversarialCriticTool extends BasePrimitive<AdversarialCriticInput> {
     constructor(private readonly secrets: vscode.SecretStorage) { super('adversarial-critic'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<AdversarialCriticInput>, token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['target']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
-        const { action = 'review', target, language = 'typescript', dimensions = ['security', 'logic', 'performance'], validate = true, invariants } = options.input;
+        this.requireFields(options.input as any, ['target']);
+        const { action = 'review', target, language = 'typescript', dimensions = ['security', 'logic', 'performance'], validate = true, invariants, limit = 50 } = options.input;
         if (!target?.trim()) return textResult(JSON.stringify({ error: 'target required' }));
-        
+
+        // ── Stats: cumulative critic metrics ──
+        if (action === 'stats') {
+            const root = workspaceRoot();
+            if (!root) return textResult(JSON.stringify({ error: 'no workspace' }));
+            const dir = safeHarmonyDir(root, 'adversarial-critic');
+            await ensureDir(dir);
+            const fp = path.join(dir, 'findings.jsonl');
+            let records: any[] = [];
+            try { records = await readJsonl(fp); } catch {}
+            const byDimension: Record<string, number> = {};
+            const bySeverity: Record<string, number> = {};
+            const byAction: Record<string, number> = {};
+            let totalFindings = 0;
+            let totalConfidence = 0;
+            let confidenceCount = 0;
+            let fpHigh = 0, fpMed = 0, fpLow = 0;
+            const recentSessions = new Set<string>();
+            for (const r of records) {
+                byAction[r.action] = (byAction[r.action] || 0) + 1;
+                if (r.session_id) recentSessions.add(r.session_id);
+                for (const f of (r.findings || [])) {
+                    totalFindings++;
+                    byDimension[f.dimension] = (byDimension[f.dimension] || 0) + 1;
+                    bySeverity[f.severity] = (bySeverity[f.severity] || 0) + 1;
+                    if (typeof f.confidence_0_to_1 === 'number') { totalConfidence += f.confidence_0_to_1; confidenceCount++; }
+                    if (f.false_positive_risk === 'high') fpHigh++;
+                    else if (f.false_positive_risk === 'medium') fpMed++;
+                    else if (f.false_positive_risk === 'low') fpLow++;
+                }
+            }
+            return textResult(JSON.stringify({
+                action: 'stats',
+                total_sessions: records.length,
+                unique_sessions: recentSessions.size,
+                total_findings: totalFindings,
+                by_dimension: byDimension,
+                by_severity: bySeverity,
+                by_action: byAction,
+                avg_confidence: confidenceCount > 0 ? Math.round(totalConfidence / confidenceCount * 1000) / 1000 : 0,
+                false_positive_risk: { high: fpHigh, medium: fpMed, low: fpLow },
+                recent: records.slice(-5).map((r: any) => ({ action: r.action, timestamp: r.timestamp, findings_count: r.findings?.length ?? 0, verdict: r.verdict })),
+            }, null, 2));
+        }
+
         // ── E5: Differential Fuzzing ──
         if (action === 'fuzz') {
             if (!invariants?.length) return textResult(JSON.stringify({ error: 'invariants[] required for fuzz action — e.g. ["always returns >= 0", "never throws on valid input"]' }));
@@ -71,6 +147,19 @@ TARGET CODE:\n${target.slice(0, 4000)}\n\nINVARIANTS:\n${invariants.map((inv, i)
                     results.push({ invariant_index: test.invariant_index, invariant: invText, violated: true, error: e?.message ?? String(e) });
                 }
             }
+            // Persist fuzz session
+            const root2 = workspaceRoot();
+            if (root2) {
+                try {
+                    const dir2 = safeHarmonyDir(root2, 'adversarial-critic');
+                    await ensureDir(dir2);
+                    await appendJsonl(path.join(dir2, 'findings.jsonl'), {
+                        id: uid(), session_id: uid(), timestamp: Date.now(), action: 'fuzz',
+                        dimensions: invariants, verdict: violationsFound > 0 ? 'INVARIANTS_VIOLATED' : 'ALL_INVARIANTS_HELD',
+                        findings: results.map(r => ({ dimension: 'invariant', severity: r.violated ? 'high' : 'observation', description: r.invariant, confidence_0_to_1: r.violated ? 0.9 : 0.5 }))
+                    });
+                } catch {}
+            }
             return textResult(JSON.stringify({
                 action: 'fuzz',
                 invariants_tested: invariants.length,
@@ -94,22 +183,25 @@ TARGET CODE:\n${target.slice(0, 4000)}\n\nINVARIANTS:\n${invariants.map((inv, i)
                 // Extract JSON array robustly — find the first [ and matching ]
                 let start = response.indexOf('[');
                 let end = response.lastIndexOf(']');
-                if (start === -1 || end === -1 || start >= end) throw new Error('no JSON array in critic response');
+                if (start === -1 || end === -1 || start >= end) throw new Error(JSON.stringify({ error: 'PARSE_FAILED', detail: 'no JSON array in critic response' }));
                 const jsonStr = response.slice(start, end + 1);
                 const parsed = JSON.parse(jsonStr);
-                if (!Array.isArray(parsed)) throw new Error('critic response is not an array');
-                // Schema validation: each finding must have required fields
-                const valid = parsed.filter((f: any) => {
-                    if (!f || typeof f !== 'object') return false;
-                    if (!f.dimension || !f.severity || !f.description) return false;
-                    const validSeverities = ['critical', 'high', 'medium', 'low', 'observation'];
-                    if (!validSeverities.includes(f.severity)) { f.severity = 'observation'; }
-                    if (typeof f.confidence_0_to_1 === 'number') {
-                        f.confidence_0_to_1 = Math.max(0, Math.min(1, f.confidence_0_to_1));
-                    }
-                    return true;
-                });
-                const invalidCount = parsed.length - valid.length;
+                if (!Array.isArray(parsed)) throw new Error(JSON.stringify({ error: 'PARSE_FAILED', detail: 'critic response is not an array' }));
+                // Zod schema validation — strict, with detailed error reporting
+                const zodResult = CriticFindingsArray.safeParse(parsed);
+                let valid: HardenedCriticFinding[] = [];
+                let invalidCount = 0;
+                if (zodResult.success) {
+                    valid = zodResult.data as HardenedCriticFinding[];
+                } else {
+                    // Partial success: accept valid items, flag invalid ones
+                    const issues = zodResult.error.issues;
+                    const invalidIndices = new Set(issues.map(i => i.path[0] as number));
+                    valid = parsed.filter((_, i) => !invalidIndices.has(i)).map(f => ({
+                        ...f, confidence_0_to_1: typeof f.confidence_0_to_1 === 'number' ? Math.max(0, Math.min(1, f.confidence_0_to_1)) : undefined
+                    })) as HardenedCriticFinding[];
+                    invalidCount = invalidIndices.size;
+                }
                 if (invalidCount > 0 && parseAttempts < maxParseAttempts) {
                     // Retry LLM with schema to get better output
                     const schemaPrompt = sp + `\n\nYou MUST output a JSON array where each object has EXACTLY these fields:\n- dimension: string (one of: security, logic, performance, style, correctness)\n- severity: string (one of: critical, high, medium, low, observation)\n- description: string (required)\n- evidence: object with optional line_number (number), code_snippet (string), pattern (string)\n- failing_test: string (optional test code that demonstrates the flaw)\n- remediation: string (suggested fix)\n- confidence_0_to_1: number between 0 and 1\n\n${invalidCount} items were invalid in your previous response. Please fix and respond with ONLY the JSON array.`;
@@ -148,7 +240,11 @@ TARGET CODE:\n${target.slice(0, 4000)}\n\nINVARIANTS:\n${invariants.map((inv, i)
         }
         findings = findings.filter(f => dimensions.includes(f.dimension));
         for (const f of findings) { if (!f.evidence?.line_number && !f.evidence?.code_snippet && !f.evidence?.pattern) { f.severity = 'observation'; f.false_positive_risk = 'high'; } if ((f.confidence_0_to_1 ?? 1) < 0.3) { f.severity = 'observation'; } }
-        if (findings.length === 0) return textResult(JSON.stringify({ verdict: 'NO_VALID_FINDINGS' }, null, 2));
+        if (findings.length === 0) {
+            const r3 = workspaceRoot();
+            if (r3) { try { const d3 = safeHarmonyDir(r3, 'adversarial-critic'); await ensureDir(d3); await appendJsonl(path.join(d3, 'findings.jsonl'), { id: uid(), session_id: uid(), timestamp: Date.now(), action: 'review', dimensions, verdict: 'NO_VALID_FINDINGS', findings: [] }); } catch {} }
+            return textResult(JSON.stringify({ verdict: 'NO_VALID_FINDINGS' }, null, 2));
+        }
         // Validate findings via sandbox when requested
         if (validate) {
             const root = workspaceRoot();
@@ -168,6 +264,9 @@ TARGET CODE:\n${target.slice(0, 4000)}\n\nINVARIANTS:\n${invariants.map((inv, i)
             }
         }
         try { await concertSpeak('adversarial', 'critic', JSON.stringify({ count: findings.length })); } catch {}
+        // Persist review session
+        const r4 = workspaceRoot();
+        if (r4) { try { const d4 = safeHarmonyDir(r4, 'adversarial-critic'); await ensureDir(d4); await appendJsonl(path.join(d4, 'findings.jsonl'), { id: uid(), session_id: uid(), timestamp: Date.now(), action: 'review', dimensions, verdict: 'FINDINGS_FOUND', findings }); } catch {} }
         return textResult(JSON.stringify({ verdict: 'FINDINGS_FOUND', finding_count: findings.length, findings: findings.slice(0, 20) }, null, 2));
     }
 }

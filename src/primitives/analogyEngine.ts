@@ -11,9 +11,18 @@ import { consult } from '../providers';
 import { BasePrimitive } from './basePrimitive';
 
 interface AnalogyRecord { id: string; action: string; source_domain: string; target_domain: string; result: any; timestamp: number; }
-interface AnalogyEngineInput { action: 'map' | 'verify' | 'transfer' | 'query' | 'transfer_cross_domain'; source_domain?: string; target_domain?: string; source_problem?: string; mapping_hint?: string; analogy_json?: string; verification?: Array<{ hypothesis: string; status?: string }>; insight?: string; query_action?: string; limit?: number; }
+interface AnalogyEngineInput { action: 'map' | 'verify' | 'transfer' | 'query' | 'stats' | 'transfer_cross_domain'; source_domain?: string; target_domain?: string; source_problem?: string; mapping_hint?: string; analogy_json?: string; verification?: Array<{ hypothesis: string; status?: string }>; insight?: string; query_action?: string; limit?: number; }
+
+import { z } from 'zod';
+
+const AnalogySchema = z.object({
+    mapping_table: z.array(z.object({ source_concept: z.string(), target_concept: z.string(), rationale: z.string() })),
+    transferable_insights: z.array(z.string()),
+    verification: z.array(z.object({ hypothesis: z.string(), status: z.enum(['holds','partial','breaks']) }))
+});
 
 /** Schema-validated JSON parse with retry. Falls back through: direct parse → regex → raw text. */
+
 async function safeJsonParse(llmText: string, expectedSchema: string[], retryProvider?: (attempt: number) => Promise<string>): Promise<any> {
     const extractJson = (text: string): string | null => {
         // Try direct parse first
@@ -31,13 +40,14 @@ async function safeJsonParse(llmText: string, expectedSchema: string[], retryPro
         }
         try {
             const parsed = JSON.parse(jsonStr);
-            // Schema validation: check that expected keys exist
-            const missing = expectedSchema.filter(k => !(k in parsed));
-            if (missing.length > 0) {
+            // Schema validation: use Zod for runtime type checking
+            try {
+                const validated = AnalogySchema.strict().parse(parsed);
+                return validated;
+            } catch (zodErr: any) {
                 if (attempt < 3 && retryProvider) { llmText = await retryProvider(attempt); continue; }
-                return { ...parsed, parse_warning: `missing keys: ${missing.join(', ')}` };
+                return { raw: llmText.slice(0, 1000), parse_error: true, reason: `schema mismatch: ${zodErr.message?.slice(0, 200)}` };
             }
-            return parsed;
         } catch {
             if (attempt < 3 && retryProvider) { llmText = await retryProvider(attempt); continue; }
             return { raw: llmText.slice(0, 1000), parse_error: true, reason: 'JSON parse failed' };
@@ -49,8 +59,7 @@ async function safeJsonParse(llmText: string, expectedSchema: string[], retryPro
 export class AnalogyEngineTool extends BasePrimitive<AnalogyEngineInput> {
     constructor(private readonly secrets: vscode.SecretStorage) { super('analogy-engine'); }
     protected async invokeImpl(options: vscode.LanguageModelToolInvocationOptions<AnalogyEngineInput>, token: vscode.CancellationToken) {
-        const fieldErr = this.requireFields(options.input as any, ['action']);
-        if (fieldErr) return textResult(JSON.stringify({ error: fieldErr }));
+        this.requireFields(options.input as any, ['action']);
         const { action, source_domain, target_domain, source_problem, mapping_hint, analogy_json, verification, insight, query_action, limit = 20 } = options.input;
         const root = workspaceRoot();
         const dir = root ? safeHarmonyDir(root, 'analogy-engine') : null;
@@ -154,6 +163,31 @@ export class AnalogyEngineTool extends BasePrimitive<AnalogyEngineInput> {
                         confidence: Math.round(confidence * 1000) / 1000
                     }, null, 2));
                 } catch (e: any) { return textResult(JSON.stringify({ error: 'cross-domain transfer failed', detail: e.message })); }
+            }
+            case 'stats': {
+                if (!fp) return textResult(JSON.stringify({ error: 'no workspace' }));
+                try {
+                    const records: AnalogyRecord[] = await readJsonl(fp);
+                    const byAction: Record<string, number> = {};
+                    const domainPairs: Record<string, number> = {};
+                    let successCount = 0;
+                    for (const r of records) {
+                        byAction[r.action] = (byAction[r.action] || 0) + 1;
+                        const pair = `${r.source_domain}→${r.target_domain}`;
+                        domainPairs[pair] = (domainPairs[pair] || 0) + 1;
+                        if (r.result && !r.result.parse_error) successCount++;
+                    }
+                    const topPairs = Object.entries(domainPairs).sort((a, b) => b[1] - a[1]).slice(0, 10);
+                    return textResult(JSON.stringify({
+                        action: 'stats',
+                        total_analogies: records.length,
+                        by_action: byAction,
+                        success_rate: records.length > 0 ? Math.round(successCount / records.length * 1000) / 1000 : 0,
+                        unique_domain_pairs: Object.keys(domainPairs).length,
+                        top_domain_pairs: Object.fromEntries(topPairs),
+                        recent: records.slice(-5).map(r => ({ id: r.id, action: r.action, source: r.source_domain, target: r.target_domain, timestamp: new Date(r.timestamp).toISOString() })),
+                    }, null, 2));
+                } catch (e: any) { return textResult(JSON.stringify({ error: 'stats failed', detail: e.message })); }
             }
             default: return textResult(JSON.stringify({ error: `unknown action: ${action}` }));
         }

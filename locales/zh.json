@@ -125,8 +125,9 @@
 
   "visual.title": "视觉工具",
   "visual.visionModel": "视觉模型（图像分析）",
-  "visual.autoGeminiFirst": "自动（优先 Gemini，阿里备用）",
-  "visual.autoAlibabaFirst": "自动（优先阿里，Gemini 备用）",
+  "visual.autoFallback": "自动（可配置回退顺序）",
+  "visual.fallbackOrder": "回退顺序：",
+  "visual.resetFallback": "重置为默认",
   "visual.autoGeminiModel": "自动 Gemini 模型",
   "visual.autoQwenModel": "自动通义千问模型",
   "visual.imgGenProvider": "图像生成服务商",
