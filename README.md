@@ -34,7 +34,8 @@ Harmony is a VS Code/Cursor extension for `@harmony` chat, workspace tools, prov
 │  │   DeepSeek · Qwen ·      │                   │
 │  │   Gemini · Claude ·      │                   │
 │  │   OpenAI · Moonshot ·    │                   │
-│  │   OpenRouter · Tencent   │                   │
+│  │   OpenRouter · Tencent · │                   │
+│  │   Zhipu                  │                   │
 │  └──────────┬───────────────┘                   │
 └─────────────┼───────────────────────────────────┘
               │ optional localhost bridge
@@ -56,12 +57,27 @@ Harmony connects you directly to a diverse set of AI providers through your own 
 
 | Capability | Detail |
 |:---|:---|
-| **Broader provider reach** | DeepSeek, Moonshot/Kimi, Alibaba/Qwen, and Tencent — alongside Gemini, OpenAI, OpenRouter, and Anthropic/Claude — all from one extension |
+| **Broader provider reach** | DeepSeek, Moonshot/Kimi, Alibaba/Qwen, Zhipu/GLM, and Tencent — alongside Gemini, OpenAI, OpenRouter, and Anthropic/Claude — all from one extension |
 | **Your keys, your choice** | You decide which providers to configure. No keys = no external calls. Add providers incrementally as you need them. |
 | **Copilot cross-play** | Use VS Code Copilot for everyday coding while Harmony handles orchestration, multi-model consensus, and document translation |
 | **Local models (planned)** | Native local-first operation is on the roadmap. Today Harmony requires API keys; local model support is in development. |
 
 The local/native backend is optional and remains localhost-first.
+
+### Multi-Key Slot Architecture
+
+Each AI provider supports up to **4 API key slots**, allowing different keys for different purposes within the same provider:
+
+| Slot | Index | Powers |
+|:---|:---:|:---|
+| **Chat** `[C]` | 0 | Primary chat, model discovery, and @harmony turns |
+| **Agents** `[A]` | 1 | Swarm planning, worker sub-tasks, and multi-agent coordination |
+| **External** `[E]` | 2 | Tool execution, external integrations, and API calls |
+| **Vision** `[V]` | 3 | Image analysis, screenshot interpretation, and vision model routing |
+
+The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each provider. A green pill means a key is configured for that slot; a gray pill means no key is set. Click any pill to set or change the key for that slot.
+
+**Legacy key migration:** If you previously configured a single API key for a provider, Harmony automatically migrates it to slot 0 (Chat) on first launch. No manual reconfiguration is needed — your existing keys continue to work.
 
 ## ⚠️ Before You Use Harmony
 
@@ -302,9 +318,12 @@ When OCR doesn't extract usable text (or on non-Windows platforms), Harmony send
 | `harmony.vision.provider` | `auto` | `auto` = tries configured providers in order. `gemini`, `alibaba`, or `auto-qwen-first` forces a specific provider or order. |
 | `harmony.vision.geminiModel` | `gemini-3.5-flash` | Gemini vision model (when Gemini is available) |
 | `harmony.vision.qwenModel` | `qwen-vl-max` | Qwen vision model (when Alibaba is available) |
+| `harmony.vision.zhipuModel` | `glm-5v-turbo` | Zhipu vision model (when Zhipu is available) |
 | `harmony.gemini.useFreeQuota` | `false` | When ON, uses Gemini free tier where applicable |
 
 All vision providers require API keys stored in VS Code Secret Storage. Set them via the Harmony sidebar or Command Palette. Provider availability depends on which keys you have configured — there is no primary/secondary hierarchy; routing is determined by your `harmony.vision.provider` setting and which keys are present.
+
+**Vision fallback order:** When a vision request is made, Harmony tries providers in this sequence: `Gemini` → `Qwen` → `Zhipu`. Each step requires that provider's Vision slot (index 3) to have a configured key. If a provider has no Vision key, it is silently skipped and the next provider in the chain is tried.
 
 ## DeepSwarm — Multi-Provider Analysis Pipelines
 

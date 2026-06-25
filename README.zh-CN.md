@@ -34,7 +34,8 @@ Harmony 是 VS Code/Cursor 扩展，提供 `@harmony` 聊天、工作区工具�
 │  │   DeepSeek · Qwen ·      │                   │
 │  │   Gemini · Claude ·      │                   │
 │  │   OpenAI · Moonshot ·    │                   │
-│  │   OpenRouter · Tencent   │                   │
+│  │   OpenRouter · Tencent · │                   │
+│  │   Zhipu                  │                   │
 │  └──────────┬───────────────┘                   │
 └─────────────┼───────────────────────────────────┘
               │ 可选本地主机桥接
@@ -56,12 +57,27 @@ Harmony 通过您自己的 API 密钥将您连接到多样化的 AI 服务商—
 
 | 能力 | 详情 |
 |:---|:---|
-| **更广泛的服务商覆盖** | DeepSeek、Moonshot/Kimi、阿里巴巴/Qwen 和腾讯——以及 Gemini、OpenAI、OpenRouter 和 Anthropic/Claude——全部在一个扩展中 |
+| **更广泛的服务商覆盖** | DeepSeek、Moonshot/Kimi、阿里巴巴/Qwen、智谱/GLM 和腾讯——以及 Gemini、OpenAI、OpenRouter 和 Anthropic/Claude——全部在一个扩展中 |
 | **您的密钥，您的选择** | 您决定配置哪些服务商。没有密钥 = 没有外部调用。按需逐步添加服务商。 |
 | **Copilot 协同** | 日常编码使用 VS Code Copilot，而 Harmony 处理协奏、多模型共识和文档翻译 |
 | **本地模型（计划中）** | 原生本地优先操作已在路线图上。目前 Harmony 需要 API 密钥；本地模型支持正在开发中。 |
 
 本地/原生后端是可选的，且始终保持本地主机优先。
+
+### 多密钥槽位架构
+
+每个 AI 服务商支持最多 **4 个 API 密钥槽位**，允许在同一服务商内为不同目的使用不同的密钥：
+
+| 槽位 | 索引 | 用途 |
+|:---|:---:|:---|
+| **聊天** `[C]` | 0 | 主要聊天、模型发现和 @harmony 对话 |
+| **智能体** `[A]` | 1 | 协奏群规划、工作者子任务和多智能体协调 |
+| **外部** `[E]` | 2 | 工具执行、外部集成和 API 调用 |
+| **视觉** `[V]` | 3 | 图像分析、截图解读和视觉模型路由 |
+
+Harmony 侧边栏在每个服务商旁边显示 `[C]` `[A]` `[E]` `[V]` 槽位标签。绿色标签表示该槽位已配置密钥；灰色标签表示尚未设置。点击任意标签可设置或更改该槽位的密钥。
+
+**旧版密钥迁移：** 若您之前为某服务商配置了单一 API 密钥，Harmony 在首次启动时自动将其迁移至槽位 0（聊天）。无需手动重新配置——您现有的密钥继续有效。
 
 ## ⚠️ 使用 Harmony 前须知
 
@@ -311,9 +327,12 @@ pip install winocr Pillow
 | `harmony.vision.provider` | `auto` | `auto` = 按顺序尝试已配置的服务商。`gemini`、`alibaba` 或 `auto-qwen-first` 强制使用特定服务商或顺序。 |
 | `harmony.vision.geminiModel` | `gemini-3.5-flash` | Gemini 视觉模型（当 Gemini 可用时） |
 | `harmony.vision.qwenModel` | `qwen-vl-max` | Qwen 视觉模型（当阿里巴巴可用时） |
+| `harmony.vision.zhipuModel` | `glm-5v-turbo` | 智谱视觉模型（当智谱可用时） |
 | `harmony.gemini.useFreeQuota` | `false` | 开启时，在适用情况下使用 Gemini 免费额度 |
 
 所有视觉服务商需要存储在 VS Code Secret Storage 中的 API 密钥。通过 Harmony 侧边栏或命令面板设置。服务商可用性取决于您已配置的密钥——没有主/次层级；路由由您的 `harmony.vision.provider` 设置和哪些密钥存在决定。
+
+**视觉回退顺序：** 当发起视觉请求时，Harmony 按此顺序尝试服务商：`Gemini` → `Qwen` → `Zhipu`。每一步需要该服务商的视觉槽位（索引 3）已配置密钥。若某服务商没有视觉密钥，则静默跳过并尝试链中的下一个服务商。
 
 ## DeepSwarm — 多服务商分析流水线
 
