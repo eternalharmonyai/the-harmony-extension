@@ -19,6 +19,7 @@ exts.txt
 .DS_Store
 Thumbs.db
 desktop.ini
+$null
 *.swp
 *.swo
 *~

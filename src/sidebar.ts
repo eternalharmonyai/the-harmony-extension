@@ -2014,8 +2014,8 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
     providers.querySelectorAll('.slot-pill-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const provider = (btn as HTMLElement).dataset.provider;
-        const slotIndex = parseInt((btn as HTMLElement).dataset.slot || '0', 10);
+        const provider = btn.dataset.provider;
+        const slotIndex = parseInt(btn.dataset.slot || '0', 10);
         vscode.postMessage({ type: 'setProviderSlotKey', provider, slotIndex });
       });
     });
