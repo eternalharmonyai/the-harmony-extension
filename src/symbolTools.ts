@@ -404,7 +404,6 @@ class CodeActionsTool implements vscode.LanguageModelTool<CodeActionsInput> {
 
 export function registerSymbolTools(context: vscode.ExtensionContext) {
     context.subscriptions.push(
-        vscode.lm.registerTool('harmony_symbol_locations', new SymbolLocationsTool()),
         vscode.lm.registerTool('harmony_symbol_rename', new SymbolRenameTool()),
         vscode.lm.registerTool('harmony_code_actions', new CodeActionsTool()),
     );

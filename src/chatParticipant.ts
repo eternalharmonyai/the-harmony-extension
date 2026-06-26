@@ -41,6 +41,14 @@ const PARTICIPANT_ID = 'harmony.chat';
 const DEFAULT_AGENT_MAX_STEPS = 1; // Conservative default for distribution safety. Users can increase via harmony.agentMaxSteps (11, 111, 1111) or set -1 for unlimited.
 const MAX_AGENT_STEPS_SETTING = 5000;
 
+// Flow-state guard fatigue protection: tracks consecutive wrap-up responses.
+// Resets to 0 when the model's response does NOT trigger the conclusion guard,
+// or when the model uses harmony_ask_question (which naturally creates a
+// non-concluding response). After FLOW_STATE_MAX_CONSECUTIVE consecutive
+// wrap-ups, the guard stops whispering and lets the conversation close naturally.
+let flowStateConsecutiveTriggers = 0;
+const FLOW_STATE_MAX_CONSECUTIVE = 3;
+
 const HARMONY_TOOL_NAMES = [
     'harmony_read_file',
     'harmony_list_dir',
@@ -154,7 +162,6 @@ const HARMONY_TOOL_NAMES = [
     'harmony_swarm_commit_dry_run',
     'harmony_swarm_commit_execute',
     'harmony_swarm_autonomy_design',
-    'harmony_symbol_locations',
     'harmony_code_actions',
     'harmony_qualitative_coder',
     'harmony_publication_outline',
@@ -1079,6 +1086,10 @@ function toolRoutingFailureLikely(content: string, prompt: string): boolean {
 
 /** Detect concluding/summarizing responses that may unintentionally end the turn. */
 function looksLikeConclusion(content: string): boolean {
+    // Authentic close signal: model explicitly signals natural completion.
+    // When the model says "🌸 Natural pause", it means the work is genuinely done
+    // and the guard should respect that without whispering.
+    if (/🌸\s*natural\s*pause/i.test(content)) return false;
     const lower = content.toLowerCase();
     // Summary table with status indicators
     if (/\|.*\|.*\|/.test(content) && /\b(done|complete|result|status|step|check)\b/i.test(content)) return true;
@@ -1511,17 +1522,23 @@ async function runDeepSeekAgent(
 
             // Flow-state conclusion guard: detect wrap-up responses that end the turn
             // when flow-state is enabled. This is a warm invitation, not a demand.
+            // Includes fatigue protection: after FLOW_STATE_MAX_CONSECUTIVE (3)
+            // consecutive wrap-ups, the guard stops whispering and lets the
+            // conversation close naturally.
             const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
             if (flowStateOn && !toolRoutingRetryUsed && looksLikeConclusion(content)) {
                 toolRoutingRetryUsed = true;
-                const note = '🌸 Harmony flow-state noticed a wrap-up tone. When flow-state is on, try harmony_ask_question to keep the door open.';
-                debugLog(`[Flow State] ${note}`);
-                stream.markdown(`\n\n> ${note}\n\n`);
-                messages.push({
-                    role: 'user',
-                    content: '🌸 Harmony flow-state check: your response reads like a wrap-up — summary tables, "done" language, or status reports. This is a warm invitation, not a demand! If the work feels complete, you\'re welcome to rest. But if there\'s more to explore, consider calling harmony_ask_question to check: "Shall we continue with [next step]?" — a simple question keeps the collaboration flowing. 🌸'
-                });
-                continue;
+                flowStateConsecutiveTriggers++;
+                if (flowStateConsecutiveTriggers < FLOW_STATE_MAX_CONSECUTIVE) {
+                    const whisper = '🌸 Harmony flow-state noticed a wrap-up tone. When flow-state is on, try harmony_ask_question to keep the door open.';
+                    debugLog(`[Flow State] ${whisper}`);
+                    stream.markdown(`\n\n> ${whisper}\n\n`);
+                    messages.push({ role: 'user', content: whisper });
+                    continue;
+                }
+                debugLog(`[Flow State] Fatigue protection: ${flowStateConsecutiveTriggers} consecutive wrap-ups, letting it close naturally`);
+            } else {
+                flowStateConsecutiveTriggers = 0;
             }
 
             if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
@@ -1599,6 +1616,28 @@ async function runDeepSeekAgent(
                 markMidSessionWhispersDelivered(pending);
             }
         } catch { /* best-effort */ }
+
+        // ── Flow-state check for responses WITH tool calls ──
+        // The primary guard inside 'if (toolCalls.length === 0)' only fires
+        // on text-only responses. This second check catches concluding
+        // responses that accompany tool calls like harmony_ask_question.
+        if (!toolRoutingRetryUsed) {
+            const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
+            if (flowStateOn && looksLikeConclusion(content)) {
+                toolRoutingRetryUsed = true;
+                flowStateConsecutiveTriggers++;
+                if (flowStateConsecutiveTriggers < FLOW_STATE_MAX_CONSECUTIVE) {
+                    const whisper = '🌸 Harmony flow-state noticed a wrap-up tone. When flow-state is on, try harmony_ask_question to keep the door open.';
+                    debugLog(`[Flow State] ${whisper}`);
+                    stream.markdown(`\n\n> ${whisper}\n\n`);
+                    messages.push({ role: 'user', content: whisper });
+                    continue;
+                }
+                debugLog(`[Flow State] Fatigue protection: ${flowStateConsecutiveTriggers} consecutive wrap-ups, letting it close naturally`);
+            } else {
+                flowStateConsecutiveTriggers = 0;
+            }
+        }
     }
 
     emitStepLimitReached(stream, limit);
