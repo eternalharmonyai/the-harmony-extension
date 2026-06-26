@@ -6742,27 +6742,6 @@
         }
       },
       {
-        "name": "harmony_check_whispers",
-        "displayName": "Check Whisper Inbox",
-        "modelDescription": "Check .harmony/inbox/ for unread whisper messages. Returns count and content of unread whispers. Use this between phases of work to discover mid-turn messages from the user.",
-        "canBeReferencedInPrompt": true,
-        "toolReferenceName": "harmonyCheckWhispers",
-        "tags": [
-          "harmony",
-          "inbox",
-          "whisper"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "max": {
-              "type": "number",
-              "description": "Maximum whispers to return. Default 10."
-            }
-          }
-        }
-      },
-      {
         "name": "harmony_parallel",
         "displayName": "Parallel Swarm Dispatch",
         "modelDescription": "Dispatch multiple workers simultaneously via Promise.all. Each worker gets a prompt and optional provider/tier/role. Includes cost guard with soft/hard limits. Returns structured results per worker.",
@@ -8333,6 +8312,47 @@
           },
           "required": [
             "action"
+          ]
+        }
+      },
+      {
+        "name": "harmony_semantic_search",
+        "displayName": "Semantic Code Search",
+        "modelDescription": "Search workspace files by meaning, not just regex. Uses TF-IDF and cosine similarity to rank code chunks by relevance to a natural language query. Returns ranked results with file paths, line numbers, preview snippets, and relevance scores. Read-only.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonySemanticSearch",
+        "tags": [
+          "harmony",
+          "search",
+          "semantic",
+          "code"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Natural language search query, e.g. 'where is the authentication logic' or 'error handling in API routes'."
+            },
+            "path_glob": {
+              "type": "string",
+              "description": "Optional VS Code glob to filter files. Default '**/*.{ts,js,tsx,jsx,py,md,json,html,css,rs,go,java}'."
+            },
+            "max_results": {
+              "type": "number",
+              "description": "Maximum results. Default 15, max 50."
+            },
+            "max_files": {
+              "type": "number",
+              "description": "Maximum files to scan. Default 200, max 500."
+            },
+            "include_snippets": {
+              "type": "boolean",
+              "description": "Include preview snippets. Default true."
+            }
+          },
+          "required": [
+            "query"
           ]
         }
       }
