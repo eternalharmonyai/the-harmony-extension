@@ -3317,6 +3317,175 @@ class ConductorJournalTool implements vscode.LanguageModelTool<ConductorJournalI
     }
 }
 
+// ─── semantic_search ────────────────────────────────────────────────────
+interface SemanticSearchInput {
+    query: string;
+    path_glob?: string;
+    max_results?: number;
+    max_files?: number;
+    include_snippets?: boolean;
+}
+
+// Lightweight stop-words set for TF-IDF
+const STOP_WORDS = new Set([
+    'a', 'an', 'the', 'and', 'or', 'but', 'if', 'in', 'on', 'at', 'to', 'for',
+    'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+    'may', 'might', 'can', 'shall', 'you', 'your', 'i', 'my', 'me', 'we', 'our',
+    'he', 'she', 'it', 'they', 'them', 'this', 'that', 'these', 'those', 'not',
+    'no', 'nor', 'so', 'as', 'just', 'very', 'too', 'also', 'all', 'each', 'every',
+    'both', 'few', 'more', 'most', 'other', 'some', 'such', 'only', 'own', 'same',
+    'than', 'then', 'now', 'here', 'there', 'when', 'where', 'why', 'how', 'which',
+    'who', 'whom', 'what', 'into', 'over', 'under', 'again', 'further', 'once',
+]);
+
+function tokenize(text: string): string[] {
+    return text.toLowerCase()
+        .split(/[^a-z0-9_]+/)
+        .filter(t => t.length >= 2 && !STOP_WORDS.has(t));
+}
+
+interface Chunk {
+    file: string;
+    line: number;
+    snippet: string;
+    tokens: string[];
+    tf: Map<string, number>;
+}
+
+function chunkFile(content: string, filePath: string): Chunk[] {
+    const lines = content.split(/\r?\n/);
+    const chunks: Chunk[] = [];
+    let start = 0;
+    for (let i = 0; i < lines.length; i++) {
+        // Split on blank lines and logical boundaries (function/class defs)
+        const isBlank = lines[i].trim() === '';
+        const isBoundary = /^(export\s+)?(async\s+)?(function|class|interface|const\s+\w+\s*=\s*(\(|[a-z]))/.test(lines[i]);
+        if ((isBlank || isBoundary) && i > start) {
+            const snippet = lines.slice(start, i).join('\n').trim();
+            if (snippet.length > 10) {
+                const tokens = tokenize(snippet);
+                if (tokens.length >= 3) {
+                    const tf = new Map<string, number>();
+                    for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+                    chunks.push({ file: filePath, line: start + 1, snippet, tokens, tf });
+                }
+            }
+            if (isBoundary) start = i; else start = i + 1;
+        }
+    }
+    // Last chunk
+    const last = lines.slice(start).join('\n').trim();
+    if (last.length > 10) {
+        const tokens = tokenize(last);
+        if (tokens.length >= 3) {
+            const tf = new Map<string, number>();
+            for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+            chunks.push({ file: filePath, line: start + 1, snippet: last, tokens, tf });
+        }
+    }
+    return chunks;
+}
+
+class SemanticSearchTool implements vscode.LanguageModelTool<SemanticSearchInput> {
+    async invoke(options: vscode.LanguageModelToolInvocationOptions<SemanticSearchInput>) {
+        const { query, path_glob, max_results, max_files, include_snippets } = options.input;
+        if (!query) return textResult('error: missing argument: query');
+        const glob = path_glob ?? '**/*.{ts,js,tsx,jsx,py,md,json,html,css,rs,go,java}';
+        const maxRes = Math.min(Number(max_results) || 15, 50);
+        const maxFiles = Math.min(Number(max_files) || 200, 500);
+        const showSnippets = include_snippets !== false;
+
+        try {
+            const uris = await vscode.workspace.findFiles(glob, '**/node_modules/**', maxFiles);
+            const queryTokens = tokenize(query);
+            if (queryTokens.length === 0) return textResult('error: query has no indexable terms after stop-word removal');
+
+            // Phase 1: chunk all files
+            const allChunks: Chunk[] = [];
+            for (const uri of uris) {
+                try {
+                    const buf = await fs.readFile(uri.fsPath, 'utf8');
+                    if (buf.length > 200_000) continue; // skip huge files
+                    const rel = vscode.workspace.asRelativePath(uri, false);
+                    allChunks.push(...chunkFile(buf, rel));
+                } catch { /* skip unreadable */ }
+            }
+
+            if (allChunks.length === 0) return textResult(`no indexable content found in ${uris.length} files matching ${glob}`);
+
+            // Phase 2: compute IDF across all chunks
+            const N = allChunks.length;
+            const df = new Map<string, number>(); // document frequency
+            for (const chunk of allChunks) {
+                const seen = new Set<string>();
+                for (const t of chunk.tokens) {
+                    if (!seen.has(t)) { seen.add(t); df.set(t, (df.get(t) ?? 0) + 1); }
+                }
+            }
+            const idf = new Map<string, number>();
+            for (const [term, count] of df) idf.set(term, Math.log((N + 1) / (count + 1)) + 1);
+
+            // Phase 3: score query vector against each chunk (cosine similarity)
+            const queryVec = new Map<string, number>();
+            for (const t of queryTokens) queryVec.set(t, (queryVec.get(t) ?? 0) + 1);
+            const queryNorm = Math.sqrt([...queryVec.values()].reduce((s, v) => s + v * v, 0));
+            if (queryNorm === 0) return textResult('error: query vector has zero magnitude');
+
+            interface Scored { chunk: Chunk; score: number; }
+            const scored: Scored[] = [];
+            for (const chunk of allChunks) {
+                let dot = 0;
+                let chunkNormSq = 0;
+                for (const [term, tfVal] of chunk.tf) {
+                    const w = tfVal * (idf.get(term) ?? 0);
+                    chunkNormSq += w * w;
+                    dot += w * (queryVec.get(term) ?? 0);
+                }
+                const chunkNorm = Math.sqrt(chunkNormSq);
+                if (chunkNorm > 0) {
+                    // Normalize dot product by both norms
+                    const score = dot / (queryNorm * chunkNorm);
+                    if (score > 0.05) scored.push({ chunk, score });
+                }
+            }
+
+            // Phase 4: sort, deduplicate by file, return top results
+            scored.sort((a, b) => b.score - a.score);
+            const seen = new Set<string>();
+            const results: Array<{ file: string; line: number; snippet?: string; score: number; }> = [];
+            for (const s of scored) {
+                const key = `${s.chunk.file}:${s.chunk.line}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                results.push({
+                    file: s.chunk.file,
+                    line: s.chunk.line,
+                    snippet: showSnippets ? s.chunk.snippet.slice(0, 200) : undefined,
+                    score: Math.round(s.score * 1000) / 1000,
+                });
+                if (results.length >= maxRes) break;
+            }
+
+            const summary = results.length === 0
+                ? `no semantic matches for "${query}" — try a different query or broader path_glob`
+                : JSON.stringify({
+                    query,
+                    results,
+                    scanned_files: uris.length,
+                    total_chunks: N,
+                }, null, 2);
+
+            return textResult(summary);
+        } catch (e: any) {
+            return textResult(`error: ${e?.message ?? String(e)}`);
+        }
+    }
+    async prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<SemanticSearchInput>) {
+        return { invocationMessage: `Semantic search: "${options.input.query}"` };
+    }
+}
+
 export function registerHarmonyTools(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.lm.registerTool('harmony_get_errors', new GetErrorsTool()),
@@ -3407,6 +3576,7 @@ export function registerHarmonyTools(context: vscode.ExtensionContext) {
         vscode.lm.registerTool('harmony_debug_dashboard', new DebugDashboardTool()),
         vscode.lm.registerTool('harmony_swarm_autonomy_v2', new SwarmAutonomyV2Tool()),
         vscode.lm.registerTool('harmony_conductor_mesh', new ConductorMeshTool()),
+        vscode.lm.registerTool('harmony_semantic_search', new SemanticSearchTool()),
     );
 }
 
