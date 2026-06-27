@@ -866,14 +866,14 @@ async function resolveReferences(refs: readonly vscode.ChatPromptReference[]): P
     return out;
 }
 
-/** Optional: ping the local Harmony memory hub if reachable. */
+/** Optional: store a turn in the local Harmony memory hub for semantic cross-session recall. */
 async function tryMemoryStore(profileId: string, prompt: string, response: string) {
     try {
         const cfg = vscode.workspace.getConfiguration('harmony');
         if (!cfg.get<boolean>('enableMemoryHub', false)) return;
-        const url = cfg.get<string>('backendUrl') ?? 'http://127.0.0.1:8889';
+        const url = (cfg.get<string>('hub.url') ?? 'http://127.0.0.1:7878').replace(/\/+$/, '');
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 1500);
+        const timer = setTimeout(() => controller.abort(), 2000);
         await fetch(`${url}/ext/v1/memory/store`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -882,6 +882,37 @@ async function tryMemoryStore(profileId: string, prompt: string, response: strin
         }).catch(() => undefined);
         clearTimeout(timer);
     } catch { /* memory hub is optional, never block on it */ }
+}
+
+interface MemoryHubHit {
+    id: number;
+    prompt: string;
+    response: string;
+    source: string;
+    timestamp: string;
+    score: number;
+    tags: string[];
+}
+
+/** Optional: recall relevant past turns from the local Harmony memory hub. */
+async function tryMemoryRecall(query: string, profileId: string, nResults: number = 5): Promise<MemoryHubHit[]> {
+    try {
+        const cfg = vscode.workspace.getConfiguration('harmony');
+        if (!cfg.get<boolean>('enableMemoryHub', false)) return [];
+        const url = (cfg.get<string>('hub.url') ?? 'http://127.0.0.1:7878').replace(/\/+$/, '');
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 2000);
+        const resp = await fetch(`${url}/ext/v1/memory/recall`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, profile: profileId, n_results: nResults }),
+            signal: controller.signal as any
+        });
+        clearTimeout(timer);
+        if (!resp.ok) return [];
+        const data = await resp.json() as { hits?: MemoryHubHit[] };
+        return data.hits ?? [];
+    } catch { return []; }
 }
 
 type DeepSeekRole = 'system' | 'user' | 'assistant' | 'tool';
