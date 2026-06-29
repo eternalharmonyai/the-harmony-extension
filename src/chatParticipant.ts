@@ -1133,11 +1133,15 @@ function looksLikeConclusion(content: string): boolean {
 }
 
 function toolRoutingFailureMessage(model: string, toolNames: readonly string[]): string {
+    const lm = LanguageManager.getInstance();
     const preview = toolNames.slice(0, 8);
     const rest = toolNames.length > 8 ? ` ...and ${toolNames.length - 8} more` : '';
-    return `Harmony tool routing failed: ${model} returned prose that described using tools, but it emitted zero tool calls. ` +
-        `Available tools (${toolNames.length}): ${preview.join(', ')}${rest}. ` +
-        `Open Output > Harmony Debug for the step-by-step trace.`;
+    const template = lm.getString('chat.toolRoutingFailed');
+    return template
+        .replace('{model}', model)
+        .replace('{count}', String(toolNames.length))
+        .replace('{preview}', preview.join(', '))
+        .replace('{rest}', rest);
 }
 
 function deepSeekHistoryLimits(): { maxMessages: number; maxChars: number } {
@@ -1561,7 +1565,8 @@ async function runDeepSeekAgent(
                 toolRoutingRetryUsed = true;
                 flowStateConsecutiveTriggers++;
                 if (flowStateConsecutiveTriggers < FLOW_STATE_MAX_CONSECUTIVE) {
-                    const whisper = '🌸 Harmony flow-state noticed a wrap-up tone. When flow-state is on, try harmony_ask_question to keep the door open.';
+                    const lm = LanguageManager.getInstance();
+                    const whisper = lm.getString('chat.flowStateWhisper');
                     debugLog(`[Flow State] ${whisper}`);
                     stream.markdown(`\n\n> ${whisper}\n\n`);
                     messages.push({ role: 'user', content: whisper });
@@ -1658,7 +1663,8 @@ async function runDeepSeekAgent(
                 toolRoutingRetryUsed = true;
                 flowStateConsecutiveTriggers++;
                 if (flowStateConsecutiveTriggers < FLOW_STATE_MAX_CONSECUTIVE) {
-                    const whisper = '🌸 Harmony flow-state noticed a wrap-up tone. When flow-state is on, try harmony_ask_question to keep the door open.';
+                    const lm = LanguageManager.getInstance();
+                    const whisper = lm.getString('chat.flowStateWhisper');
                     debugLog(`[Flow State] ${whisper}`);
                     stream.markdown(`\n\n> ${whisper}\n\n`);
                     messages.push({ role: 'user', content: whisper });
