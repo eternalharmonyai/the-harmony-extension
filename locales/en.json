@@ -326,6 +326,21 @@
   "compose.files": "file(s)",
   "compose.remove": "Remove",
 
+  "ask.title": "Harmony Ask",
+  "ask.placeholder": "Type your answer here.",
+  "ask.placeholderWithOptions": "Add details here. Ctrl+Enter expands this box.",
+  "ask.hint": "Enter to answer. Ctrl+Enter to expand the input box for longer responses.",
+  "ask.expand": "Expand",
+  "ask.collapse": "Collapse",
+  "ask.cancel": "Cancel",
+  "ask.answer": "Answer",
+  "ask.readyLabel": "✅ Ready — proceed when you are too",
+  "ask.invocationWithOptions": "Asking the user ({count} options)",
+  "ask.invocationSimple": "Asking the user a question",
+
+  "chat.flowStateWhisper": "🌸 Harmony flow-state noticed a wrap-up tone. When flow-state is on, try harmony_ask_question to keep the door open.",
+  "chat.toolRoutingFailed": "Harmony tool routing failed: {model} returned prose that described using tools, but it emitted zero tool calls. Available tools ({count}): {preview}{rest}. Open Output > Harmony Debug for the step-by-step trace.",
+
   "notify.whisperSaved": "📥 Whisper saved — read on next turn.",
   "notify.globalMemoryCleared": "🌐 Global memory cleared.",
   "notify.memoryHidden": "Harmony workspace memory is hidden from the panel only. Persisted @harmony memory was not deleted.",

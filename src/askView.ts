@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { LanguageManager } from './languageManager';
 
 export interface HarmonyAskOption {
     label: string;
@@ -102,6 +103,7 @@ function showHarmonyAskWebview(input: HarmonyAskOptions, token?: vscode.Cancella
 
 
 function renderAskHtml(input: HarmonyAskOptions, nonce: string): string {
+    const lm = LanguageManager.getInstance();
     const question = escapeHtml(input.question);
     const options = normalizeOptions(input.options);
     const allowFreeform = input.allowFreeformInput !== false;
@@ -113,15 +115,20 @@ function renderAskHtml(input: HarmonyAskOptions, nonce: string): string {
         </label>`).join('');
 
     const textareaPlaceholder = input.multiline || options.length > 0
-        ? 'Add details here. Ctrl+Enter expands this box.'
-        : 'Type your answer here.';
+        ? lm.getString('ask.placeholderWithOptions')
+        : lm.getString('ask.placeholder');
+
+    const localized = {
+        expand: lm.getString('ask.expand'),
+        collapse: lm.getString('ask.collapse'),
+    };
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
-<title>Harmony Ask</title>
+<title>${escapeHtml(lm.getString('ask.title'))}</title>
 <style>
     :root { color-scheme: light dark; }
     body {
@@ -223,17 +230,17 @@ function renderAskHtml(input: HarmonyAskOptions, nonce: string): string {
     <div class="question">${question}</div>
     ${options.length > 0 ? `<div class="choices">${optionHtml}</div>` : ''}
     ${allowFreeform ? `<textarea id="answer" placeholder="${escapeAttr(textareaPlaceholder)}"></textarea>` : ''}
-    <div class="hint">Ctrl+Enter to answer. Click Expand to write longer responses.</div>
+    <div class="hint">${escapeHtml(lm.getString('ask.hint'))}</div>
     ${input.readyCheckbox ? `
     <label class="ready-row">
         <input type="checkbox" id="readyCheck">
-        <span>${escapeHtml(input.readyLabel || '✅ Ready — proceed when you are too')}</span>
+        <span>${escapeHtml(input.readyLabel || lm.getString('ask.readyLabel'))}</span>
     </label>` : ''}
     <div class="actions">
-        <button class="secondary" id="expand">Expand</button>
+        <button class="secondary" id="expand">${escapeHtml(lm.getString('ask.expand'))}</button>
         <span class="spacer"></span>
-        <button class="secondary" id="cancel">Cancel</button>
-        <button class="primary" id="answerBtn">Answer</button>
+        <button class="secondary" id="cancel">${escapeHtml(lm.getString('ask.cancel'))}</button>
+        <button class="primary" id="answerBtn">${escapeHtml(lm.getString('ask.answer'))}</button>
     </div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
@@ -241,6 +248,7 @@ const answer = document.getElementById('answer');
 const expand = document.getElementById('expand');
 const answerBtn = document.getElementById('answerBtn');
 const cancel = document.getElementById('cancel');
+const LOC = ${JSON.stringify(localized)};
 
 function selectedChoice() {
     return Array.from(document.querySelectorAll('input[name="choice"]:checked')).map((input) => input.value);
@@ -248,7 +256,7 @@ function selectedChoice() {
 function toggleExpand() {
     if (!answer) return;
     answer.classList.toggle('expanded');
-    expand.textContent = answer.classList.contains('expanded') ? 'Collapse' : 'Expand';
+    expand.textContent = answer.classList.contains('expanded') ? LOC.collapse : LOC.expand;
     answer.focus();
 }
 function submit() {
