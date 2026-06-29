@@ -8,6 +8,7 @@ import * as crypto from 'crypto';
 import { consult, confirmHeavyTier, ProviderId, resolveCollabModel, Tier, modelFor } from './providers';
 import { addTodos, checkTodo, removeTodo, clearTodos, loadTodos, formatTodos } from './todoStore';
 import { HarmonyAskOptions, showHarmonyAsk } from './askView';
+import { LanguageManager } from './languageManager';
 import { invokeCreativeService } from './toolExecutor';
 import { appendContinuityEntry, compactContinuity, createContinuityHandoff, forkContinuity, formatContinuityEntry, importContinuityFromText, latestContinuityEntry, listContinuityEntries } from './continuity';
 import { createRepoPack, providerOrchestratorSystem } from './orchestrator';
@@ -2105,10 +2106,11 @@ class AskQuestionTool implements vscode.LanguageModelTool<AskQuestionInput> {
         }
     }
     async prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<AskQuestionInput>) {
+        const lm = LanguageManager.getInstance();
         const choiceCount = options.input.options?.length ?? 0;
         return { invocationMessage: choiceCount > 0
-            ? `Asking the user (${choiceCount} options)`
-            : 'Asking the user a question'
+            ? lm.getString('ask.invocationWithOptions').replace('{count}', String(choiceCount))
+            : lm.getString('ask.invocationSimple')
         };
     }
 }
