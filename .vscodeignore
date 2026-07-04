@@ -8,6 +8,7 @@ exts.txt
 .harmony-repair/**
 .fastembed_cache/**
 .harmonyhub-test/**
+.carebloom/**
 *_AI/**
 *.md
 !README.md

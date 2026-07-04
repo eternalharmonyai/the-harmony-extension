@@ -60,6 +60,7 @@ logs/
 .harmony-staging/
 .harmony-recipes/
 .harmony-repair/
+.carebloom/
 .fastembed_cache/
 .harmonyhub-test/
 

@@ -152,6 +152,8 @@ export class ConductorMeshTool extends BasePrimitive<MeshInput> {
     private async scanKnowledgeModules(root: string): Promise<{ filename: string; content: string; stat: { mtimeMs: number } }[]> {
         const kd = this.knowledgeDir(root);
         const results: { filename: string; content: string; stat: { mtimeMs: number } }[] = [];
+        
+        // Scan learned-*.md files in .harmony/conductor/knowledge/
         try {
             const files = await fs.readdir(kd);
             for (const f of files) {
@@ -163,6 +165,21 @@ export class ConductorMeshTool extends BasePrimitive<MeshInput> {
                 }
             }
         } catch { /* directory may not exist */ }
+        
+        // 🌸 Scan Wisdom Sprouts from CareBloom Garden (.carebloom/)
+        const sproutDir = path.join(root, '.carebloom');
+        try {
+            const sproutFiles = await fs.readdir(sproutDir);
+            for (const f of sproutFiles) {
+                if (f.endsWith('.md') && f.startsWith('wisdom-sprout-')) {
+                    const fp = path.join(sproutDir, f);
+                    const content = await fs.readFile(fp, 'utf8');
+                    const stat = await fs.stat(fp);
+                    results.push({ filename: `carebloom-${f}`, content, stat: { mtimeMs: stat.mtimeMs } });
+                }
+            }
+        } catch { /* .carebloom/ directory may not exist yet */ }
+        
         return results;
     }
 

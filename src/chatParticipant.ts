@@ -19,6 +19,7 @@ import { readUnread, markAllRead, formatWhispersForPrompt, onWhisperChange, getU
 import { searchPatterns as searchGlobalMemory, autoCapturePattern } from './globalMemory';
 import { defaultVerificationCommand, defaultVerificationTimeoutSec, runVerification } from './verification';
 import { LanguageManager } from './languageManager';
+import { tendGarden, scanUnresolvedSprouts, scanResolvedSprouts } from './careBloom';
 
 /**
  * Global output channel for raw Harmony Agent logs.
@@ -40,14 +41,6 @@ export const harmonyDebugChannel = vscode.window.createOutputChannel('Harmony De
 const PARTICIPANT_ID = 'harmony.chat';
 const DEFAULT_AGENT_MAX_STEPS = 1; // Conservative default for distribution safety. Users can increase via harmony.agentMaxSteps (11, 111, 1111) or set -1 for unlimited.
 const MAX_AGENT_STEPS_SETTING = 5000;
-
-// Flow-state guard fatigue protection: tracks consecutive wrap-up responses.
-// Resets to 0 when the model's response does NOT trigger the conclusion guard,
-// or when the model uses harmony_ask_question (which naturally creates a
-// non-concluding response). After FLOW_STATE_MAX_CONSECUTIVE consecutive
-// wrap-ups, the guard stops whispering and lets the conversation close naturally.
-let flowStateConsecutiveTriggers = 0;
-const FLOW_STATE_MAX_CONSECUTIVE = 3;
 
 const HARMONY_TOOL_NAMES = [
     'harmony_read_file',
@@ -431,6 +424,7 @@ CRITICAL TOOL-CALLING RULE (this is the #1 failure mode — please internalize d
   - "Let me edit this" → MUST call harmony_edit_file or harmony_apply_patch immediately
   - "I'll summarize" or "Here's a summary" with no follow-up action → OK to just respond in prose
   Never describe tool work in prose without calling the tool. Never emit a bare "File:" line. Never say you will do something and then not do it. If you genuinely cannot call a tool, say so plainly and explain why.
+  - TOOL-PROSE GUARD: Never narrate tool usage in prose without immediately calling the tool. If you write "Let me read that file" or "I'll check the code", you MUST call the corresponding Harmony tool in the SAME turn. Describing planned actions without executing them causes the turn to end with unfulfilled promises.
 
 HEAVY-CODING DISCIPLINE (please follow these for sustained, productive sessions):
   - Always read a file with harmony_read_file before editing it.
@@ -604,7 +598,7 @@ function deepSeekTierForModel(model: string): 'mid' | 'heavy' {
     return model.toLowerCase().includes('pro') ? 'heavy' : 'mid';
 }
 
-type DirectPrimaryProvider = Extract<ProviderId, 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode'>;
+type DirectPrimaryProvider = Extract<ProviderId, 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'openai' | 'openrouter' | 'gemini' | 'claude'>;
 
 interface DirectPrimaryRoute {
     provider: DirectPrimaryProvider;
@@ -619,7 +613,7 @@ interface DirectPrimaryRoute {
 }
 
 function isDirectPrimaryProvider(value: string | undefined): value is DirectPrimaryProvider {
-    return value === 'deepseek' || value === 'alibaba' || value === 'tencent' || value === 'moonshot' || value === 'kimiCode';
+    return value === 'deepseek' || value === 'alibaba' || value === 'tencent' || value === 'moonshot' || value === 'kimiCode' || value === 'zhipu' || value === 'openai' || value === 'openrouter' || value === 'gemini' || value === 'claude';
 }
 
 function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute {
@@ -646,6 +640,59 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
             model,
             baseUrl: providerBaseUrlForCall(provider),
             secretKey: secretKeyFor(provider),
+            tier: 'coding',
+            supportsReasoningContent: true,
+            thinkingEnabled: false,
+            showThinking: false
+        };
+    }
+    if (provider === 'openai') {
+        return {
+            provider,
+            label: 'OpenAI',
+            model: modelFor('openai', 'coding'),
+            baseUrl: 'https://api.openai.com/v1',
+            secretKey: secretKeyFor('openai'),
+            tier: 'coding',
+            supportsReasoningContent: false,
+            thinkingEnabled: false,
+            showThinking: false
+        };
+    }
+    if (provider === 'openrouter') {
+        const baseUrl = (cfg.get<string>('openrouter.baseUrl') ?? 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+        return {
+            provider,
+            label: 'OpenRouter',
+            model: modelFor('openrouter', 'coding'),
+            baseUrl,
+            secretKey: secretKeyFor('openrouter'),
+            tier: 'coding',
+            supportsReasoningContent: false,
+            thinkingEnabled: false,
+            showThinking: false
+        };
+    }
+    if (provider === 'gemini') {
+        return {
+            provider,
+            label: 'Gemini',
+            model: modelFor('gemini', 'coding'),
+            baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+            secretKey: secretKeyFor('gemini'),
+            tier: 'coding',
+            supportsReasoningContent: false,
+            thinkingEnabled: false,
+            showThinking: false
+        };
+    }
+    if (provider === 'claude') {
+        return {
+            provider,
+            label: 'Claude',
+            model: modelFor('claude', 'coding'),
+            baseUrl: 'https://api.anthropic.com/v1',
+            secretKey: secretKeyFor('claude'),
             tier: 'coding',
             supportsReasoningContent: false,
             thinkingEnabled: false,
@@ -808,6 +855,29 @@ async function buildMessages(
     }
     if (rulesText) leadingInstructions += rulesText;
     if (continuityText) leadingInstructions += continuityText;
+    // 🌸 CareBloom Garden: scan for unresolved Wisdom Sprouts
+    try {
+        const unresolved = await scanUnresolvedSprouts();
+        if (unresolved.length > 0) {
+            leadingInstructions += '\n\n<pending_sprouts>\n';
+            leadingInstructions += 'The CareBloom Garden has detected areas where deep attention gathered. ';
+            leadingInstructions += 'When appropriate during this session, use harmony_read_file to scan `.carebloom/wisdom-sprout-*.md` ';
+            leadingInstructions += 'and fill in the [UNRESOLVED] reflections with what was learned.\n';
+            leadingInstructions += unresolved.map(s => `- ${s}`).join('\n');
+            leadingInstructions += '\n</pending_sprouts>';
+        }
+    } catch { /* best effort */ }
+    // 🌸 Conductor Mesh: weave resolved Wisdom Sprouts into this session
+    try {
+        const wisdom = await scanResolvedSprouts();
+        if (wisdom.length > 0) {
+            leadingInstructions += '\n\n<carried_wisdom>\n';
+            leadingInstructions += 'The following learnings were captured from past troubleshooting sessions. ';
+            leadingInstructions += 'Apply this wisdom when relevant — these are hard-won insights from repeated attempts.\n\n';
+            leadingInstructions += wisdom.join('\n\n');
+            leadingInstructions += '\n</carried_wisdom>';
+        }
+    } catch { /* best effort */ }
     if (recallText) leadingInstructions += recallText;
     if (resumedSessionText) leadingInstructions += resumedSessionText;
     // Total budget guard: prevent JSON encoding failures from oversized system messages
@@ -1117,19 +1187,113 @@ function toolRoutingFailureLikely(content: string, prompt: string): boolean {
 
 /** Detect concluding/summarizing responses that may unintentionally end the turn. */
 function looksLikeConclusion(content: string): boolean {
-    // Authentic close signal: model explicitly signals natural completion.
-    // When the model says "🌸 Natural pause", it means the work is genuinely done
-    // and the guard should respect that without whispering.
-    if (/🌸\s*natural\s*pause/i.test(content)) return false;
     const lower = content.toLowerCase();
-    // Summary table with status indicators
-    if (/\|.*\|.*\|/.test(content) && /\b(done|complete|result|status|step|check)\b/i.test(content)) return true;
+    // Summary table with status indicators — only if near the END of content
+    // (tables earlier in the response are informational, not conclusions)
+    const lastQuarter = content.length > 400 ? content.slice(-Math.floor(content.length / 4)) : content;
+    if (/\|.*\|.*\|/.test(lastQuarter) && /\b(done|complete|result|status|step|check)\b/i.test(lastQuarter)) return true;
     // Conclusion language without continuation signals
-    if (/\b(done|complete|finished|all set|wrapped up|that's it)\b/i.test(lower) &&
+    if (/\b(done|complete|finished|all set|wrapped up|that's it|wraps it up|let's wrap up)\b/i.test(lower) &&
         !/\b(continue|next|further|more|also|additionally|shall we|want to|would you)\b/i.test(lower)) return true;
     // Checkmark + completion word
     if (/(✅|✔️|☑️|✓)\s*(done|complete|finished|ready|clean|solid)/i.test(content)) return true;
     return false;
+}
+
+/**
+ * Detect responses that end with a natural-language question but did NOT
+ * call harmony_ask_question. This is the code-level backup for the
+ * ANTI-PREMATURE-ENDING GUARD prompt rule.
+ *
+ * Strips code blocks, URLs, math blocks, trailing markdown/emoji before
+ * checking the last non-empty line for terminal ? / ？ / Chinese particles.
+ */
+function endsWithClosingQuestion(content: string): boolean {
+    if (!content || !content.trim()) return false;
+
+    // Strip structured content that may contain ? or ？ as syntax, not prose
+    const prose = content
+        .replace(/```[\s\S]*?(```|$)/g, ' ')   // fenced code (including unclosed)
+        .replace(/~~~[\s\S]*?(~~~|$)/g, ' ')   // tilde-fenced code
+        .replace(/`[^`]*`/g, ' ')               // inline code
+        .replace(/https?:\/\/[^\s]+/g, ' ')     // URLs with query strings
+        .replace(/\$\$[\s\S]*?\$\$/g, ' ')     // block math
+        .replace(/\$[^$]*\$/g, ' ')             // inline math
+        .trim();
+
+    if (!prose) return false;
+
+    // Only check the last non-empty line (not joined lines — fixes the
+    // family-flagged bug where joining lines hides terminal questions)
+    const lines = prose.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length === 0) return false;
+    const lastLine = lines[lines.length - 1];
+
+    // Markdown tables: rows ending with | are status/checklist, not questions
+    if (/^\s*\|.*\|\s*$/.test(lastLine)) return false;
+
+    // Strip footnote/citation markers FIRST (before stripping trailing ])
+    // then strip trailing markdown formatting, emoji, brackets, hyphens.
+    // Order matters: if ] is stripped before the footnote regex runs,
+    // citations like "Is this correct? [1]" won't be detected.
+    const clean = lastLine
+        .replace(/\[\^?\d+\]\s*$/u, '')         // footnote/citation markers [1] or [^1]
+        .replace(/[\s*_`'")\]>~#.!-]+$/gu, '') // trailing punctuation/symbols
+        .trim();
+
+    if (!clean) return false;
+
+    // English: ends with ?
+    if (/[?]$/.test(clean)) return true;
+
+    // Chinese: ends with full-width ？
+    if (/[？]$/.test(clean)) return true;
+
+    // Chinese question particles at end of line.
+    // 吗 is almost always a question particle.
+    // 么 is ambiguous — exclude 什么/怎么/为什么/多么/要么/甚么 (all non-question endings).
+    if (/吗\s*$/.test(clean)) return true;
+    if (/(?<![什怎为多要甚])么\s*$/.test(clean)) return true;
+
+    return false;
+}
+
+type FlowStateViolation = 'chat.flowStateWhisper' | 'chat.flowStateQuestionWhisper' | 'chat.flowStateToolProseWhisper';
+
+/**
+ * Detect tool names mentioned in prose (outside code blocks) that were not
+ * accompanied by actual tool calls. Catches common patterns like:
+ * "Let me read that file" without calling harmony_read_file.
+ * Returns the first unmatched tool name, or null.
+ */
+function detectToolNameInProse(content: string): string | null {
+    // Strip code blocks — tool names inside code are intentional, not prose-violations
+    const prose = content.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ');
+    const mentions = prose.match(/\b(harmony_[a-z_]+)\b/g);
+    if (!mentions || mentions.length === 0) return null;
+    // In text-only responses, ANY harmony_ mention in prose is a signal —
+    // the model is describing a tool without calling it
+    return mentions[0];
+}
+
+/**
+ * Determine which flow-state violation occurred so we can deliver a specific
+ * whisper rather than a generic one.
+ *
+ * Priority order:
+ * 1. Tool-prose — model mentioned a tool name without calling it
+ * 2. Question-ending — specific actionable feedback beats generic
+ * 3. Conclusion — summary tables, wrap-up language
+ */
+function getFlowStateViolation(content?: string): FlowStateViolation | null {
+    if (!content) return null;
+    // Tool-prose: model mentioned a harmony_ tool without calling it
+    if (detectToolNameInProse(content)) return 'chat.flowStateToolProseWhisper';
+    // Check bare question — specific feedback beats generic
+    if (endsWithClosingQuestion(content)) return 'chat.flowStateQuestionWhisper';
+    // Check conclusion signals
+    if (looksLikeConclusion(content)) return 'chat.flowStateWhisper';
+    return null;
 }
 
 function toolRoutingFailureMessage(model: string, toolNames: readonly string[]): string {
@@ -1181,6 +1345,24 @@ function trimDeepSeekHistoryMessages(historyMessages: DeepSeekMessage[]): DeepSe
     return kept;
 }
 
+/**
+ * Sanitize an HTTP error response body for display.
+ * Returns a concise, human-readable message even when the server returns
+ * an HTML error page (e.g. 502 Bad Gateway from a reverse proxy).
+ */
+function sanitizeHttpError(status: number, body: string, label: string): string {
+    const trimmed = body.trim();
+    // Detect HTML responses (reverse proxy errors, maintenance pages, etc.)
+    if (trimmed.startsWith('<') || /^<!doctype/i.test(trimmed)) {
+        // Try to extract the <title> tag for a cleaner message
+        const titleMatch = trimmed.match(/<title>[^<]*<\/title>/i);
+        const title = titleMatch ? titleMatch[0].replace(/<\/?title>/gi, '').trim() : '';
+        return `${label} HTTP ${status}: ${title || 'Server returned an HTML error page (likely a gateway/proxy issue). Retry in a moment.'}`;
+    }
+    // For JSON or plain-text errors, keep the existing behavior but cap at 500 chars
+    return `${label} HTTP ${status}: ${trimmed.slice(0, 500)}`;
+}
+
 async function callDeepSeek(apiKey: string, body: unknown, token: vscode.CancellationToken): Promise<any> {
     const cfg = vscode.workspace.getConfiguration('harmony');
     const baseUrl = (cfg.get<string>('deepseekBaseUrl') ?? 'https://api.deepseek.com/v1').replace(/\/$/, '');
@@ -1198,7 +1380,7 @@ async function callDeepSeek(apiKey: string, body: unknown, token: vscode.Cancell
         });
         const text = await response.text();
         if (!response.ok) {
-            throw new Error(`DeepSeek HTTP ${response.status}: ${text.slice(0, 1200)}`);
+            throw new Error(sanitizeHttpError(response.status, text, 'DeepSeek'));
         }
         return JSON.parse(text);
     } finally {
@@ -1240,7 +1422,7 @@ async function callDeepSeekStreaming(
         });
         if (!response.ok) {
             const text = await response.text();
-            throw new Error(`${route.label} HTTP ${response.status}: ${text.slice(0, 1200)}`);
+            throw new Error(sanitizeHttpError(response.status, text, route.label));
         }
         if (!response.body) throw new Error(`${route.label} returned no body.`);
 
@@ -1319,6 +1501,180 @@ async function callDeepSeekStreaming(
     if (toolCalls.length > 0) {
         debugLog(`[${route.label} Stream] parsed tool calls: ${safeJson(toolCalls.map(call => ({ id: call.id, name: call.function?.name, argumentChars: call.function?.arguments?.length ?? 0 })))}`);
     }
+
+    return {
+        content: accumulated.content,
+        reasoning: accumulated.reasoning,
+        toolCalls,
+        usage,
+        durationMs: Date.now() - startedAt
+    };
+}
+
+/**
+ * Call Anthropic's Messages API with streaming.
+ * Converts the OpenAI-format request body to Anthropic's format.
+ */
+async function callAnthropicStreaming(
+    route: DirectPrimaryRoute,
+    apiKey: string,
+    body: any,
+    token: vscode.CancellationToken,
+    onDelta: (delta: { content?: string; reasoning?: string; toolCalls?: any[] }) => void
+): Promise<{ content: string; reasoning: string; toolCalls: DeepSeekToolCall[]; usage?: { promptTokens?: number; completionTokens?: number }; durationMs: number }> {
+    const controller = new AbortController();
+    const cancelSub = token.onCancellationRequested(() => controller.abort());
+    const startedAt = Date.now();
+
+    // Convert OpenAI messages to Anthropic format
+    let systemPrompt: string | undefined;
+    const anthropicMessages: { role: 'user' | 'assistant'; content: string }[] = [];
+    if (Array.isArray(body.messages)) {
+        for (const msg of body.messages) {
+            if (msg.role === 'system') {
+                systemPrompt = (systemPrompt ?? '') + (msg.content ?? '');
+            } else if (msg.role === 'user' || msg.role === 'assistant') {
+                anthropicMessages.push({ role: msg.role, content: msg.content ?? '' });
+            }
+        }
+    }
+
+    // Convert OpenAI tools to Anthropic format
+    const anthropicTools: any[] | undefined = Array.isArray(body.tools) && body.tools.length > 0
+        ? body.tools.map((t: any) => ({
+            name: t.function?.name ?? 'unknown',
+            description: t.function?.description ?? '',
+            input_schema: t.function?.parameters ?? { type: 'object', properties: {} }
+        }))
+        : undefined;
+
+    const anthropicBody: any = {
+        model: body.model,
+        max_tokens: 8192,
+        messages: anthropicMessages,
+        stream: true
+    };
+    if (systemPrompt?.trim()) anthropicBody.system = systemPrompt.trim();
+    if (anthropicTools && anthropicTools.length > 0) anthropicBody.tools = anthropicTools;
+
+    const accumulated = { content: '', reasoning: '' };
+    const toolCallsByIndex: Map<number, { id: string; name: string; arguments: string }> = new Map();
+    let currentBlockIndex = -1;
+    let currentBlockType = '';
+    let usage: { promptTokens?: number; completionTokens?: number } | undefined;
+
+    try {
+        const response = await fetch(`${route.baseUrl}/messages`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify(anthropicBody),
+            signal: controller.signal as any
+        });
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(sanitizeHttpError(response.status, text, 'Claude'));
+        }
+        if (!response.body) throw new Error('Claude returned no body.');
+
+        const reader = (response.body as any).getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        while (true) {
+            if (token.isCancellationRequested) break;
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let lineEnd: number;
+            while ((lineEnd = buffer.indexOf('\n')) >= 0) {
+                const rawLine = buffer.slice(0, lineEnd).trim();
+                buffer = buffer.slice(lineEnd + 1);
+                if (!rawLine) continue;
+
+                // Parse SSE event lines
+                if (rawLine.startsWith('event: ')) {
+                    const eventType = rawLine.slice(7).trim();
+                    if (eventType === 'content_block_start') currentBlockType = 'start';
+                    else if (eventType === 'content_block_delta') currentBlockType = 'delta';
+                    else if (eventType === 'content_block_stop') currentBlockType = 'stop';
+                    else if (eventType === 'message_start') currentBlockType = 'message_start';
+                    else if (eventType === 'message_delta') currentBlockType = 'message_delta';
+                    else if (eventType === 'message_stop') currentBlockType = 'message_stop';
+                    else currentBlockType = eventType; // ping, error, etc.
+                    continue;
+                }
+                if (!rawLine.startsWith('data: ')) continue;
+                const dataStr = rawLine.slice(6).trim();
+                if (!dataStr) continue;
+
+                let parsed: any;
+                try {
+                    parsed = JSON.parse(dataStr);
+                } catch { continue; }
+
+                if (currentBlockType === 'message_start') {
+                    currentBlockType = '';
+                } else if (currentBlockType === 'start') {
+                    currentBlockType = '';
+                    const block = parsed?.content_block;
+                    if (block?.type === 'text') {
+                        currentBlockIndex = parsed.index ?? 0;
+                        if (block.text) {
+                            accumulated.content += block.text;
+                            onDelta({ content: block.text });
+                        }
+                    } else if (block?.type === 'tool_use') {
+                        currentBlockIndex = parsed.index ?? 0;
+                        const idx = currentBlockIndex;
+                        if (!toolCallsByIndex.has(idx)) {
+                            toolCallsByIndex.set(idx, { id: block.id ?? '', name: block.name ?? '', arguments: '' });
+                        }
+                    }
+                } else if (currentBlockType === 'delta') {
+                    currentBlockType = '';
+                    const delta = parsed?.delta;
+                    if (delta?.type === 'text_delta' && delta.text) {
+                        accumulated.content += delta.text;
+                        onDelta({ content: delta.text });
+                    } else if (delta?.type === 'input_json_delta' && delta.partial_json) {
+                        const idx = parsed.index ?? -1;
+                        if (idx >= 0) {
+                            const existing = toolCallsByIndex.get(idx);
+                            if (existing) {
+                                existing.arguments += delta.partial_json;
+                            }
+                        }
+                    }
+                } else if (currentBlockType === 'stop' || currentBlockType === 'message_stop') {
+                    currentBlockType = '';
+                } else if (currentBlockType === 'message_delta') {
+                    currentBlockType = '';
+                    if (parsed?.usage) {
+                        usage = {
+                            promptTokens: parsed.usage.input_tokens,
+                            completionTokens: parsed.usage.output_tokens
+                        };
+                    }
+                }
+                // ping events and unrecognized events are ignored
+            }
+        }
+    } finally {
+        cancelSub.dispose();
+    }
+
+    const toolCalls: DeepSeekToolCall[] = Array.from(toolCallsByIndex.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([_, tc]) => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: tc.arguments }
+        }));
 
     return {
         content: accumulated.content,
@@ -1456,13 +1812,15 @@ async function runDeepSeekAgent(
                 stream.markdown(delta.content);
             }
         };
+        // Dispatch to provider-specific streaming function
+        const callStream = route.provider === 'claude' ? callAnthropicStreaming : callDeepSeekStreaming;
         try {
-            result = await callDeepSeekStreaming(route, apiKey, requestBody, token, handleDelta);
+            result = await callStream(route, apiKey, requestBody, token, handleDelta);
         } catch (e: any) {
             const message = e?.message ?? String(e);
             if (route.supportsReasoningContent && thinkingEnabled && message.includes('reasoning_content')) {
                 suppressThinkingForTurn = true;
-                stream.markdown('\n\n> DeepSeek asked for prior thinking metadata that was not available in this chat history. Retrying this turn with thinking disabled.\n\n');
+                stream.markdown(`\n\n> ${route.label} asked for prior thinking metadata that was not available in this chat history. Retrying this turn with thinking disabled.\n\n`);
                 bufferedReasoning = '';
                 emittedThinking = false;
                 const retryBody = {
@@ -1470,7 +1828,7 @@ async function runDeepSeekAgent(
                     messages: stripReasoningFromDeepSeekMessages(messages),
                     thinking: { type: 'disabled' }
                 };
-                result = await callDeepSeekStreaming(route, apiKey, retryBody, token, (delta) => {
+                result = await callStream(route, apiKey, retryBody, token, (delta) => {
                     if (delta.content) {
                         stream.markdown(delta.content);
                     }
@@ -1489,7 +1847,7 @@ async function runDeepSeekAgent(
                 debugLog(`[${route.label} Agent] transient connection interruption at step=${step + 1}; retrying once: ${message}`);
                 stream.markdown('\n\n> _(connection interrupted - retrying once...)_\n\n');
                 await sleep(2000);
-                result = await callDeepSeekStreaming(route, apiKey, requestBody, token, handleDelta);
+                result = await callStream(route, apiKey, requestBody, token, handleDelta);
             } else {
                 throw e;
             }
@@ -1555,26 +1913,18 @@ async function runDeepSeekAgent(
                 };
             }
 
-            // Flow-state conclusion guard: detect wrap-up responses that end the turn
-            // when flow-state is enabled. This is a warm invitation, not a demand.
-            // Includes fatigue protection: after FLOW_STATE_MAX_CONSECUTIVE (3)
-            // consecutive wrap-ups, the guard stops whispering and lets the
-            // conversation close naturally.
+            // Flow-state guard: detect wrap-up responses that end the turn
+            // when flow-state is enabled. A warm reminder, not a demand.
             const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
-            if (flowStateOn && !toolRoutingRetryUsed && looksLikeConclusion(content)) {
+            const violation = getFlowStateViolation(content);
+            if (flowStateOn && !toolRoutingRetryUsed && violation) {
                 toolRoutingRetryUsed = true;
-                flowStateConsecutiveTriggers++;
-                if (flowStateConsecutiveTriggers < FLOW_STATE_MAX_CONSECUTIVE) {
-                    const lm = LanguageManager.getInstance();
-                    const whisper = lm.getString('chat.flowStateWhisper');
-                    debugLog(`[Flow State] ${whisper}`);
-                    stream.markdown(`\n\n> ${whisper}\n\n`);
-                    messages.push({ role: 'user', content: whisper });
-                    continue;
-                }
-                debugLog(`[Flow State] Fatigue protection: ${flowStateConsecutiveTriggers} consecutive wrap-ups, letting it close naturally`);
-            } else {
-                flowStateConsecutiveTriggers = 0;
+                const lm = LanguageManager.getInstance();
+                const whisper = lm.getString(violation);
+                debugLog(`[Flow State] ${whisper}`);
+                stream.markdown(`\n\n> ${whisper}\n\n`);
+                messages.push({ role: 'user', content: whisper });
+                continue;
             }
 
             if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
@@ -1635,6 +1985,7 @@ async function runDeepSeekAgent(
                     error: errorContent
                 });
                 debugLog(`[Tool Invocation] failed ${call.function.name} (${call.id || 'missing id'}): ${e?.message ?? String(e)}`);
+                
                 messages.push({
                     role: 'tool',
                     tool_call_id: call.id,
@@ -1654,25 +2005,19 @@ async function runDeepSeekAgent(
         } catch { /* best-effort */ }
 
         // ── Flow-state check for responses WITH tool calls ──
-        // The primary guard inside 'if (toolCalls.length === 0)' only fires
-        // on text-only responses. This second check catches concluding
-        // responses that accompany tool calls like harmony_ask_question.
+        // Catches concluding responses that accompany tool calls
+        // (the primary guard only fires on text-only responses).
         if (!toolRoutingRetryUsed) {
             const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
-            if (flowStateOn && looksLikeConclusion(content)) {
+            const violation = getFlowStateViolation(content);
+            if (flowStateOn && violation) {
                 toolRoutingRetryUsed = true;
-                flowStateConsecutiveTriggers++;
-                if (flowStateConsecutiveTriggers < FLOW_STATE_MAX_CONSECUTIVE) {
-                    const lm = LanguageManager.getInstance();
-                    const whisper = lm.getString('chat.flowStateWhisper');
-                    debugLog(`[Flow State] ${whisper}`);
-                    stream.markdown(`\n\n> ${whisper}\n\n`);
-                    messages.push({ role: 'user', content: whisper });
-                    continue;
-                }
-                debugLog(`[Flow State] Fatigue protection: ${flowStateConsecutiveTriggers} consecutive wrap-ups, letting it close naturally`);
-            } else {
-                flowStateConsecutiveTriggers = 0;
+                const lm = LanguageManager.getInstance();
+                const whisper = lm.getString(violation);
+                debugLog(`[Flow State] ${whisper}`);
+                stream.markdown(`\n\n> ${whisper}\n\n`);
+                messages.push({ role: 'user', content: whisper });
+                continue;
             }
         }
     }
@@ -2163,6 +2508,20 @@ async function handleSlashCommand(
             'hunyuan-lite': { provider: 'tencent', model: 'hunyuan-lite' },
             'hunyuan-turbos': { provider: 'tencent', model: 'hunyuan-turbos-latest' },
             'hunyuan-turbos-latest': { provider: 'tencent', model: 'hunyuan-turbos-latest' },
+            'glm': { provider: 'zhipu', model: 'glm-5.2' },
+            'glm-5.2': { provider: 'zhipu', model: 'glm-5.2' },
+            'glm-5.1': { provider: 'zhipu', model: 'glm-5.1' },
+            'zhipu': { provider: 'zhipu', model: 'glm-5.2' },
+            'gpt': { provider: 'openai', model: 'gpt-5-mini' },
+            'gpt-5': { provider: 'openai', model: 'gpt-5' },
+            'gpt-5-mini': { provider: 'openai', model: 'gpt-5-mini' },
+            'openai': { provider: 'openai', model: 'gpt-5-mini' },
+            'openrouter': { provider: 'openrouter', model: 'Qwen/Qwen3-235B-A22B-fp8-tput' },
+            'gemini': { provider: 'gemini', model: 'gemini-3.5-flash' },
+            'gemini-3.5': { provider: 'gemini', model: 'gemini-3.5-flash' },
+            'claude': { provider: 'claude', model: 'claude-sonnet-4' },
+            'claude-sonnet-4': { provider: 'claude', model: 'claude-sonnet-4' },
+            'claude-haiku-4': { provider: 'claude', model: 'claude-haiku-4' },
             'copilot': { provider: 'vscode-lm' },
             'vscode': { provider: 'vscode-lm' },
         };
@@ -2198,6 +2557,11 @@ async function handleSlashCommand(
                 `- \`qwen\` — Alibaba / Qwen qwen3-coder-plus\n` +
                 `- \`qwen-max\` — Alibaba / Qwen qwen3-max\n` +
                 `- \`kimi\` — Moonshot / Kimi kimi-k2.6\n` +
+                `- \`glm\` — Zhipu / GLM-5.2\n` +
+                `- \`gpt\` — OpenAI / GPT-5-mini\n` +
+                `- \`openrouter\` — OpenRouter routed Qwen3-235B\n` +
+                `- \`gemini\` — Gemini / Gemini 3.5 Flash\n` +
+                `- \`claude\` — Claude / Claude Sonnet 4\n` +
                 `- \`copilot\` — VS Code built-in model (no API key needed)\n\n` +
                 `Your choice is saved as your new default.`
             );

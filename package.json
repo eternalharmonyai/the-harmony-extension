@@ -2,7 +2,7 @@
   "name": "harmony-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "publisher": "harmony",
   "private": true,
   "license": "UNLICENSED",
@@ -8823,6 +8823,18 @@
           "default": false,
           "description": "Skip confirmation dialogs for write_file and run_terminal tool calls. Turn on for uninterrupted agent sessions."
         },
+        "harmony.careBloom.threshold": {
+          "type": "number",
+          "default": 3,
+          "minimum": 2,
+          "maximum": 10,
+          "description": "Number of engagements with the same tool+file before a Wisdom Sprout blooms. Lower = more frequent reflections."
+        },
+        "harmony.errorLearning.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, CareBloom learns from resolved error patterns and proactively advises when similar failures are detected."
+        },
         "harmony.orchestrateMode.enabled": {
           "type": "boolean",
           "default": false,
@@ -9818,6 +9830,7 @@
     "isolated-vm": "^5.0.3",
     "isomorphic-git": "^1.38.5",
     "pdf-parse": "^2.4.5",
+    "tesseract.js": "^5.1.1",
     "zod": "^4.4.3"
   }
 }
