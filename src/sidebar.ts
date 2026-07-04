@@ -118,8 +118,7 @@ const PRIMARY_MODEL_OPTIONS: Record<string, { value: string; label: string }[]> 
     { value: 'kimi-k2-instruct-0905', label: 'kimi-k2-instruct-0905 (legacy k2)' },
   ],
   tencent: [
-    { value: 'hunyuan-turbos-latest', label: 'hunyuan-turbos-latest (latest)' },
-    { value: 'hunyuan-lite', label: 'hunyuan-lite (fast, free tier)' },
+    { value: 'hy3-preview', label: 'hy3-preview (flagship)' },
   ],
   zhipu: [
     { value: 'glm-5.1', label: 'glm-5.1 (fast, light)' },

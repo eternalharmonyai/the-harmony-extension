@@ -1514,6 +1514,95 @@ async function callDeepSeekStreaming(
 }
 
 /**
+ * Enforce strict user/tool ↔ assistant alternation for Tencent Hunyuan.
+ * - Side A: user/tool messages
+ * - Side B: assistant messages
+ * - Consecutive tool messages are allowed (safeMultiTool)
+ * - Leading tool messages (no prior assistant) are dropped
+ * - Trailing assistant gets a dummy user/tool appended
+ */
+interface _Message {
+    role: 'user' | 'assistant' | 'tool';
+    content?: string | any[];
+    tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+    tool_call_id?: string;
+    name?: string;
+}
+
+function sanitizeMessagesForTencent(messages: _Message[]): _Message[] {
+    if (!messages?.length) return [];
+
+    // Remove leading tool messages with no prior assistant context
+    let startIdx = 0;
+    while (startIdx < messages.length && messages[startIdx].role === 'tool') startIdx++;
+    messages = messages.slice(startIdx);
+    if (!messages.length) return [{ role: 'user', content: 'Hello' }];
+
+    const result: _Message[] = [];
+
+    // Seed: prepend user if first message is assistant
+    if (messages[0].role === 'assistant') {
+        result.push({ role: 'user', content: ' ' });
+    }
+    result.push(structuredClone(messages[0]));
+
+    // Track expected next side (A = user/tool, B = assistant)
+    let expectedSide: 'A' | 'B' = result[result.length - 1].role === 'assistant' ? 'A' : 'B';
+
+    for (let i = 1; i < messages.length; i++) {
+        const current = messages[i];
+        const currentSide: 'A' | 'B' = current.role === 'assistant' ? 'B' : 'A';
+        // Consecutive tool messages are allowed (safeMultiTool)
+        const safeMultiTool = result[result.length - 1].role === 'tool' && current.role === 'tool';
+
+        if (currentSide === expectedSide || safeMultiTool) {
+            result.push(structuredClone(current));
+            // Don't advance expectedSide on repeated tool messages
+            if (!safeMultiTool) {
+                expectedSide = currentSide === 'A' ? 'B' : 'A';
+            }
+        } else {
+            // Merge into last message of same side
+            result[result.length - 1] = mergeMessages(result[result.length - 1], current);
+        }
+    }
+
+    // Enforce trailing user/tool
+    if (result.length > 0 && result[result.length - 1].role === 'assistant') {
+        result.push({ role: 'user', content: ' ' });
+    }
+
+    return result;
+}
+
+function mergeMessages(base: _Message, additional: _Message): _Message {
+    const merged = structuredClone(base);
+
+    // Safely handle string vs array/object content
+    const baseContent = typeof base.content === 'string' ? base.content : '';
+    const addContent = typeof additional.content === 'string' ? additional.content : '';
+
+    if (baseContent && addContent) {
+        merged.content = baseContent + '\n\n' + addContent;
+    } else if (addContent) {
+        merged.content = addContent;
+    }
+
+    // Preserve tool calls
+    if (base.tool_calls && additional.tool_calls) {
+        merged.tool_calls = [...base.tool_calls, ...additional.tool_calls];
+    } else if (additional.tool_calls) {
+        merged.tool_calls = additional.tool_calls;
+    }
+
+    // Preserve additional metadata
+    if (additional.tool_call_id && !merged.tool_call_id) merged.tool_call_id = additional.tool_call_id;
+    if (additional.name && !merged.name) merged.name = additional.name;
+
+    return merged;
+}
+
+/**
  * Call Tencent Hunyuan via native Cloud API v3 (TC3-HMAC-SHA256 signing).
  * Used when the user has SecretId + SecretKey but no OpenAI-compatible API key.
  * Converts OpenAI-format request body to Tencent native format, streams SSE response.
@@ -1529,12 +1618,52 @@ async function callTencentNativeStreaming(
     const cancelSub = token.onCancellationRequested(() => controller.abort());
     const startedAt = Date.now();
 
-    // Convert OpenAI messages to Tencent native format (PascalCase)
+    // Sanitize messages for Tencent's strict alternation requirements.
+    // System messages are exempt from alternation — extract, sanitize the rest, then prepend.
+    let systemContent = '';
+    if (Array.isArray(body.messages)) {
+        const systemMsgs = body.messages.filter((m: any) => m.role === 'system');
+        const nonSystemMsgs = body.messages.filter((m: any) => m.role !== 'system');
+        if (systemMsgs.length > 0) {
+            systemContent = systemMsgs.map((m: any) => typeof m.content === 'string' ? m.content : '').filter(Boolean).join('\n\n');
+        }
+        body.messages = sanitizeMessagesForTencent(nonSystemMsgs);
+        if (systemContent) {
+            body.messages.unshift({ role: 'system', content: systemContent });
+        }
+    }
+
+    // Convert OpenAI messages to Tencent native format (PascalCase).
+    // Tool role stays as Tool — Tencent allows consecutive tool messages.
     const tencentMessages: any[] = [];
     if (Array.isArray(body.messages)) {
         for (const msg of body.messages) {
-            if (msg.role === 'system' || msg.role === 'user' || msg.role === 'assistant') {
-                tencentMessages.push({ Role: msg.role.charAt(0).toUpperCase() + msg.role.slice(1), Content: msg.content ?? '' });
+            if (msg.role === 'system' || msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool') {
+                let content = msg.content ?? '';
+                if (Array.isArray(content)) {
+                    content = content
+                        .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
+                        .map((part: any) => part.text)
+                        .join('');
+                }
+                const tencentRole = msg.role.charAt(0).toUpperCase() + msg.role.slice(1);
+                const tencentMsg: any = { Role: tencentRole, Content: content };
+                // Preserve tool calls on assistant messages (Tencent native PascalCase)
+                if (msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+                    tencentMsg.ToolCalls = msg.tool_calls.map((tc: any) => ({
+                        Id: tc.id ?? '',
+                        Type: tc.type ?? 'function',
+                        Function: {
+                            Name: tc.function?.name ?? '',
+                            Arguments: tc.function?.arguments ?? ''
+                        }
+                    }));
+                }
+                // Preserve tool_call_id on tool result messages
+                if (msg.role === 'tool' && msg.tool_call_id) {
+                    tencentMsg.ToolCallId = msg.tool_call_id;
+                }
+                tencentMessages.push(tencentMsg);
             }
         }
     }
@@ -1596,6 +1725,9 @@ async function callTencentNativeStreaming(
             const { value, done } = await reader.read();
             if (done) break;
             const chunkText = decoder.decode(value, { stream: true });
+            if (vscode.workspace.getConfiguration('harmony').get<boolean>('logRawStream')) {
+                debugAppend(chunkText);
+            }
             buffer += chunkText;
 
             let lineEnd: number;
@@ -1610,6 +1742,14 @@ async function callTencentNativeStreaming(
                     parsed = JSON.parse(data);
                 } catch {
                     continue;
+                }
+
+                // Check for Tencent error in response
+                const tencentError = parsed?.Response?.Error ?? parsed?.error;
+                if (tencentError) {
+                    const errMsg = tencentError.Message ?? tencentError.message ?? 'Unknown Tencent API error';
+                    const errCode = tencentError.Code ?? tencentError.code ?? 'unknown';
+                    throw new Error(`${route.label} API error (${errCode}): ${errMsg}`);
                 }
 
                 // Tencent native response: Response.Choices[0].Delta.Content
@@ -1666,10 +1806,96 @@ async function callTencentNativeStreaming(
         debugLog(`[${route.label} Native Stream] parsed tool calls: ${safeJson(toolCalls.map(call => ({ id: call.id, name: call.function?.name, argumentChars: call.function?.arguments?.length ?? 0 })))}`);
     }
 
+    // If streaming returned nothing, retry with Stream: false (non-streaming fallback)
+    if (!accumulated.content && toolCalls.length === 0) {
+        debugLog(`[${route.label} Native Stream] Empty streaming response — retrying with Stream: false (non-streaming fallback)`);
+        const nonStreamPayload = { ...payload, Stream: false };
+        const nonStreamPayloadStr = JSON.stringify(nonStreamPayload);
+        const nsTimestamp = Math.floor(Date.now() / 1000);
+        const { headers: nsHeaders } = tencentSignV3(nativeCreds.secretId, nativeCreds.secretKey, nonStreamPayloadStr, nsTimestamp);
+
+        const nsResponse = await fetch(url, {
+            method: 'POST',
+            headers: nsHeaders,
+            body: nonStreamPayloadStr,
+            signal: controller.signal as any
+        });
+        if (!nsResponse.ok) {
+            const text = await nsResponse.text();
+            throw new Error(sanitizeHttpError(nsResponse.status, text, route.label));
+        }
+        const nsText = await nsResponse.text();
+        debugLog(`[${route.label} Native Non-Stream] Response length: ${nsText.length}`);
+        let nsParsed: any;
+        try {
+            nsParsed = JSON.parse(nsText);
+        } catch {
+            debugLog(`[${route.label} Native Non-Stream] Failed to parse response as JSON: ${nsText.slice(0, 500)}`);
+        }
+        if (nsParsed) {
+            // Check for error
+            const nsError = nsParsed?.Response?.Error ?? nsParsed?.error;
+            if (nsError) {
+                const errMsg = nsError.Message ?? nsError.message ?? 'Unknown Tencent API error';
+                const errCode = nsError.Code ?? nsError.code ?? 'unknown';
+                throw new Error(`${route.label} API error (${errCode}): ${errMsg}`);
+            }
+            // Extract content
+            const nsDelta = nsParsed?.Response?.Choices?.[0]?.Delta
+                ?? nsParsed?.Response?.Choices?.[0]?.Message
+                ?? nsParsed?.Choices?.[0]?.Message
+                ?? nsParsed?.Choices?.[0]?.delta
+                ?? nsParsed?.choices?.[0]?.message;
+            if (nsDelta) {
+                const nsContent = nsDelta.Content ?? nsDelta.content ?? '';
+                if (typeof nsContent === 'string' && nsContent) {
+                    accumulated.content = nsContent;
+                    onDelta({ content: nsContent });
+                }
+                // Tool calls
+                const nsTcArray = nsDelta.Tools ?? nsDelta.tool_calls;
+                if (Array.isArray(nsTcArray)) {
+                    for (const tc of nsTcArray) {
+                        const idx = tc.Index ?? tc.index ?? 0;
+                        let existing = toolCallsByIndex.get(idx);
+                        if (!existing) {
+                            existing = { id: tc.Id ?? tc.id ?? '', type: 'function', function: { name: '', arguments: '' } };
+                            toolCallsByIndex.set(idx, existing);
+                        }
+                        if (tc.Id) existing.id = tc.Id;
+                        if (tc.id) existing.id = tc.id;
+                        const fn = tc.Function ?? tc.function;
+                        if (fn?.Name) existing.function.name += fn.Name;
+                        if (fn?.name) existing.function.name += fn.name;
+                        if (fn?.Arguments) existing.function.arguments += fn.Arguments;
+                        if (fn?.arguments) existing.function.arguments += fn.arguments;
+                    }
+                }
+            }
+            // Usage
+            const nsU = nsParsed?.Response?.Usage ?? nsParsed?.Usage ?? nsParsed?.usage;
+            if (nsU) {
+                usage = {
+                    promptTokens: nsU.PromptTokens ?? nsU.prompt_tokens ?? nsU.InputTokens ?? 0,
+                    completionTokens: nsU.CompletionTokens ?? nsU.completion_tokens ?? nsU.OutputTokens ?? 0
+                };
+            }
+        }
+    }
+
+    const finalToolCalls = Array.from(toolCallsByIndex.values()) as DeepSeekToolCall[];
+    if (finalToolCalls.length > 0) {
+        debugLog(`[${route.label} Native Stream] parsed tool calls: ${safeJson(finalToolCalls.map(call => ({ id: call.id, name: call.function?.name, argumentChars: call.function?.arguments?.length ?? 0 })))}`);
+    }
+
+    if (!accumulated.content && finalToolCalls.length === 0) {
+        debugLog(`[${route.label} Native Stream] WARNING: no content and no tool calls received even after non-streaming fallback.`);
+    }
+
     return {
         content: accumulated.content,
         reasoning: accumulated.reasoning,
-        toolCalls,
+        toolCalls: finalToolCalls,
         usage,
         durationMs: Date.now() - startedAt
     };
@@ -2684,10 +2910,10 @@ async function handleSlashCommand(
             'kimi-k2.6': { provider: 'moonshot', model: 'kimi-k2.6' },
             'kimi-k2': { provider: 'moonshot', model: 'kimi-k2.6' },
             'kimi-latest': { provider: 'moonshot', model: 'kimi-k2.6' },
-            'hunyuan': { provider: 'tencent', model: 'hunyuan-turbos-latest' },
-            'hunyuan-lite': { provider: 'tencent', model: 'hunyuan-lite' },
-            'hunyuan-turbos': { provider: 'tencent', model: 'hunyuan-turbos-latest' },
-            'hunyuan-turbos-latest': { provider: 'tencent', model: 'hunyuan-turbos-latest' },
+            'hunyuan': { provider: 'tencent', model: 'hy3-preview' },
+            'hunyuan-lite': { provider: 'tencent', model: 'hy3-preview' },
+            'hunyuan-turbos': { provider: 'tencent', model: 'hy3-preview' },
+            'hunyuan-turbos-latest': { provider: 'tencent', model: 'hy3-preview' },
             'glm': { provider: 'zhipu', model: 'glm-5.2' },
             'glm-5.2': { provider: 'zhipu', model: 'glm-5.2' },
             'glm-5.1': { provider: 'zhipu', model: 'glm-5.1' },
