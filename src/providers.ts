@@ -1170,20 +1170,20 @@ export async function discoverModels(
 
 // ── Tencent Cloud API v3 Native Auth (HMAC-SHA256) ──
 
-const TENCENT_NATIVE_HOST = 'hunyuan.tencentcloudapi.com';
-const TENCENT_NATIVE_SERVICE = 'hunyuan';
-const TENCENT_NATIVE_REGION = 'ap-guangzhou';
-const TENCENT_NATIVE_VERSION = '2023-09-01';
+export const TENCENT_NATIVE_HOST = 'hunyuan.tencentcloudapi.com';
+export const TENCENT_NATIVE_SERVICE = 'hunyuan';
+export const TENCENT_NATIVE_REGION = 'ap-guangzhou';
+export const TENCENT_NATIVE_VERSION = '2023-09-01';
 
-function sha256Hex(data: string): string {
+export function sha256Hex(data: string): string {
     return crypto.createHash('sha256').update(data, 'utf8').digest('hex');
 }
 
-function hmacSha256(key: Buffer | string, data: string): Buffer {
+export function hmacSha256(key: Buffer | string, data: string): Buffer {
     return crypto.createHmac('sha256', key).update(data, 'utf8').digest();
 }
 
-function tencentSignV3(secretId: string, secretKey: string, payload: string, timestamp: number): { authorization: string; headers: Record<string, string> } {
+export function tencentSignV3(secretId: string, secretKey: string, payload: string, timestamp: number): { authorization: string; headers: Record<string, string> } {
     const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
     const algorithm = 'TC3-HMAC-SHA256';
 

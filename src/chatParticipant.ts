@@ -13,7 +13,7 @@ import { formatHarmonyToolLedger } from './opsTools';
 import { showHarmonyAsk } from './askView';
 import { appendContinuityEntry, compactContinuity, createContinuityHandoff, forkContinuity, formatContinuityEntry, formatContinuityForPrompt, getContinuityStatus, importContinuityFromText, listContinuityEntries } from './continuity';
 import { formatRulesDetails, formatRulesStatus, loadRulesContext } from './rules';
-import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, listAvailableProviders, modelFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier } from './providers';
+import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, listAvailableProviders, modelFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier, tencentSignV3, TENCENT_NATIVE_HOST, TENCENT_NATIVE_SERVICE, TENCENT_NATIVE_REGION, TENCENT_NATIVE_VERSION, sha256Hex, hmacSha256 } from './providers';
 import { formatMcpStatus, mcpStatusSummary } from './mcp';
 import { readUnread, markAllRead, formatWhispersForPrompt, onWhisperChange, getUnreadCount, startMidSessionTracking, getPendingMidSessionWhispers, markMidSessionWhispersDelivered } from './whisperInbox';
 import { searchPatterns as searchGlobalMemory, autoCapturePattern } from './globalMemory';
@@ -610,6 +610,8 @@ interface DirectPrimaryRoute {
     supportsReasoningContent: boolean;
     thinkingEnabled: boolean;
     showThinking: boolean;
+    /** Tencent native auth creds (SecretId + SecretKey). When set, streaming uses TC3-HMAC-SHA256 signing instead of Bearer token. */
+    tencentNativeCreds?: { secretId: string; secretKey: string };
 }
 
 function isDirectPrimaryProvider(value: string | undefined): value is DirectPrimaryProvider {
@@ -1512,6 +1514,168 @@ async function callDeepSeekStreaming(
 }
 
 /**
+ * Call Tencent Hunyuan via native Cloud API v3 (TC3-HMAC-SHA256 signing).
+ * Used when the user has SecretId + SecretKey but no OpenAI-compatible API key.
+ * Converts OpenAI-format request body to Tencent native format, streams SSE response.
+ */
+async function callTencentNativeStreaming(
+    route: DirectPrimaryRoute,
+    nativeCreds: { secretId: string; secretKey: string },
+    body: any,
+    token: vscode.CancellationToken,
+    onDelta: (delta: { content?: string; reasoning?: string; toolCalls?: any[] }) => void
+): Promise<{ content: string; reasoning: string; toolCalls: DeepSeekToolCall[]; usage?: { promptTokens?: number; completionTokens?: number }; durationMs: number }> {
+    const controller = new AbortController();
+    const cancelSub = token.onCancellationRequested(() => controller.abort());
+    const startedAt = Date.now();
+
+    // Convert OpenAI messages to Tencent native format (PascalCase)
+    const tencentMessages: any[] = [];
+    if (Array.isArray(body.messages)) {
+        for (const msg of body.messages) {
+            if (msg.role === 'system' || msg.role === 'user' || msg.role === 'assistant') {
+                tencentMessages.push({ Role: msg.role.charAt(0).toUpperCase() + msg.role.slice(1), Content: msg.content ?? '' });
+            }
+        }
+    }
+
+    // Convert OpenAI tools to Tencent native format
+    const tencentTools: any[] | undefined = Array.isArray(body.tools) && body.tools.length > 0
+        ? body.tools.map((t: any) => ({
+            Type: 'function',
+            Function: {
+                Name: t.function?.name ?? 'unknown',
+                Description: t.function?.description ?? '',
+                Parameters: JSON.stringify(t.function?.parameters ?? { type: 'object', properties: {} })
+            }
+        }))
+        : undefined;
+
+    const payload: any = {
+        Model: body.model,
+        Messages: tencentMessages,
+        Stream: true
+    };
+    if (tencentTools && tencentTools.length > 0) {
+        payload.Tools = tencentTools;
+        payload.ToolChoice = 'auto';
+    }
+
+    const payloadStr = JSON.stringify(payload);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const { headers } = tencentSignV3(nativeCreds.secretId, nativeCreds.secretKey, payloadStr, timestamp);
+
+    const url = `https://${TENCENT_NATIVE_HOST}/`;
+    if (vscode.workspace.getConfiguration('harmony').get<boolean>('enableDebugLogging') !== false) {
+        harmonyDebugChannel.appendLine(`\n[${route.label} Native API] Fetching ${url} ...`);
+    }
+
+    const accumulated = { content: '', reasoning: '' };
+    const toolCallsByIndex: Map<number, any> = new Map();
+    let usage: { promptTokens?: number; completionTokens?: number } | undefined;
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: payloadStr,
+            signal: controller.signal as any
+        });
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(sanitizeHttpError(response.status, text, route.label));
+        }
+        if (!response.body) throw new Error(`${route.label} returned no body.`);
+
+        const reader = (response.body as any).getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        while (true) {
+            if (token.isCancellationRequested) break;
+            const { value, done } = await reader.read();
+            if (done) break;
+            const chunkText = decoder.decode(value, { stream: true });
+            buffer += chunkText;
+
+            let lineEnd: number;
+            while ((lineEnd = buffer.indexOf('\n')) >= 0) {
+                const rawLine = buffer.slice(0, lineEnd).trim();
+                buffer = buffer.slice(lineEnd + 1);
+                if (!rawLine || !rawLine.startsWith('data:')) continue;
+                const data = rawLine.slice(5).trim();
+                if (data === '[DONE]') continue;
+                let parsed: any;
+                try {
+                    parsed = JSON.parse(data);
+                } catch {
+                    continue;
+                }
+
+                // Tencent native response: Response.Choices[0].Delta.Content
+                // Also handle OpenAI-compatible format as fallback
+                const delta = parsed?.Response?.Choices?.[0]?.Delta
+                    ?? parsed?.Choices?.[0]?.Delta
+                    ?? parsed?.choices?.[0]?.delta;
+                if (!delta) continue;
+
+                if (typeof delta.Content === 'string' && delta.Content) {
+                    accumulated.content += delta.Content;
+                    onDelta({ content: delta.Content });
+                } else if (typeof delta.content === 'string' && delta.content) {
+                    accumulated.content += delta.content;
+                    onDelta({ content: delta.content });
+                }
+
+                // Tool calls (Tencent native format)
+                const tcArray = delta.Tools ?? delta.tool_calls;
+                if (Array.isArray(tcArray)) {
+                    for (const tc of tcArray) {
+                        const idx = tc.Index ?? tc.index ?? 0;
+                        let existing = toolCallsByIndex.get(idx);
+                        if (!existing) {
+                            existing = { id: tc.Id ?? tc.id ?? '', type: 'function', function: { name: '', arguments: '' } };
+                            toolCallsByIndex.set(idx, existing);
+                        }
+                        if (tc.Id) existing.id = tc.Id;
+                        if (tc.id) existing.id = tc.id;
+                        const fn = tc.Function ?? tc.function;
+                        if (fn?.Name) existing.function.name += fn.Name;
+                        if (fn?.name) existing.function.name += fn.name;
+                        if (fn?.Arguments) existing.function.arguments += fn.Arguments;
+                        if (fn?.arguments) existing.function.arguments += fn.arguments;
+                    }
+                }
+
+                // Usage
+                const u = parsed?.Response?.Usage ?? parsed?.Usage ?? parsed?.usage;
+                if (u) {
+                    usage = {
+                        promptTokens: u.PromptTokens ?? u.prompt_tokens ?? u.InputTokens ?? 0,
+                        completionTokens: u.CompletionTokens ?? u.completion_tokens ?? u.OutputTokens ?? 0
+                    };
+                }
+            }
+        }
+    } finally {
+        cancelSub.dispose();
+    }
+
+    const toolCalls = Array.from(toolCallsByIndex.values()) as DeepSeekToolCall[];
+    if (toolCalls.length > 0) {
+        debugLog(`[${route.label} Native Stream] parsed tool calls: ${safeJson(toolCalls.map(call => ({ id: call.id, name: call.function?.name, argumentChars: call.function?.arguments?.length ?? 0 })))}`);
+    }
+
+    return {
+        content: accumulated.content,
+        reasoning: accumulated.reasoning,
+        toolCalls,
+        usage,
+        durationMs: Date.now() - startedAt
+    };
+}
+
+/**
  * Call Anthropic's Messages API with streaming.
  * Converts the OpenAI-format request body to Anthropic's format.
  */
@@ -1816,9 +1980,14 @@ async function runDeepSeekAgent(
             }
         };
         // Dispatch to provider-specific streaming function
+        const isTencentNative = !!(route.tencentNativeCreds);
         const callStream = route.provider === 'claude' ? callAnthropicStreaming : callDeepSeekStreaming;
         try {
-            result = await callStream(route, apiKey, requestBody, token, handleDelta);
+            if (isTencentNative) {
+                result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, requestBody, token, handleDelta);
+            } else {
+                result = await callStream(route, apiKey, requestBody, token, handleDelta);
+            }
         } catch (e: any) {
             const message = e?.message ?? String(e);
             if (route.supportsReasoningContent && thinkingEnabled && message.includes('reasoning_content')) {
@@ -1831,11 +2000,15 @@ async function runDeepSeekAgent(
                     messages: stripReasoningFromDeepSeekMessages(messages),
                     thinking: { type: 'disabled' }
                 };
-                result = await callStream(route, apiKey, retryBody, token, (delta) => {
-                    if (delta.content) {
-                        stream.markdown(delta.content);
-                    }
-                });
+                if (isTencentNative) {
+                    result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, retryBody, token, (delta) => {
+                        if (delta.content) { stream.markdown(delta.content); }
+                    });
+                } else {
+                    result = await callStream(route, apiKey, retryBody, token, (delta) => {
+                        if (delta.content) { stream.markdown(delta.content); }
+                    });
+                }
             } else if (!networkRetried && !token.isCancellationRequested && isTransientProviderInterruption(e)) {
                 const autoRetry = vscode.workspace.getConfiguration('harmony').get<boolean>('autoRetry') ?? true;
                 if (!autoRetry) {
@@ -1850,7 +2023,11 @@ async function runDeepSeekAgent(
                 debugLog(`[${route.label} Agent] transient connection interruption at step=${step + 1}; retrying once: ${message}`);
                 stream.markdown('\n\n> _(connection interrupted - retrying once...)_\n\n');
                 await sleep(2000);
-                result = await callStream(route, apiKey, requestBody, token, handleDelta);
+                if (isTencentNative) {
+                    result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, requestBody, token, handleDelta);
+                } else {
+                    result = await callStream(route, apiKey, requestBody, token, handleDelta);
+                }
             } else {
                 throw e;
             }
@@ -3196,7 +3373,7 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
         const decorated = decoratePromptForCommand(effectiveRequest);
         const forceReadOnly = shouldForceReadOnly(effectiveRequest);
         const provider = vscode.workspace.getConfiguration('harmony').get<string>('modelProvider') ?? 'vscode-lm';
-        const directRoute = isDirectPrimaryProvider(provider) ? directPrimaryRoute(provider) : undefined;
+        let directRoute = isDirectPrimaryProvider(provider) ? directPrimaryRoute(provider) : undefined;
         const modelLabel = directRoute
             ? `${directRoute.label} (${directRoute.model})`
             : `${request.model.vendor}/${request.model.family}`;
@@ -3208,7 +3385,18 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
             let turnOutcome: AgentRunOutcome;
 
             if (directRoute) {
-                const apiKey = await context.secrets.get(directRoute.secretKey);
+                let apiKey = await context.secrets.get(directRoute.secretKey);
+                
+                // Tencent native auth fallback: if no OpenAI-compatible API key, try SecretId + SecretKey
+                if (!apiKey && directRoute.provider === 'tencent') {
+                    const tkSid = await context.secrets.get('harmony.tencent.secretId');
+                    const tkSkey = await context.secrets.get('harmony.tencent.secretKey');
+                    if (tkSid && tkSkey) {
+                        directRoute = { ...directRoute, tencentNativeCreds: { secretId: tkSid, secretKey: tkSkey } };
+                        apiKey = '__tencent_native__'; // sentinel so the guard below passes; actual auth uses TC3 signing
+                    }
+                }
+                
                 if (!apiKey) {
                     stream.markdown(
                         `${directRoute.label} is selected for primary Harmony turns, but no API key is saved in VS Code Secret Storage at \`${directRoute.secretKey}\`.\n\n` +
