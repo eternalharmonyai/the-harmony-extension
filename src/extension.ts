@@ -12,6 +12,8 @@ import { registerSelfTools } from './selfTools';
 import { registerCognitionTools } from './cognitionTools';
 import { registerRepairRestore } from './repairRestore';
 import { registerEvidenceTools } from './evidenceTools';
+import { registerResearchUpgradeTools } from './researchTools';
+import { initializeErrorLearning } from './careBloom';
 import { registerProviderRegistryTools } from './providerRegistryTools';
 import { registerSwarmTools } from './swarmTools';
 import { registerDeepOrchestrate } from './deepOrchestrate';
@@ -1069,6 +1071,9 @@ export function activate(context: vscode.ExtensionContext) {
         migrateLegacyToSlots(context.secrets, p).catch(() => {});
     }
     
+    // 0c. Initialize error pattern learning (reads saved config + listens for changes).
+    initializeErrorLearning();
+    
     registerChatHistoryProvider(context);
 
     // Register DeepSeek as a native language model provider in Copilot Chat.
@@ -1118,7 +1123,7 @@ export function activate(context: vscode.ExtensionContext) {
             const currentDeepSeek = cfg.get<string>('deepseekModel') ?? 'deepseek-v4-flash';
             const currentAlibaba = modelFor('alibaba', 'coding');
             const currentMoonshot = modelFor('moonshot', 'coding');
-            type ModelPick = vscode.QuickPickItem & { action?: 'set' | 'discover'; provider?: 'vscode-lm' | 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode'; model?: string };
+            type ModelPick = vscode.QuickPickItem & { action?: 'set' | 'discover'; provider?: 'vscode-lm' | 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'openai' | 'openrouter' | 'gemini' | 'claude'; model?: string };
             const picks: ModelPick[] = [
                 {
                     label: 'DeepSeek V4 Pro',
@@ -1169,6 +1174,46 @@ export function activate(context: vscode.ExtensionContext) {
                     picked: currentProvider === 'moonshot' && currentMoonshot === 'kimi-k2.6'
                 },
                 {
+                    label: 'Zhipu / GLM-5.2',
+                    description: 'Harmony direct API',
+                    detail: 'Zhipu (Z.A.I) GLM-5.2 coding route, OpenAI-compatible. Uses your Zhipu / GLM API key.',
+                    provider: 'zhipu',
+                    model: 'glm-5.2',
+                    picked: currentProvider === 'zhipu'
+                },
+                {
+                    label: 'OpenAI / GPT-5-mini',
+                    description: 'Harmony direct API',
+                    detail: 'OpenAI GPT-5-mini fast coding route. Uses your OpenAI API key.',
+                    provider: 'openai',
+                    model: 'gpt-5-mini',
+                    picked: currentProvider === 'openai'
+                },
+                {
+                    label: 'OpenRouter / Qwen3-235B',
+                    description: 'Harmony direct API',
+                    detail: 'OpenRouter routed Qwen3-235B-A22B. Uses your OpenRouter API key.',
+                    provider: 'openrouter',
+                    model: 'Qwen/Qwen3-235B-A22B-fp8-tput',
+                    picked: currentProvider === 'openrouter'
+                },
+                {
+                    label: 'Gemini / Gemini 3.5 Flash',
+                    description: 'Harmony direct API',
+                    detail: 'Google Gemini 3.5 Flash via OpenAI-compatible endpoint. Uses your Gemini API key.',
+                    provider: 'gemini',
+                    model: 'gemini-3.5-flash',
+                    picked: currentProvider === 'gemini'
+                },
+                {
+                    label: 'Claude / Claude Sonnet 4',
+                    description: 'Harmony direct API',
+                    detail: 'Anthropic Claude Sonnet 4. Uses your Claude API key.',
+                    provider: 'claude',
+                    model: 'claude-sonnet-4',
+                    picked: currentProvider === 'claude'
+                },
+                {
                     label: 'VS Code / Copilot dropdown',
                     description: 'VS Code Language Model API',
                     detail: 'Uses whatever model/account access VS Code Chat provides. Requires the relevant Copilot plan for premium models.',
@@ -1195,7 +1240,7 @@ export function activate(context: vscode.ExtensionContext) {
             await cfg.update('modelProvider', pick.provider, vscode.ConfigurationTarget.Global);
             if (pick.provider === 'deepseek' && pick.model) {
                 await cfg.update('deepseekModel', pick.model, vscode.ConfigurationTarget.Global);
-            } else if ((pick.provider === 'alibaba' || pick.provider === 'tencent' || pick.provider === 'moonshot') && pick.model) {
+            } else if ((pick.provider === 'alibaba' || pick.provider === 'tencent' || pick.provider === 'moonshot' || pick.provider === 'zhipu' || pick.provider === 'openai' || pick.provider === 'openrouter' || pick.provider === 'gemini' || pick.provider === 'claude') && pick.model) {
                 await cfg.update(`providers.${pick.provider}.coding`, pick.model, vscode.ConfigurationTarget.Global);
             }
             const summary = pick.provider === 'vscode-lm'
@@ -1216,6 +1261,7 @@ export function activate(context: vscode.ExtensionContext) {
     registerCognitionTools(context);
     registerRepairRestore(context);
     registerEvidenceTools(context);
+    registerResearchUpgradeTools(context);
     registerProviderRegistryTools(context);
     registerSwarmTools(context);
     registerDeepOrchestrate(context);
@@ -2518,7 +2564,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Persistent status bar launcher — always visible at the bottom of VS Code.
     const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, harmonyStatusPriority.primary);
-    const DIRECT_PRIMARY = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode'];
+    const DIRECT_PRIMARY = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'zhipu', 'openai', 'openrouter', 'gemini', 'claude'];
     const refreshHarmonyBar = () => {
         const cfg = vscode.workspace.getConfiguration('harmony');
         const provider = cfg.get<string>('modelProvider') ?? 'vscode-lm';
@@ -3953,7 +3999,7 @@ document.getElementById('cancel').addEventListener('click', () => {
     // ── Custom Swarm Roles Commands ──────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.addCustomRole', async () => {
-            const id = await vscode.window.showInputBox({ prompt: 'Role ID (e.g., documenter, security_auditor)', placeHolder: 'documenter' });
+            const id = await vscode.window.showInputBox({ prompt: 'Role ID (e.g., documenter, code_reviewer)', placeHolder: 'documenter' });
             if (!id) return;
             const label = await vscode.window.showInputBox({ prompt: 'Role label (e.g., 📝 Documenter)', placeHolder: '📝 Documenter' });
             if (!label) return;

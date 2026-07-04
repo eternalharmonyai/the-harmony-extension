@@ -329,6 +329,10 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                         await vscode.workspace.getConfiguration('harmony')
                             .update('vision.skipOcr', !!msg.value, true);
                         break;
+                    case 'toggleErrorLearning':
+                        await vscode.workspace.getConfiguration('harmony')
+                            .update('errorLearning.enabled', !!msg.value, true);
+                        break;
                     case 'toggleFlowState':
                         await vscode.workspace.getConfiguration('harmony')
                             .update('flowState', !!msg.value, true);
@@ -774,6 +778,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             imageGenProvider: cfg.get<string>('imageGen.provider') ?? 'gemini',
             imageGenAutoApprove: !!cfg.get<boolean>('imageGen.autoApprove'),
             flowState: !!cfg.get<boolean>('flowState'),
+            errorLearning: !!cfg.get<boolean>('errorLearning.enabled'),
             ocrOnly: !!cfg.get<boolean>('vision.ocrOnly'),
             skipOcr: !!cfg.get<boolean>('vision.skipOcr'),
             localFirst: !!cfg.get<boolean>('vision.localFirst'),
@@ -1314,6 +1319,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     <label class="row"><input type="checkbox" id="deepseek-trace"> ${lm.getString('steering.deepseekTrace')}</label>
     <label class="row"><input type="checkbox" id="deepseek-thinking"> 🧠 ${lm.getString('steering.deepseekThinking')} <span class="hint">${lm.getString('steering.deepseekThinkingHint')}</span></label>
     <label class="row"><input type="checkbox" id="sidebar-compact"> ${lm.getString('steering.lowMemory')}</label>
+    <label class="row"><input type="checkbox" id="error-learning"> 🌸 ${lm.getString('steering.errorLearning')} <span class="hint">${lm.getString('steering.errorLearningHint')}</span></label>
+    <div class="disclaimer" id="error-learning-warning" style="display:none;">⚠️ ${lm.getString('steering.errorLearningWarning')}</div>
     <button class="subtle" id="configure-sidebar-mode">${lm.getString('steering.sidebarDisplay')}</button>
     <button class="subtle" id="write-oom-diagnostics">${lm.getString('steering.writeOomReport')}</button>
     <button class="subtle" id="enable-low-memory-safety">${lm.getString('steering.enableLowMemory')}</button>
@@ -1787,6 +1794,12 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
     $('image-gen-provider').value = s.imageGenProvider || 'gemini';
     $('image-gen-auto').checked = !!s.imageGenAutoApprove;
     $('flow-state').checked = !!s.flowState;
+    (function() {
+      var el = $('error-learning');
+      var warn = $('error-learning-warning');
+      if (el) el.checked = !!s.errorLearning;
+      if (warn && el && el.checked) warn.style.display = 'block';
+    })();
     $('ocr-only').checked = !!s.ocrOnly;
     $('skip-ocr').checked = !!s.skipOcr;
       $('local-first').checked = !!s.localFirst;
@@ -2263,6 +2276,14 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
   $('image-gen-provider').addEventListener('change', (e) => vscode.postMessage({ type: 'setImageGenProvider', value: e.target.value }));
   $('image-gen-auto').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleImageGenAutoApprove', value: e.target.checked }));
   $('flow-state').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleFlowState', value: e.target.checked }));
+    (function() {
+      var el = $('error-learning');
+      if (el) el.addEventListener('change', function(e) {
+        vscode.postMessage({ type: 'toggleErrorLearning', value: e.target.checked });
+        var warn = $('error-learning-warning');
+        if (warn) warn.style.display = e.target.checked ? 'block' : 'none';
+      });
+    })();
   $('ocr-only').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleOcrOnly', value: e.target.checked }));
   $('skip-ocr').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleSkipOcr', value: e.target.checked }));
   $('local-first').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleLocalFirst', value: e.target.checked }));

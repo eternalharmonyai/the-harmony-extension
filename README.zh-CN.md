@@ -34,6 +34,7 @@ Harmony 是 VS Code/Cursor 扩展，提供 `@harmony` 聊天、工作区工具�
 │  │   DeepSeek · Qwen ·      │                   │
 │  │   Gemini · Claude ·      │                   │
 │  │   OpenAI · Moonshot ·    │                   │
+│  │   Kimi Code ·            │                   │
 │  │   OpenRouter · Tencent · │                   │
 │  │   Zhipu                  │                   │
 │  └──────────┬───────────────┘                   │
@@ -57,7 +58,7 @@ Harmony 通过您自己的 API 密钥将您连接到多样化的 AI 服务商—
 
 | 能力 | 详情 |
 |:---|:---|
-| **更广泛的服务商覆盖** | DeepSeek、Moonshot/Kimi、阿里巴巴/Qwen、智谱/GLM 和腾讯——以及 Gemini、OpenAI、OpenRouter 和 Anthropic/Claude——全部在一个扩展中 |
+| **更广泛的服务商覆盖** | DeepSeek、Moonshot/Kimi、Kimi Code、阿里巴巴/Qwen、智谱/GLM 和腾讯——以及 Gemini、OpenAI、OpenRouter 和 Anthropic/Claude——全部在一个扩展中 |
 | **您的密钥，您的选择** | 您决定配置哪些服务商。没有密钥 = 没有外部调用。按需逐步添加服务商。 |
 | **Copilot 协同** | 日常编码使用 VS Code Copilot，而 Harmony 处理协奏、多模型共识和文档翻译 |
 | **本地模型（计划中）** | 原生本地优先操作已在路线图上。目前 Harmony 需要 API 密钥；本地模型支持正在开发中。 |
@@ -184,6 +185,26 @@ node bin/harmony-cli.js ui native
 
 所有操作均包装在 try/catch 中——清理失败不是致命错误。定期运行以保持 `.harmony/` 精简，或在打包 VSIX 分发前运行。
 
+## 🌸 CareBloom — 自我改进的工具使用
+
+CareBloom 是 Harmony 内置的学习系统，追踪工具使用模式并随时间逐步改进。它在本地运行，不产生额外的 API 调用。
+
+### 工作原理
+
+| 组件 | 功能 |
+|:---|:---|
+| **🌿 Phoenix Loop（凤凰循环）** | 当 Harmony 对同一文件进行多次编辑且结果各异（试错学习）时，会生成 Wisdom Sprout（智慧芽）并附上结构化的反思请求。您解决该芽后，学习成果会注入未来的系统提示词——这样 Harmony 就能记住有效的做法。 |
+| **🌸 Error Pattern Learning（错误模式学习）** | 当工具调用失败时，Harmony 对错误进行指纹识别（去除文件路径、行号和动态数据），与本地索引中的历史修复方案进行匹配，并提供相关解决方案。错误在存储前已经过脱敏处理（电子邮件、IP、API 密钥均已移除）。 |
+| **⚙️ 配置** | 通过**设置 → `harmony.errorLearning.enabled`** 或 Harmony 侧边栏的 Steering 部分切换开关。默认：关闭。 |
+
+### 隐私与成本
+
+| 关注点 | 详情 |
+|:---|:---|
+| **API 调用** | 此功能设计为完全本地运行。匹配和索引不会发起 API 调用。 |
+| **存储** | 错误模式经 PII 脱敏后存储在 `.carebloom/troubleshooting_index.json`。芽文件以 Markdown 格式存储在 `.carebloom/` 目录（您的反思回复）。 |
+| **数据共享** | 错误文本在存储前已脱敏处理（电子邮件、IP、API 密钥已移除），此功能不会直接将错误文本发送给 AI 服务商。 |
+
 ## 📥 密语模式（Whisper Mode）——对话间人类消息传递
 
 密语模式让您可以在**聊天回合之间**向 Harmony 发送消息——无需打开聊天面板，无需开启新对话。在密语框中输入消息并发送。Harmony 在下一个自然停顿处接收——甚至在**回合进行中**，当它还在处理其他事情时就能收到。
@@ -299,25 +320,25 @@ Harmony 的文件编辑工具支持可选的基于 Python 的自愈引擎，用�
 1. 安装 Python 3：https://www.python.org/downloads/
 2. 安装后，从 `@harmony` 聊天运行 `harmony_check_python` 验证。
 
-## Compose OCR（Windows）
+## Compose OCR
 
-当您通过 Harmony Compose 面板附加截图时，Harmony 自动运行**免费 Windows OCR**，然后决定是否调用付费视觉模型。若 OCR 提取到可用文本，则不进行视觉 API 调用——您获得即时、免费的文本提取，就像 Windows 截图工具一样。
+当您通过 Harmony Compose 面板附加截图时，Harmony 自动运行**免费本地 OCR**，然后决定是否调用付费视觉模型。若 OCR 提取到可用文本，则不进行视觉 API 调用——您获得即时、免费的文本提取。
 
-**要求（仅 Windows）：**
+**跨平台：** Tesseract.js 在所有平台（macOS、Linux、Windows）提供 OCR 回退支持。Windows 额外获得原生 OCR 层（Windows.Media.Ocr），实现更快的离线提取——就像将 Windows 截图工具内置于 Harmony 中。
 
-```powershell
-pip install winocr Pillow
-```
+**要求：**
 
-无需 API 密钥。无需云端。无需费用。OCR 完全在您的机器上使用内置 Windows.Media.Ocr 引擎运行。若 OCR 未找到文本或结果模糊，Harmony 照常回退到视觉模型。
+- **所有平台：** Tesseract.js 已随扩展捆绑（无需额外设置）。
+- **Windows（可选原生层）：** 安装 `pip install winocr Pillow` 以获得更快的原生 OCR。
+- **macOS（可选原生层）：** 安装 `pip install pyobjc` 以使用 Apple VisionKit OCR。
 
-**macOS / Linux：** Compose OCR 目前仅限 Windows。从其他平台附加的图像直接发送到视觉模型。欢迎贡献平台原生 OCR 支持（VisionKit、Tesseract）。
+无需 API 密钥。无需云端。无需费用。OCR 完全在您的机器上运行。若 OCR 未找到文本或结果模糊，Harmony 照常回退到视觉模型。
 
 ## 图像分析 & 视觉服务商
 
-当 OCR 未提取到可用文本（或在非 Windows 平台上），Harmony 将图像发送到视觉模型进行分析。视觉流水线支持多个服务商，路由可配置：
+当 OCR 未提取到可用文本时，Harmony 将图像发送到视觉模型进行分析。视觉流水线支持多个服务商，路由可配置：
 
-1. **OCR 预检**（Windows）——免费、本地、无 API 调用
+1. **OCR 预检**——免费、本地、跨平台、无 API 调用
 2. **视觉模型**——可配置的服务商路由（见下方设置）
 
 **配置：**

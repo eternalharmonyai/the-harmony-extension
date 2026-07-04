@@ -30,6 +30,57 @@ import { SwarmAutonomyV2Tool } from './primitives/swarmAutonomyV2';
 import { ConductorMeshTool } from './primitives/conductorMesh';
 import { DeliberationChallengeTool } from './deliberation';
 import { ConductorJournal } from './conductorJournal';
+import { tendGarden } from './careBloom';
+
+// ── CareBloom Tracking Wrapper ──────────────────────────────────────────
+
+/**
+ * Wraps a tool's invoke method with CareBloom garden tracking.
+ * Every meaningful tool invocation increments the garden — success or failure.
+ * Depth counter spans async call boundaries: when a tool calls another tool
+ * internally (e.g. RunFailFix → RunTerminal), the inner tool runs inside the
+ * outer tool's invoke() while invocationDepth is still 1, so the inner
+ * wrapper sees depth===1 and skips tendGarden. Only the outermost wrapper
+ * (depth===0 before increment) calls tendGarden.
+ *
+ * Async-safe in single-threaded JS: all synchronous increments/decrements
+ * happen before/after await points with no interleaving.
+ */
+let invocationDepth = 0;
+
+/**
+ * Wraps a LanguageModelTool's invoke method to track CareBloom engagement.
+ *
+ * Uses finally-block semantics: garden is always tended, even on throw.
+ */
+function trackToolInvocation<T>(
+    toolName: string,
+    invoke: (options: vscode.LanguageModelToolInvocationOptions<T>) => Promise<vscode.LanguageModelToolResult>
+): (options: vscode.LanguageModelToolInvocationOptions<T>) => Promise<vscode.LanguageModelToolResult> {
+    return async (options) => {
+        // Depth guard: only the outermost tool invocation counts.
+        // Nested tools (e.g., RunFailFix → RunTerminal) are skipped.
+        const isOutermost = invocationDepth === 0;
+        invocationDepth++;
+        let success = false;
+        let outcome = '';
+        try {
+            const result = await invoke(options);
+            success = true;
+            outcome = 'ok';
+            return result;
+        } catch (e: any) {
+            outcome = `error: ${e?.message ?? String(e)}`.slice(0, 80);
+            throw e;
+        } finally {
+            invocationDepth = Math.max(0, invocationDepth - 1);
+            if (isOutermost) {
+                try { await tendGarden(toolName, options?.input, { outcome, success }); }
+                catch (e) { console.error('[CareBloom] tendGarden failed:', e); }
+            }
+        }
+    };
+}
 
 
 
@@ -1949,7 +2000,6 @@ class EditFileTool implements vscode.LanguageModelTool<EditFileInput> {
             if (!snapshot.ok) return textResult(snapshot.message);
             const patchResult = await patchSafeFullFile(p, resolved, originalBuffer, original, updated);
             if (patchResult.startsWith('error:')) return textResult(patchResult);
-            // Build a compact unified-diff-style preview for the model + chat.
             const oldLines = old_string.split('\n');
             const newLines = new_string.split('\n');
             const previewOld = oldLines.slice(0, 8).map(l => '- ' + l).join('\n');
@@ -3500,11 +3550,11 @@ export function registerHarmonyTools(context: vscode.ExtensionContext) {
         vscode.lm.registerTool('harmony_read_file', new ReadFileTool()),
         vscode.lm.registerTool('harmony_list_dir', new ListDirTool()),
         vscode.lm.registerTool('harmony_grep', new GrepTool()),
-        vscode.lm.registerTool('harmony_write_file', new WriteFileTool()),
-        vscode.lm.registerTool('harmony_edit_file', new EditFileTool()),
-        vscode.lm.registerTool('harmony_apply_patch', new ApplyPatchTool()),
+        (() => { const t = new WriteFileTool(); return vscode.lm.registerTool('harmony_write_file', { ...t, invoke: trackToolInvocation('harmony_write_file', (o: any) => t.invoke(o)) }); })(),
+        (() => { const t = new EditFileTool(); return vscode.lm.registerTool('harmony_edit_file', { ...t, invoke: trackToolInvocation('harmony_edit_file', (o: any) => t.invoke(o)) }); })(),
+        (() => { const t = new ApplyPatchTool(); return vscode.lm.registerTool('harmony_apply_patch', { ...t, invoke: trackToolInvocation('harmony_apply_patch', (o: any) => t.invoke(o)) }); })(),
         vscode.lm.registerTool('harmony_open_file', new OpenFileTool()),
-        vscode.lm.registerTool('harmony_run_terminal', new RunTerminalTool()),
+        (() => { const t = new RunTerminalTool(); return vscode.lm.registerTool('harmony_run_terminal', { ...t, invoke: trackToolInvocation('harmony_run_terminal', (o: any) => t.invoke(o)) }); })(),
         vscode.lm.registerTool('harmony_port_status', new PortStatusTool()),
         vscode.lm.registerTool('harmony_git_status', new GitStatusTool()),
         vscode.lm.registerTool('harmony_git_diff', new GitDiffTool()),
@@ -3533,7 +3583,7 @@ export function registerHarmonyTools(context: vscode.ExtensionContext) {
         vscode.lm.registerTool('harmony_search_patterns', new SearchPatternsTool(context)),
         vscode.lm.registerTool('harmony_continuity', new ContinuityTool()),
         vscode.lm.registerTool('harmony_orchestrate_codebase', new OrchestrateCodebaseTool(context.secrets)),
-        vscode.lm.registerTool('harmony_run_fail_fix', new RunFailFixTool()),
+        (() => { const t = new RunFailFixTool(); return vscode.lm.registerTool('harmony_run_fail_fix', { ...t, invoke: trackToolInvocation('harmony_run_fail_fix', (o: any) => t.invoke(o)) }); })(),
         vscode.lm.registerTool('harmony_mcp_status', new McpStatusTool()),
         vscode.lm.registerTool('harmony_creative_health', new CreativeHealthTool()),
         vscode.lm.registerTool('harmony_generate_image', new GenerateImageTool()),

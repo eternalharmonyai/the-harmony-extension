@@ -10,6 +10,7 @@ import { recordUsage } from './costTracker';
 import { confirmPremiumModel } from './providers';
 import { describeImages } from './visionRouter';
 import { withOperationLock } from './operationLocks';
+import { runOcr, hasNativeOcr } from './ocrEngine';
 
 const MAX_RESULT_CHARS = 60000;
 
@@ -2884,33 +2885,42 @@ export class OcrTool implements vscode.LanguageModelTool<OcrInput> {
             return textResult(`error: cannot access file: ${requestedPath}`);
         }
 
-        // Run Windows OCR via Python script
-        const scriptPath = path.join(__dirname, '..', 'scripts', 'ocr_text.py');
+        // Cross-platform OCR: native first → Tesseract.js fallback
+        const nativeAvailable = hasNativeOcr();
+
         try {
-            const result = cp.execSync(`python "${scriptPath}" "${resolved}"`, {
-                encoding: 'utf-8',
-                timeout: 30000,
-                maxBuffer: 1024 * 1024,
-            });
-            const parsed = JSON.parse(result.trim());
-            if (parsed.ok && parsed.text) {
-                const confidenceLabel = parsed.confidence === 'high' ? 'HIGH confidence'
-                    : parsed.confidence === 'medium' ? 'MEDIUM confidence'
-                    : parsed.confidence === 'low' ? 'LOW confidence (verify accuracy)'
+            const result = await runOcr(resolved);
+
+            const engineNames: Record<string, string> = {
+                'windows-ocr': 'Windows OCR',
+                'macos-vision': 'macOS Vision',
+                'tesseract.js': 'Tesseract.js',
+                'none': 'OCR',
+            };
+            const engineLabel = engineNames[result.engine] || result.engine;
+
+            if (result.text) {
+                const confidenceLabel = result.confidence === 'high' ? 'HIGH confidence'
+                    : result.confidence === 'medium' ? 'MEDIUM confidence'
+                    : result.confidence === 'low' ? 'LOW confidence (verify accuracy)'
                     : 'UNKNOWN confidence';
-                const lines = [`[Windows OCR — ${confidenceLabel}]`, '', parsed.text, '',
-                    `Lines: ${parsed.line_count ?? '?'} | Words: ${parsed.word_count ?? '?'} | Language: ${parsed.language ?? '?'}`];
-                if (parsed.confidence === 'low' || parsed.confidence === 'medium') {
+                const lines = [`[${engineLabel} — ${confidenceLabel}]`, '', result.text, '',
+                    `Lines: ${result.lineCount} | Words: ${result.wordCount} | Language: ${result.language}`];
+                if (result.confidence === 'low' || result.confidence === 'medium') {
                     lines.push('', 'Tip: For low/medium confidence results, call harmony_vision_read for cross-check.');
                 }
                 return textResult(lines.join('\n'));
             }
-            // OCR ran but found no text or failed
-            const hint = parsed.hint || parsed.error || 'OCR found no text';
-            return textResult(`[Windows OCR — NO TEXT FOUND]\n\n${hint}\n\nTip: Call harmony_vision_read for AI vision analysis instead.`);
+
+            // OCR ran but found no text
+            const hint = result.hint
+                || (result.engine === 'tesseract.js' && !nativeAvailable
+                    ? 'No text detected. Try harmony_vision_read for AI vision analysis instead.'
+                    : 'No text detected. Try harmony_vision_read for AI vision analysis instead.');
+            return textResult(`[${engineLabel} — NO TEXT FOUND]\n\n${hint}\n\nTip: Call harmony_vision_read for AI vision analysis instead.`);
         } catch (e: any) {
             const errMsg = e?.message ?? String(e);
-            return textResult(`[Windows OCR — FAILED]\n\n${errMsg}\n\nTip: Windows OCR requires the 'winrt' Python package and an OCR language pack. Call harmony_vision_read for AI vision analysis as fallback.`);
+            return textResult(`[OCR — FAILED]\n\n${errMsg}\n\nTip: Call harmony_vision_read for AI vision analysis as fallback.`);
         }
     }
 
