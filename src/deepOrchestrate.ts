@@ -125,9 +125,9 @@ const REVIEWER_CONFIGS: Record<string, ReviewerConfig> = {
     'tencent': {
         provider: 'tencent', group: 'Hunyuan',
         endpoint: 'https://api.hunyuan.cloud.tencent.com/v1/chat/completions',
-        model: 'hunyuan-lite',
+        model: 'hy3-preview',
         authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
-        buildBody: (prompt) => ({ model: 'hunyuan-lite', messages: [{ role: 'user', content: prompt }], max_tokens: 200, temperature: 0.1 }),
+        buildBody: (prompt) => ({ model: 'hy3-preview', messages: [{ role: 'user', content: prompt }], max_tokens: 200, temperature: 0.1 }),
     },
 };
 

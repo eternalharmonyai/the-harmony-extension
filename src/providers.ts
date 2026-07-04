@@ -23,8 +23,7 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'qwen-plus': 8192,
     'qwen-turbo': 8192,
     'kimi-latest': 8192,
-    'hunyuan-pro': 8192,
-    'hunyuan-turbos': 32768,
+    'hy3-preview': 8192,
     'glm-5.1': 131072,
     'glm-5.2': 131072,
     'glm-4-flash': 131072,
@@ -64,7 +63,7 @@ function sanitizeHttpError(status: number, body: string, label: string): string 
 
 /** Fallback models for OpenRouter coding tier (free models, in order of preference). */
 const CODING_FALLBACKS: string[] = [
-    'tencent/hunyuan-turbos-latest',    // Tencent Hy3 preview (free this week!)
+    'tencent/hy3-preview',               // Tencent Hy3 preview (flagship)
     'Qwen/Qwen3-235B-A22B-fp8-tput',  // Alibaba Qwen3 (free)
     'deepseek/deepseek-v4-flash',       // DeepSeek V4 Flash (your credits)
     'deepseek/deepseek-r1:free'         // Last resort free option
@@ -72,7 +71,7 @@ const CODING_FALLBACKS: string[] = [
 
 /** General fallback models for OpenRouter (free tier). */
 const OPENROUTER_FREE_FALLBACKS: string[] = [
-    'tencent/hunyuan-turbos-latest',
+    'tencent/hy3-preview',
     'Qwen/Qwen3-235B-A22B-fp8-tput',
     'deepseek/deepseek-r1:free',
     'deepseek/deepseek-v4-flash'
@@ -150,10 +149,10 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'kimi-k2.7-code'
     },
     tencent: {
-        light: 'hunyuan-lite',
-        mid: 'hunyuan-turbos-latest',
-        heavy: 'hunyuan-pro',
-        coding: 'hunyuan-turbos-latest'
+        light: 'hy3-preview',
+        mid: 'hy3-preview',
+        heavy: 'hy3-preview',
+        coding: 'hy3-preview'
     },
     gemini: {
         light: 'gemini-3.1-flash-lite',
@@ -162,10 +161,10 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'gemini-3.5-flash'
     },
     openrouter: {
-        light: 'tencent/hunyuan-turbos-latest',
+        light: 'tencent/hy3-preview',
         mid: 'Qwen/Qwen3-235B-A22B-fp8-tput',
         heavy: 'deepseek/deepseek-r1:free',
-        coding: 'tencent/hunyuan-turbos-latest'
+        coding: 'tencent/hy3-preview'
     },
     openai: {
         light: 'gpt-5-mini',
