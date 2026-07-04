@@ -1782,12 +1782,15 @@ async function runDeepSeekAgent(
         if (token.isCancellationRequested) break;
         warnedStepLimit = maybeWarnStepLimit(stream, limit, step, warnedStepLimit);
 
+        // Moonshot/Kimi k2.7+ requires temperature=1.0 or omitting it entirely;
+        // other providers work fine with 0.2 for deterministic agent behavior.
+        const needsStrictTemp = route.provider === 'moonshot' || route.provider === 'kimiCode';
         const requestBody: any = {
             model,
             messages,
             tools,
             tool_choice: 'auto',
-            temperature: 0.2,
+            ...(needsStrictTemp ? {} : { temperature: 0.2 }),
             stream_options: { include_usage: true }
         };
         if (route.supportsReasoningContent && (!thinkingEnabled || suppressThinkingForTurn)) requestBody.thinking = { type: 'disabled' };

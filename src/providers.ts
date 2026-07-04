@@ -47,6 +47,21 @@ function computeTimeout(maxTokens: number): number {
     return Math.min(ceiling, Math.max(floor, est));
 }
 
+/**
+ * Sanitize an HTTP error response body for display.
+ * Returns a concise, human-readable message even when the server returns
+ * an HTML error page (e.g. 502 Bad Gateway from a reverse proxy).
+ */
+function sanitizeHttpError(status: number, body: string, label: string): string {
+    const trimmed = body.trim();
+    if (trimmed.startsWith('<') || /^<!doctype/i.test(trimmed)) {
+        const titleMatch = trimmed.match(/<title>[^<]*<\/title>/i);
+        const title = titleMatch ? titleMatch[0].replace(/<\/?title>/gi, '').trim() : '';
+        return `${label} HTTP ${status}: ${title || 'Server returned an HTML error page (likely a gateway/proxy issue). Retry in a moment.'}`;
+    }
+    return `${label} HTTP ${status}: ${trimmed.slice(0, 500)}`;
+}
+
 /** Fallback models for OpenRouter coding tier (free models, in order of preference). */
 const CODING_FALLBACKS: string[] = [
     'tencent/hunyuan-turbos-latest',    // Tencent Hy3 preview (free this week!)
@@ -816,7 +831,7 @@ async function openaiCompat(
         });
         if (!r.ok) {
             const errText = await r.text();
-            throw new Error(`${provider} HTTP ${r.status}: ${errText.slice(0, 1200)}`);
+            throw new Error(sanitizeHttpError(r.status, errText, providerDisplayName(provider)));
         }
         // Parse SSE stream — accumulate delta chunks into full response
         const rawStream = await r.text();
@@ -915,7 +930,7 @@ async function anthropicCall(
             signal: controller.signal as any
         });
         const text = await r.text();
-        if (!r.ok) throw new Error(`claude HTTP ${r.status}: ${text.slice(0, 1200)}`);
+        if (!r.ok) throw new Error(sanitizeHttpError(r.status, text, 'Claude'));
         const json = JSON.parse(text);
         // Content may include thinking blocks; extract only text blocks for the response.
         const content = Array.isArray(json?.content)
@@ -967,7 +982,7 @@ async function geminiCall(
             signal: controller.signal as any
         });
         const text = await r.text();
-        if (!r.ok) throw new Error(`gemini HTTP ${r.status}: ${text.slice(0, 1200)}`);
+        if (!r.ok) throw new Error(sanitizeHttpError(r.status, text, 'Gemini'));
         const json = JSON.parse(text);
         const parts = json?.candidates?.[0]?.content?.parts ?? [];
         const content = parts.map((p: any) => (typeof p?.text === 'string' ? p.text : '')).join('\n');
@@ -1260,7 +1275,7 @@ async function tencentNativeCall(
         });
         if (!r.ok) {
             const errText = await r.text();
-            throw new Error(`Tencent native HTTP ${r.status}: ${errText.slice(0, 1200)}`);
+            throw new Error(sanitizeHttpError(r.status, errText, 'Tencent / Hunyuan'));
         }
         // Parse SSE stream (Tencent native also uses SSE)
         const rawStream = await r.text();
