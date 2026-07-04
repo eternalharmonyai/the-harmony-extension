@@ -3387,8 +3387,10 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
             if (directRoute) {
                 let apiKey = await context.secrets.get(directRoute.secretKey);
                 
-                // Tencent native auth fallback: if no OpenAI-compatible API key, try SecretId + SecretKey
-                if (!apiKey && directRoute.provider === 'tencent') {
+                // For Tencent, PREFER native SecretId+SecretKey auth when available (TC3-HMAC-SHA256 signing).
+                // Only fall back to the OpenAI-compatible API key if native creds are not set.
+                // This prevents stale/wrong values in harmony.tencent.apiKey from causing 401 errors.
+                if (directRoute.provider === 'tencent') {
                     const tkSid = await context.secrets.get('harmony.tencent.secretId');
                     const tkSkey = await context.secrets.get('harmony.tencent.secretKey');
                     if (tkSid && tkSkey) {
