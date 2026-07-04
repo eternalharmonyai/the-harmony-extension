@@ -29,6 +29,9 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'glm-5.2': 131072,
     'glm-4-flash': 131072,
     'glm-4-plus': 131072,
+    'glm-4-0520': 131072,
+    'glm-4v-plus': 131072,
+    'glm-4-airx': 131072,
 };
 
 /** Fallback model max tokens when model not in the map. */
@@ -164,7 +167,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
     zhipu: {
         light: 'glm-5.1',
         mid: 'glm-5.2',
-        heavy: 'glm-5.2',
+        heavy: 'glm-4-plus',
         coding: 'glm-5.2'
     }
 };
@@ -201,7 +204,7 @@ export function providerDisplayName(provider: CollabDirectProvider): string {
         case 'openai': return 'OpenAI';
         case 'claude': return 'Anthropic (Claude models)';
         case 'tencent': return 'Tencent / Hunyuan';
-        case 'zhipu': return 'Zhipu (Z.AI / GLM)';
+        case 'zhipu': return 'Zhipu / GLM (Z.AI)';
     }
 }
 
@@ -263,55 +266,57 @@ export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 
             detail: profile === 'custom' ? 'Uses harmony.kimiCode.baseUrl.' : 'Uses the standard KimiCode OpenAI-compatible endpoint (api.moonshot.cn).'
         };
     }
-    const profile = configuredEndpointProfile('alibaba.endpointProfile', 'international', ['international', 'mainland', 'us', 'custom']);
-    const custom = explicitConfigString('alibaba.baseUrl');
-    if (profile === 'mainland') {
+    if (provider === 'alibaba') {
+        const profile = configuredEndpointProfile('alibaba.endpointProfile', 'international', ['international', 'mainland', 'us', 'custom']);
+        const custom = explicitConfigString('alibaba.baseUrl');
+        if (profile === 'mainland') {
+            return {
+                provider,
+                profile,
+                label: 'Alibaba mainland China endpoint',
+                baseUrl: ALIBABA_MAINLAND_BASE_URL,
+                baseUrlSetting: 'harmony.alibaba.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: 'Uses the mainland China DashScope endpoint. This is the Beijing/China account route; international keys commonly return 401 here.'
+            };
+        }
+        if (profile === 'custom') {
+            const baseUrl = custom.value || ALIBABA_INTERNATIONAL_BASE_URL;
+            return {
+                provider,
+                profile,
+                label: 'Alibaba custom endpoint',
+                baseUrl: baseUrl.replace(/\/$/, ''),
+                baseUrlSetting: 'harmony.alibaba.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: 'Uses harmony.alibaba.baseUrl exactly, for provider-issued regional endpoints.'
+            };
+        }
+        if (profile === 'us') {
+            const hasCustomBaseUrl = custom.explicit && Boolean(custom.value);
+            const baseUrl = hasCustomBaseUrl ? custom.value.replace(/\/$/, '') : ALIBABA_INTERNATIONAL_BASE_URL;
+            return {
+                provider,
+                profile,
+                label: 'Alibaba US/Virginia endpoint',
+                baseUrl,
+                baseUrlSetting: 'harmony.alibaba.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: hasCustomBaseUrl
+                    ? 'Uses the configured US/Virginia base URL override for this account.'
+                    : 'Uses the Alibaba international OpenAI-compatible endpoint for US/Virginia keys unless the account is issued a different regional base URL.'
+            };
+        }
         return {
             provider,
             profile,
-            label: 'Alibaba mainland China endpoint',
-            baseUrl: ALIBABA_MAINLAND_BASE_URL,
+            label: 'Alibaba international endpoint',
+            baseUrl: ALIBABA_INTERNATIONAL_BASE_URL,
             baseUrlSetting: 'harmony.alibaba.baseUrl',
             needsCustomBaseUrl: false,
-            detail: 'Uses the mainland China DashScope endpoint. This is the Beijing/China account route; international keys commonly return 401 here.'
+            detail: 'Uses the international DashScope endpoint. This is the Singapore/global route that passed the recent live smoke.'
         };
     }
-    if (profile === 'custom') {
-        const baseUrl = custom.value || ALIBABA_INTERNATIONAL_BASE_URL;
-        return {
-            provider,
-            profile,
-            label: 'Alibaba custom endpoint',
-            baseUrl: baseUrl.replace(/\/$/, ''),
-            baseUrlSetting: 'harmony.alibaba.baseUrl',
-            needsCustomBaseUrl: false,
-            detail: 'Uses harmony.alibaba.baseUrl exactly, for provider-issued regional endpoints.'
-        };
-    }
-    if (profile === 'us') {
-        const hasCustomBaseUrl = custom.explicit && Boolean(custom.value);
-        const baseUrl = hasCustomBaseUrl ? custom.value.replace(/\/$/, '') : ALIBABA_INTERNATIONAL_BASE_URL;
-        return {
-            provider,
-            profile,
-            label: 'Alibaba US/Virginia endpoint',
-            baseUrl,
-            baseUrlSetting: 'harmony.alibaba.baseUrl',
-            needsCustomBaseUrl: false,
-            detail: hasCustomBaseUrl
-                ? 'Uses the configured US/Virginia base URL override for this account.'
-                : 'Uses the Alibaba international OpenAI-compatible endpoint for US/Virginia keys unless the account is issued a different regional base URL.'
-        };
-    }
-    return {
-        provider,
-        profile,
-        label: 'Alibaba international endpoint',
-        baseUrl: ALIBABA_INTERNATIONAL_BASE_URL,
-        baseUrlSetting: 'harmony.alibaba.baseUrl',
-        needsCustomBaseUrl: false,
-        detail: 'Uses the international DashScope endpoint. This is the Singapore/global route that passed the recent live smoke.'
-    };
     // --- Tencent / Hunyuan ---
     if (provider === 'tencent') {
         const profile = configuredEndpointProfile('tencent.endpointProfile', 'international', ['international', 'mainland', 'custom']);
@@ -691,11 +696,13 @@ export async function consult(
             }
             case 'moonshot': {
                 const baseUrl = providerBaseUrlForCall('moonshot');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'moonshot', 1.0);
+                // kimi-k2.7+ requires temperature=1.0 or omitting it entirely; omit to avoid strict validation
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'moonshot');
             }
             case 'kimiCode': {
                 const baseUrl = providerBaseUrlForCall('kimiCode');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'kimiCode', 1.0);
+                // kimi-k2.7+ requires temperature=1.0 or omitting it entirely; omit to avoid strict validation
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'kimiCode');
             }
             case 'alibaba': {
                 const baseUrl = providerBaseUrlForCall('alibaba');
@@ -886,6 +893,17 @@ async function anthropicCall(
     const sub = token.onCancellationRequested(() => controller.abort());
     const timeoutId = setTimeout(() => controller.abort(new Error(`Claude request timed out after ${Math.round(computeTimeout(effectiveMaxTokens) / 1000)}s`)), computeTimeout(effectiveMaxTokens));
     try {
+        // Claude requires system to be non-empty; omit the field entirely if empty
+        const claudeSystem = system?.trim() ? system : undefined;
+        const body: any = {
+            model,
+            max_tokens: effectiveMaxTokens,
+            thinking: thinkingParam,
+            messages: [{ role: 'user', content: question }]
+        };
+        if (claudeSystem !== undefined) {
+            body.system = claudeSystem;
+        }
         const r = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
@@ -893,13 +911,7 @@ async function anthropicCall(
                 'x-api-key': apiKey,
                 'anthropic-version': '2023-06-01'
             },
-            body: JSON.stringify({
-                model,
-                system,
-                max_tokens: effectiveMaxTokens,
-                thinking: thinkingParam,
-                messages: [{ role: 'user', content: question }]
-            }),
+            body: JSON.stringify(body),
             signal: controller.signal as any
         });
         const text = await r.text();

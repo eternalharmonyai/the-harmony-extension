@@ -34,6 +34,7 @@ Harmony is a VS Code/Cursor extension for `@harmony` chat, workspace tools, prov
 │  │   DeepSeek · Qwen ·      │                   │
 │  │   Gemini · Claude ·      │                   │
 │  │   OpenAI · Moonshot ·    │                   │
+│  │   Kimi Code ·            │                   │
 │  │   OpenRouter · Tencent · │                   │
 │  │   Zhipu                  │                   │
 │  └──────────┬───────────────┘                   │
@@ -57,7 +58,7 @@ Harmony connects you directly to a diverse set of AI providers through your own 
 
 | Capability | Detail |
 |:---|:---|
-| **Broader provider reach** | DeepSeek, Moonshot/Kimi, Alibaba/Qwen, Zhipu/GLM, and Tencent — alongside Gemini, OpenAI, OpenRouter, and Anthropic/Claude — all from one extension |
+| **Broader provider reach** | DeepSeek, Moonshot/Kimi, Kimi Code, Alibaba/Qwen, Zhipu/GLM, and Tencent — alongside Gemini, OpenAI, OpenRouter, and Anthropic/Claude — all from one extension |
 | **Your keys, your choice** | You decide which providers to configure. No keys = no external calls. Add providers incrementally as you need them. |
 | **Copilot cross-play** | Use VS Code Copilot for everyday coding while Harmony handles orchestration, multi-model consensus, and document translation |
 | **Local models (planned)** | Native local-first operation is on the roadmap. Today Harmony requires API keys; local model support is in development. |
@@ -175,6 +176,26 @@ Over time, Harmony accumulates local state: continuity handoffs, supervisor even
 
 All operations are wrapped in try/catch — cleanup failures are non-fatal. Run it periodically to keep `.harmony/` lean, or before packaging a VSIX for distribution.
 
+## 🌸 CareBloom — Self-Improving Tool Usage
+
+CareBloom is Harmony's built-in learning system that tracks tool usage patterns and gradually improves over time. It operates locally with zero additional API calls.
+
+### How it works
+
+| Component | What it does |
+|:---|:---|
+| **🌿 Phoenix Loop** | When Harmony makes repeated edits to the same file with varied outcomes (trial-and-error learning), a Wisdom Sprout emerges with a structured reflection request. After you resolve the sprout, the learning is injected into future system prompts — so Harmony remembers what worked. |
+| **🌸 Error Pattern Learning** | When tools fail, Harmony fingerprints the error (stripping file paths, line numbers, and dynamic data), matches it against a local index of past fixes, and surfaces relevant solutions. Errors are redacted (emails, IPs, API keys removed) before storage. |
+| **⚙️ Configuration** | Toggle via **Settings → `harmony.errorLearning.enabled`** or the Steering section of the Harmony sidebar. Default: off. |
+
+### Privacy & Cost
+
+| Concern | Detail |
+|:---|:---|
+| **API calls** | This feature is designed to run entirely locally. Matching and indexing do not make API calls. |
+| **Storage** | Error patterns stored in `.carebloom/troubleshooting_index.json` with PII redacted. Sprouts stored in `.carebloom/` as Markdown files (your reflection responses). |
+| **Data sharing** | Error text is redacted (emails, IPs, API keys removed) before storage and is never directly sent to AI providers by this feature. |
+
 ## 📥 Whisper Mode — Mid-Turn Human Messaging
 
 Whisper Mode lets you send messages to Harmony **between chat turns** — without opening the chat panel, without starting a new conversation. Type a message into the Whisper box and press Send. Harmony catches it at the next natural pause — even **mid-turn**, while still working on something else.
@@ -290,25 +311,25 @@ To enable the full harness:
 1. Install Python 3: https://www.python.org/downloads/
 2. After install, run `harmony_check_python` from `@harmony` chat to verify.
 
-## Compose OCR (Windows)
+## Compose OCR
 
-When you attach a screenshot via the Harmony Compose panel, Harmony automatically runs **free Windows OCR** before deciding whether to call a paid vision model. If OCR extracts usable text, no vision API call is made — you get instant, free text extraction just like Windows Snipping Tool.
+When you attach a screenshot via the Harmony Compose panel, Harmony automatically runs **free local OCR** before deciding whether to call a paid vision model. If OCR extracts usable text, no vision API call is made — you get instant, free text extraction.
 
-**Requirements (Windows only):**
+**Cross-platform:** Tesseract.js provides OCR fallback on all platforms (macOS, Linux, Windows). Windows additionally gets a native OCR layer via Windows.Media.Ocr for faster, offline extraction — like having Windows Snipping Tool built into Harmony.
 
-```powershell
-pip install winocr Pillow
-```
+**Requirements:**
 
-No API keys. No cloud. No cost. The OCR runs entirely on your machine using the built-in Windows.Media.Ocr engine. If OCR finds no text or the result is ambiguous, Harmony falls through to the vision model as usual.
+- **All platforms:** Tesseract.js is bundled with the extension (no setup needed).
+- **Windows (optional native layer):** Install `pip install winocr Pillow` for faster native OCR.
+- **macOS (optional native layer):** Install `pip install pyobjc` for Apple VisionKit OCR.
 
-**macOS / Linux:** Compose OCR is currently Windows-only. Images attached from other platforms go directly to the vision model. Contributions for platform-native OCR support (VisionKit, Tesseract) are welcome.
+No API keys. No cloud. No cost. The OCR runs entirely on your machine. If OCR finds no text or the result is ambiguous, Harmony falls through to the vision model as usual.
 
 ## Image Analysis & Vision Providers
 
-When OCR doesn't extract usable text (or on non-Windows platforms), Harmony sends images to a vision model for analysis. The vision pipeline supports multiple providers with configurable routing:
+When OCR doesn't extract usable text, Harmony sends images to a vision model for analysis. The vision pipeline supports multiple providers with configurable routing:
 
-1. **OCR pre-check** (Windows) — free, local, no API call
+1. **OCR pre-check** — free, local, cross-platform, no API call
 2. **Vision model** — configurable provider routing (see settings below)
 
 **Configuration:**

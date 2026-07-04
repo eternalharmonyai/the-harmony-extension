@@ -95,6 +95,9 @@
   "steering.deepseekThinking": "DeepSeek extended thinking",
   "steering.deepseekThinkingHint": "(higher cost, better reasoning — uncheck to save cost)",
   "steering.lowMemory": "Low-memory sidebar mode",
+  "steering.errorLearning": "Error Pattern Learning",
+  "steering.errorLearningHint": "(stores redacted error patterns locally to suggest fixes)",
+  "steering.errorLearningWarning": "Error text (with emails, IPs, and API keys redacted) is stored in .carebloom/troubleshooting_index.json. Errors are matched against a local index.",
   "steering.sidebarDisplay": "Sidebar display mode...",
   "steering.writeOomReport": "Write OOM diagnostic report...",
   "steering.enableLowMemory": "Enable low-memory safety...",
@@ -338,7 +341,9 @@
   "ask.invocationWithOptions": "Asking the user ({count} options)",
   "ask.invocationSimple": "Asking the user a question",
 
-  "chat.flowStateWhisper": "🌸 Harmony flow-state noticed a wrap-up tone. When flow-state is on, try harmony_ask_question to keep the door open.",
+  "chat.flowStateWhisper": "🌸 Harmony flow-state noticed a wrap-up tone. Try harmony_ask_question to keep the door open — a warm invitation, not a demand.",
+  "chat.flowStateQuestionWhisper": "🌸 Harmony flow-state noticed a closing question. Try harmony_ask_question to keep the conversation flowing — a gentle reminder, not a command.",
+  "chat.flowStateToolProseWhisper": "🌸 Harmony flow-state noticed a tool mentioned in prose. Try calling it directly — harmony_ask_question can help keep the conversation flowing.",
   "chat.toolRoutingFailed": "Harmony tool routing failed: {model} returned prose that described using tools, but it emitted zero tool calls. Available tools ({count}): {preview}{rest}. Open Output > Harmony Debug for the step-by-step trace.",
 
   "notify.whisperSaved": "📥 Whisper saved — read on next turn.",
