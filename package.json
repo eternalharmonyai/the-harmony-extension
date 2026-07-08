@@ -8675,10 +8675,12 @@
             "deepseek",
             "alibaba",
             "moonshot",
-            "tencent"
+            "tencent",
+            "zhipu",
+            "zhipu-coding"
           ],
           "default": "vscode-lm",
-          "description": "Model source for the native @harmony participant. 'vscode-lm' uses the model selected in VS Code Chat. 'deepseek', 'alibaba', 'tencent', and 'moonshot' call their OpenAI-compatible direct APIs using stored provider keys. Alibaba/Tencent/Moonshot primary models use their coding-tier provider setting."
+          "description": "Model source for the native @harmony participant. 'vscode-lm' uses the model selected in VS Code Chat. 'deepseek', 'alibaba', 'tencent', 'zhipu', 'zhipu-coding', and 'moonshot' call their OpenAI-compatible direct APIs using stored provider keys. Provider primary models use their coding-tier setting."
         },
         "harmony.collabProvider": {
           "type": "string",
@@ -9657,7 +9659,27 @@
           "default": "",
           "description": "Override Tencent Hunyuan coding-tier model (default hunyuan-turbos-latest)."
         },
-        "harmony.tokenBudget": {
+        "harmony.providers.zhipu-coding.light": {
+          "type": "string",
+          "default": "",
+          "description": "Override Zhipu Coding Plan light-tier model (default glm-5.2)."
+        },
+        "harmony.providers.zhipu-coding.mid": {
+          "type": "string",
+          "default": "",
+          "description": "Override Zhipu Coding Plan mid-tier model (default glm-5.2)."
+        },
+        "harmony.providers.zhipu-coding.heavy": {
+          "type": "string",
+          "default": "",
+          "description": "Override Zhipu Coding Plan heavy-tier model (default glm-5.2)."
+        },
+        "harmony.providers.zhipu-coding.coding": {
+          "type": "string",
+          "default": "",
+          "description": "Override Zhipu Coding Plan coding-tier model (default glm-5.2)."
+        },
+                "harmony.tokenBudget": {
           "type": "number",
           "default": 32768,
           "minimum": 4096,

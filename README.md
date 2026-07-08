@@ -36,7 +36,7 @@ Harmony is a VS Code/Cursor extension for `@harmony` chat, workspace tools, prov
 │  │   OpenAI · Moonshot ·    │                   │
 │  │   Kimi Code ·            │                   │
 │  │   OpenRouter · Tencent · │                   │
-│  │   Zhipu                  │                   │
+│  │   Zhipu · Zhipu Coding   │                   │
 │  └──────────┬───────────────┘                   │
 └─────────────┼───────────────────────────────────┘
               │ optional localhost bridge
@@ -58,7 +58,7 @@ Harmony connects you directly to a diverse set of AI providers through your own 
 
 | Capability | Detail |
 |:---|:---|
-| **Broader provider reach** | DeepSeek, Moonshot/Kimi, Kimi Code, Alibaba/Qwen, Zhipu/GLM, and Tencent — alongside Gemini, OpenAI, OpenRouter, and Anthropic/Claude — all from one extension |
+| **Broader provider reach** | DeepSeek, Moonshot/Kimi, Kimi Code, Alibaba/Qwen, Zhipu/GLM, Zhipu Coding Plan, and Tencent — alongside Gemini, OpenAI, OpenRouter, and Anthropic/Claude — all from one extension |
 | **Your keys, your choice** | You decide which providers to configure. No keys = no external calls. Add providers incrementally as you need them. |
 | **Copilot cross-play** | Use VS Code Copilot for everyday coding while Harmony handles orchestration, multi-model consensus, and document translation |
 | **Local models (planned)** | Native local-first operation is on the roadmap. Today Harmony requires API keys; local model support is in development. |
@@ -587,7 +587,7 @@ Harmony speaks Chinese. Full i18n with `locales/zh.json`, `package.nls.zh-cn.jso
 
 ## Legal & Disclaimers
 
-**API Costs:** Harmony can call paid AI provider APIs (DeepSeek, Alibaba, Gemini, OpenAI, Claude, OpenRouter, Moonshot) when configured with your API keys. You are solely responsible for all API charges incurred. Harmony includes cost guards, provider policies, and per-session quotas to help manage spend, but no automated cap is foolproof. Review your provider billing dashboards regularly.
+**API Costs:** Harmony can call paid AI provider APIs (DeepSeek, Alibaba/Qwen, Gemini, OpenAI, Claude, OpenRouter, Moonshot/Kimi, Tencent, and Zhipu/Zhipu Coding) when configured with your API keys. You are solely responsible for all API charges incurred. Harmony includes cost guards, provider policies, and per-session quotas to help manage spend, but no automated cap is foolproof. Review your provider billing dashboards regularly.
 
 **No Warranty:** This software is provided "AS IS", without warranty of any kind, express or implied. See the [LICENSE](LICENSE) file for the full Hippocratic License terms.
 
