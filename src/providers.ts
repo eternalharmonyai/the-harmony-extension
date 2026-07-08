@@ -90,7 +90,7 @@ const OPENROUTER_FREE_FALLBACKS: string[] = [
  * primary model (Copilot / DeepSeek) is configured separately.
  */
 
-export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu';
+export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu' | 'zhipu-coding';
 export type Tier = 'light' | 'mid' | 'heavy' | 'coding';
 export type CollabModelPreset = 'auto' | 'economy' | 'balanced' | 'power' | 'custom';
 export type CollabDirectProvider = ProviderId | 'auto';
@@ -104,9 +104,10 @@ const ALIBABA_MAINLAND_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mod
 const TENCENT_INTERNATIONAL_BASE_URL = 'https://api.hunyuan.cloud.tencent.com/v1';
 const TENCENT_MAINLAND_BASE_URL = 'https://hunyuan.tencentcloudapi.com/v1';
 const ZHIPU_DEFAULT_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
+const ZHIPU_CODING_BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
 
 export interface ProviderEndpointInfo {
-    provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu'>;
+    provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding'>;
     profile: ProviderEndpointProfile;
     label: string;
     baseUrl?: string;
@@ -183,6 +184,12 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         mid: 'glm-5.2',
         heavy: 'glm-4-plus',
         coding: 'glm-5.2'
+    },
+    'zhipu-coding': {
+        light: 'glm-5.2',
+        mid: 'glm-5.2',
+        heavy: 'glm-5.2',
+        coding: 'glm-5.2'
     }
 };
 
@@ -196,10 +203,11 @@ const SECRET_KEY: Record<ProviderId, string> = {
     openai: 'harmony.openaiApiKey',
     claude: 'harmony.claudeApiKey',
     tencent: 'harmony.tencent.apiKey',
-    zhipu: 'harmony.zhipu.apiKey'
+    zhipu: 'harmony.zhipu.apiKey',
+    'zhipu-coding': 'harmony.zhipu.apiKey'
 };
 
-export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'zhipu'];
+export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'zhipu', 'zhipu-coding'];
 const FREE_QUOTA_PROVIDER_IDS: ProviderId[] = ['gemini', 'deepseek', 'alibaba', 'moonshot', 'kimiCode', 'openrouter', 'openai', 'claude'];
 
 export function isProviderId(value: string | undefined): value is ProviderId {
@@ -219,6 +227,7 @@ export function providerDisplayName(provider: CollabDirectProvider): string {
         case 'claude': return 'Anthropic (Claude models)';
         case 'tencent': return 'Tencent / Hunyuan';
         case 'zhipu': return 'Zhipu / GLM (Z.AI)';
+        case 'zhipu-coding': return 'Zhipu Coding (Z.AI Coding Plan)';
     }
 }
 
@@ -237,7 +246,7 @@ function configuredEndpointProfile(key: string, fallback: ProviderEndpointProfil
     return raw && allowed.includes(raw as ProviderEndpointProfile) ? raw as ProviderEndpointProfile : fallback;
 }
 
-export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu'>): ProviderEndpointInfo {
+export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding'>): ProviderEndpointInfo {
     if (provider === 'deepseek') {
         const profile = configuredEndpointProfile('deepseek.endpointProfile', 'default', ['default', 'custom']);
         const custom = explicitConfigString('deepseekBaseUrl');
@@ -383,10 +392,22 @@ export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 
             detail: profile === 'custom' ? 'Uses harmony.zhipu.baseUrl.' : 'Uses the standard Zhipu (Z.AI) OpenAI-compatible endpoint.'
         };
     }
+    // --- Zhipu Coding Plan ---
+    if (provider === 'zhipu-coding') {
+        return {
+            provider,
+            profile: 'default',
+            label: 'Zhipu Coding Plan endpoint',
+            baseUrl: ZHIPU_CODING_BASE_URL,
+            baseUrlSetting: 'harmony.zhipu.baseUrl',
+            needsCustomBaseUrl: false,
+            detail: 'Uses the Z.AI Coding Plan endpoint (api.z.ai). Reuses the same API key as the standard Zhipu provider.'
+        };
+    }
     throw new Error(`Unsupported endpoint provider: ${provider}`);
 }
 
-export function providerBaseUrlForCall(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu'>): string {
+export function providerBaseUrlForCall(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding'>): string {
     const endpoint = providerEndpointInfo(provider);
     if (!endpoint.baseUrl) {
         throw new Error(`${providerDisplayName(provider)} endpoint profile "${endpoint.profile}" needs a custom base URL. Set ${endpoint.baseUrlSetting} to the provider-issued regional URL.`);
@@ -1144,6 +1165,11 @@ export async function discoverModels(
                 const cfg = vscode.workspace.getConfiguration('harmony');
                 const baseUrl = (cfg.get<string>('zhipu.baseUrl') ?? ZHIPU_DEFAULT_BASE_URL).replace(/\/$/, '');
                 url = `${baseUrl}/models`;
+                headers['Authorization'] = `Bearer ${apiKey}`;
+                break;
+            }
+            case 'zhipu-coding': {
+                url = `${ZHIPU_CODING_BASE_URL}/models`;
                 headers['Authorization'] = `Bearer ${apiKey}`;
                 break;
             }

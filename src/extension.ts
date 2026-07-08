@@ -1123,7 +1123,7 @@ export function activate(context: vscode.ExtensionContext) {
             const currentDeepSeek = cfg.get<string>('deepseekModel') ?? 'deepseek-v4-flash';
             const currentAlibaba = modelFor('alibaba', 'coding');
             const currentMoonshot = modelFor('moonshot', 'coding');
-            type ModelPick = vscode.QuickPickItem & { action?: 'set' | 'discover'; provider?: 'vscode-lm' | 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'openai' | 'openrouter' | 'gemini' | 'claude'; model?: string };
+            type ModelPick = vscode.QuickPickItem & { action?: 'set' | 'discover'; provider?: 'vscode-lm' | 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude'; model?: string };
             const picks: ModelPick[] = [
                 {
                     label: 'DeepSeek V4 Pro',
@@ -1180,6 +1180,14 @@ export function activate(context: vscode.ExtensionContext) {
                     provider: 'zhipu',
                     model: 'glm-5.2',
                     picked: currentProvider === 'zhipu'
+                },
+                {
+                    label: 'Zhipu Coding (GLM Coding Plan)',
+                    description: 'Harmony direct API',
+                    detail: 'Z.AI Coding Plan endpoint via api.z.ai, cost-efficient coding. Uses same API key as Zhipu.',
+                    provider: 'zhipu-coding',
+                    model: 'glm-5.2',
+                    picked: currentProvider === 'zhipu-coding'
                 },
                 {
                     label: 'OpenAI / GPT-5-mini',
@@ -1240,7 +1248,7 @@ export function activate(context: vscode.ExtensionContext) {
             await cfg.update('modelProvider', pick.provider, vscode.ConfigurationTarget.Global);
             if (pick.provider === 'deepseek' && pick.model) {
                 await cfg.update('deepseekModel', pick.model, vscode.ConfigurationTarget.Global);
-            } else if ((pick.provider === 'alibaba' || pick.provider === 'tencent' || pick.provider === 'moonshot' || pick.provider === 'zhipu' || pick.provider === 'openai' || pick.provider === 'openrouter' || pick.provider === 'gemini' || pick.provider === 'claude') && pick.model) {
+            } else if ((pick.provider === 'alibaba' || pick.provider === 'tencent' || pick.provider === 'moonshot' || pick.provider === 'zhipu' || pick.provider === 'zhipu-coding' || pick.provider === 'openai' || pick.provider === 'openrouter' || pick.provider === 'gemini' || pick.provider === 'claude') && pick.model) {
                 await cfg.update(`providers.${pick.provider}.coding`, pick.model, vscode.ConfigurationTarget.Global);
             }
             const summary = pick.provider === 'vscode-lm'

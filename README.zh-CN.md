@@ -36,7 +36,7 @@ Harmony 是 VS Code/Cursor 扩展，提供 `@harmony` 聊天、工作区工具�
 │  │   OpenAI · Moonshot ·    │                   │
 │  │   Kimi Code ·            │                   │
 │  │   OpenRouter · Tencent · │                   │
-│  │   Zhipu                  │                   │
+│  │   Zhipu · Zhipu Coding   │                   │
 │  └──────────┬───────────────┘                   │
 └─────────────┼───────────────────────────────────┘
               │ 可选本地主机桥接
@@ -58,7 +58,7 @@ Harmony 通过您自己的 API 密钥将您连接到多样化的 AI 服务商—
 
 | 能力 | 详情 |
 |:---|:---|
-| **更广泛的服务商覆盖** | DeepSeek、Moonshot/Kimi、Kimi Code、阿里巴巴/Qwen、智谱/GLM 和腾讯——以及 Gemini、OpenAI、OpenRouter 和 Anthropic/Claude——全部在一个扩展中 |
+| **更广泛的服务商覆盖** | DeepSeek、Moonshot/Kimi、Kimi Code、阿里巴巴/Qwen、智谱/GLM、智谱编码计划（Zhipu Coding Plan）和腾讯——以及 Gemini、OpenAI、OpenRouter 和 Anthropic/Claude——全部在一个扩展中 |
 | **您的密钥，您的选择** | 您决定配置哪些服务商。没有密钥 = 没有外部调用。按需逐步添加服务商。 |
 | **Copilot 协同** | 日常编码使用 VS Code Copilot，而 Harmony 处理协奏、多模型共识和文档翻译 |
 | **本地模型（计划中）** | 原生本地优先操作已在路线图上。目前 Harmony 需要 API 密钥；本地模型支持正在开发中。 |
@@ -607,7 +607,7 @@ Harmony 会说中文。完整的 i18n，具备 `locales/zh.json`、`package.nls.
 
 ## 法律 & 免责声明
 
-**API 费用：** Harmony 在配置了您的 API 密钥时可以调用付费 AI 服务商 API（DeepSeek、阿里巴巴、Gemini、OpenAI、Claude、OpenRouter、Moonshot）。您对产生的所有 API 费用承担全部责任。Harmony 包含费用防护、服务商策略和每会话配额以帮助管理支出，但没有任何自动上限是万无一失的。定期查看您的服务商账单仪表盘。
+**API 费用：** Harmony 在配置了您的 API 密钥时可以调用付费 AI 服务商 API（DeepSeek、阿里巴巴/Qwen、Gemini、OpenAI、Claude、OpenRouter、Moonshot/Kimi、腾讯和智谱/智谱编码）。您对产生的所有 API 费用承担全部责任。Harmony 包含费用防护、服务商策略和每会话配额以帮助管理支出，但没有任何自动上限是万无一失的。定期查看您的服务商账单仪表盘。
 
 **无担保：** 本软件按"现状"提供，不附带任何明示或暗示的担保。完整 Hippocratic License 条款见 [LICENSE](LICENSE) 文件。
 

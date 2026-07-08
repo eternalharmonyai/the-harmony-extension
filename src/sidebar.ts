@@ -124,6 +124,10 @@ const PRIMARY_MODEL_OPTIONS: Record<string, { value: string; label: string }[]> 
     { value: 'glm-5.1', label: 'glm-5.1 (fast, light)' },
     { value: 'glm-5.2', label: 'glm-5.2 (balanced, capable)' },
   ],
+  'zhipu-coding': [
+    { value: 'glm-5.2', label: 'glm-5.2 (coding plan, cost-efficient)' },
+    { value: 'glm-5.1', label: 'glm-5.1 (fast, light)' },
+  ],
 };
 
 export class HarmonyViewProvider implements vscode.WebviewViewProvider {
@@ -739,6 +743,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                 ?? modelFor('tencent', 'coding'),
             zhipuModel: this.context.workspaceState.get<string>('harmony.primaryModel.zhipu')
                 ?? modelFor('zhipu', 'coding'),
+            zhipuCodingModel: this.context.workspaceState.get<string>('harmony.primaryModel.zhipu-coding')
+                ?? modelFor('zhipu-coding', 'coding'),
             agentMaxSteps: cfg.get<number>('agentMaxSteps') ?? 1,
             autoApprove: !!cfg.get<boolean>('autoApproveTools'),
             planOnly: !!cfg.get<boolean>('planOnlyMode'),
@@ -1277,6 +1283,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     <option value="moonshot">Moonshot / Kimi (direct)</option>
     <option value="zhipu">Zhipu / GLM (direct)</option>
     <option value="kimiCode">KimiCode (direct)</option>
+    <option value="zhipu-coding">Zhipu Coding (direct)</option>
   </select>
   <div id="direct-primary-block" class="hint" style="display:none; margin-top:4px;"></div>
   <button class="subtle" id="set-key" style="display:none; margin-top:4px;">${lm.getString('provider.setKey')}</button>
@@ -1669,7 +1676,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
       if (!document.getElementById('deepswarm-provider')) {
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;gap:4px;margin-top:4px;';
-        row.innerHTML = '<select id="deepswarm-provider" style="flex:1;"><option value="auto">\uD83E\uDD16 Auto (strategy picks)</option><option value="deepseek">\uD83D\uDC0B DeepSeek</option><option value="gemini">\uD83D\uDC8E Gemini</option><option value="alibaba">\u2601\uFE0F Qwen (Alibaba)</option><option value="moonshot">\uD83C\uDF19 Kimi (Moonshot)</option><option value="zhipu">\uD83E\uDDE0 Zhipu / GLM</option><option value="tencent">\uD83D\uDD37 Hunyuan (Tencent)</option></select><select id="deepswarm-tier" style="width:90px;"><option value="auto">Auto tier</option><option value="light">Light</option><option value="mid">Mid</option><option value="heavy">Heavy</option><option value="coding">Coding</option></select>';
+        row.innerHTML = '<select id="deepswarm-provider" style="flex:1;"><option value="auto">\uD83E\uDD16 Auto (strategy picks)</option><option value="deepseek">\uD83D\uDC0B DeepSeek</option><option value="gemini">\uD83D\uDC8E Gemini</option><option value="alibaba">\u2601\uFE0F Qwen (Alibaba)</option><option value="moonshot">\uD83C\uDF19 Kimi (Moonshot)</option><option value="zhipu">\uD83E\uDDE0 Zhipu / GLM</option><option value="zhipu-coding">\uD83E\uDDE0 Zhipu Coding Plan</option><option value="tencent">\uD83D\uDD37 Hunyuan (Tencent)</option></select><select id="deepswarm-tier" style="width:90px;"><option value="auto">Auto tier</option><option value="light">Light</option><option value="mid">Mid</option><option value="heavy">Heavy</option><option value="coding">Coding</option></select>';
         deepswarmHeader.insertAdjacentElement('afterend', row);
         // Wire event listeners
         document.getElementById('deepswarm-provider').addEventListener('change', function(e) { vscode.postMessage({ type: 'selectDeepSwarmProvider', value: e.target.value }); });
@@ -1698,8 +1705,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     // ── End dynamic injection ──
     $('profile').value = s.profile;
     $('provider').value = s.provider;
-    const primaryDirect = ['deepseek', 'alibaba', 'moonshot', 'kimiCode', 'tencent', 'zhipu'].includes(s.provider);
-    const primaryModel = s.provider === 'deepseek' ? s.deepseekModel : (s.provider === 'alibaba' ? s.alibabaPrimaryModel : (s.provider === 'moonshot' ? s.moonshotPrimaryModel : (s.provider === 'kimiCode' ? s.kimiCodePrimaryModel : (s.provider === 'zhipu' ? s.zhipuModel : s.tencentPrimaryModel))));
+    const primaryDirect = ['deepseek', 'alibaba', 'moonshot', 'kimiCode', 'tencent', 'zhipu', 'zhipu-coding'].includes(s.provider);
+    const primaryModel = s.provider === 'deepseek' ? s.deepseekModel : (s.provider === 'alibaba' ? s.alibabaPrimaryModel : (s.provider === 'moonshot' ? s.moonshotPrimaryModel : (s.provider === 'kimiCode' ? s.kimiCodePrimaryModel : (s.provider === 'zhipu' ? s.zhipuModel : (s.provider === 'zhipu-coding' ? s.zhipuCodingModel : s.tencentPrimaryModel)))));
     const primaryKeySaved = !!(s.primaryProviderKeys && s.primaryProviderKeys[s.provider]);
     const primarySecretKey = s.providerSecretKeys && s.providerSecretKeys[s.provider] ? s.providerSecretKeys[s.provider] : '';
     const primaryEndpoint = s.providerEndpoints && s.providerEndpoints[s.provider] ? s.providerEndpoints[s.provider] : null;
