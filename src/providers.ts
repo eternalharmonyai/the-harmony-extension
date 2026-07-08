@@ -1177,7 +1177,9 @@ export async function discoverModels(
         const r = await fetch(url, { method: 'GET', headers, signal: controller.signal as any });
         const text = await r.text();
         if (!r.ok) throw new Error(`${provider} HTTP ${r.status}: ${text.slice(0, 600)}`);
-        const json = JSON.parse(text);
+        let json: any;
+        try { json = JSON.parse(text); }
+        catch { throw new Error(`${provider} returned non-JSON response: ${text.slice(0, 200)}`); }
         // OpenAI/DeepSeek/Claude all wrap as { data: [{id|name}, ...] }; Gemini as { models: [{name}, ...] }
         const items: any[] = json?.data ?? json?.models ?? [];
         const ids = items.map((m: any) => {
