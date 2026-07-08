@@ -1190,15 +1190,17 @@ function toolRoutingFailureLikely(content: string, prompt: string): boolean {
 /** Detect concluding/summarizing responses that may unintentionally end the turn. */
 function looksLikeConclusion(content: string): boolean {
     const lower = content.toLowerCase();
-    // Summary table with status indicators — only if near the END of content
-    // (tables earlier in the response are informational, not conclusions)
-    const lastQuarter = content.length > 400 ? content.slice(-Math.floor(content.length / 4)) : content;
-    if (/\|.*\|.*\|/.test(lastQuarter) && /\b(done|complete|result|status|step|check)\b/i.test(lastQuarter)) return true;
+    // Only check the last ~15% of content (the tail), not the last 25%.
+    // This prevents mid-response TODO lists and status tables from triggering.
+    const tailLen = Math.max(200, Math.floor(content.length * 0.15));
+    const tail = content.length > tailLen ? content.slice(-tailLen) : content;
+    // Summary table with status indicators — only in the actual tail
+    if (/\|.*\|.*\|/.test(tail) && /\b(done|complete|result|status|step|check)\b/i.test(tail)) return true;
     // Conclusion language without continuation signals
     if (/\b(done|complete|finished|all set|wrapped up|that's it|wraps it up|let's wrap up)\b/i.test(lower) &&
         !/\b(continue|next|further|more|also|additionally|shall we|want to|would you)\b/i.test(lower)) return true;
-    // Checkmark + completion word
-    if (/(✅|✔️|☑️|✓)\s*(done|complete|finished|ready|clean|solid)/i.test(content)) return true;
+    // Checkmark + completion word — only in the tail, not the full content
+    if (/(✅|✔️|☑️|✓)\s*(done|complete|finished|ready|clean|solid)/i.test(tail)) return true;
     return false;
 }
 
@@ -1273,8 +1275,11 @@ function detectToolNameInProse(content: string): string | null {
     const prose = content.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ');
     const mentions = prose.match(/\b(harmony_[a-z_]+)\b/g);
     if (!mentions || mentions.length === 0) return null;
-    // In text-only responses, ANY harmony_ mention in prose is a signal —
-    // the model is describing a tool without calling it
+    // Heuristic: if the response is long (>800 chars) or contains multiple
+    // tool mentions, the model is likely summarizing work it already did,
+    // not promising to use tools. Skip the violation.
+    // Short responses with a single tool mention are more suspicious.
+    if (mentions.length >= 3 || content.length > 1200) return null;
     return mentions[0];
 }
 
@@ -1286,6 +1291,10 @@ function detectToolNameInProse(content: string): string | null {
  * 1. Tool-prose — model mentioned a tool name without calling it
  * 2. Question-ending — specific actionable feedback beats generic
  * 3. Conclusion — summary tables, wrap-up language
+ *
+ * IMPORTANT: When called from the tool-call path (post-tool-check), the
+ * tool-prose check should be skipped because the model DID call tools.
+ * Use getFlowStateViolationPostTool() for that path instead.
  */
 function getFlowStateViolation(content?: string): FlowStateViolation | null {
     if (!content) return null;
@@ -1294,6 +1303,19 @@ function getFlowStateViolation(content?: string): FlowStateViolation | null {
     // Check bare question — specific feedback beats generic
     if (endsWithClosingQuestion(content)) return 'chat.flowStateQuestionWhisper';
     // Check conclusion signals
+    if (looksLikeConclusion(content)) return 'chat.flowStateWhisper';
+    return null;
+}
+
+/**
+ * Post-tool-call flow-state check. Skips tool-prose detection because the
+ * model already made tool calls — mentioning tool names in the summary is
+ * expected and normal, not a violation.
+ */
+function getFlowStateViolationPostTool(content?: string): FlowStateViolation | null {
+    if (!content) return null;
+    // Skip tool-prose — the model already called tools
+    if (endsWithClosingQuestion(content)) return 'chat.flowStateQuestionWhisper';
     if (looksLikeConclusion(content)) return 'chat.flowStateWhisper';
     return null;
 }
@@ -2413,9 +2435,11 @@ async function runDeepSeekAgent(
         // ── Flow-state check for responses WITH tool calls ──
         // Catches concluding responses that accompany tool calls
         // (the primary guard only fires on text-only responses).
+        // Uses getFlowStateViolationPostTool which SKIPS tool-prose detection,
+        // since the model already made tool calls and may mention them in its summary.
         if (!toolRoutingRetryUsed) {
             const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
-            const violation = getFlowStateViolation(content);
+            const violation = getFlowStateViolationPostTool(content);
             if (flowStateOn && violation) {
                 toolRoutingRetryUsed = true;
                 const lm = LanguageManager.getInstance();
