@@ -2098,10 +2098,33 @@ class ApplyPatchTool implements vscode.LanguageModelTool<ApplyPatchInput> {
 }
 
 // ─── ask_question (interactive, non-destructive) ──────────────────────────────
+export type ConvoMode = 'explore' | 'decide';
+
 export interface AskQuestionInput {
+    /** The question, reflection, or topic to explore with the user. */
     question: string;
+    /** Short header/title for the question dialog. */
     header?: string;
+    /** Optional extra context shown with the prompt. */
     message?: string;
+    /**
+     * Conversation mode:
+     * - 'explore' (default): Non-blocking exploration. Share a thought, reflection, or idea
+     *   and invite the user to build on it. Include a `thought` field with your reasoning.
+     * - 'decide': Blocking decision. Provide clear options with your recommendation.
+     *   Options should be offered in the `options` array.
+     */
+    mode?: ConvoMode;
+    /**
+     * Required in 'explore' mode. Your reflection, reasoning, or musing about the topic.
+     * Never omit this — it ensures the question is grounded in thought, not bare.
+     * In 'decide' mode, this is optional but recommended.
+     */
+    thought?: string;
+    /**
+     * Decision options for 'decide' mode. Each option is a string label or an object
+     * with label, optional description, and optional recommended flag.
+     */
     options?: Array<string | { label: string; description?: string; recommended?: boolean }>;
     allowFreeformInput?: boolean;
     allow_freeform?: boolean;
@@ -2116,6 +2139,8 @@ export interface AskQuestionInput {
         header?: string;
         question: string;
         message?: string;
+        mode?: ConvoMode;
+        thought?: string;
         options?: Array<string | { label: string; description?: string; recommended?: boolean }>;
         allowFreeformInput?: boolean;
         allow_freeform?: boolean;

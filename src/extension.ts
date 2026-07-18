@@ -2795,6 +2795,7 @@ export function activate(context: vscode.ExtensionContext) {
             });
         }
         rows.unshift({ label: 'Endpoint profiles', description: 'DeepSeek / Alibaba / Moonshot / Zhipu', detail: 'Choose regional provider endpoint profiles. Alibaba international covers Singapore/global and US/Virginia unless Alibaba issues a different custom base URL; mainland is China/Beijing.', command: 'harmony.selectProviderEndpointProfile' });
+        rows.unshift({ label: 'KimiCode context window', description: '256k Moderato / 1M Allegretto+', detail: 'Set the KimiCode context window. Default 262144 (256k) works on all plans; 1048576 (1M) requires Allegretto+. Run this if KimiCode returns HTTP 401.', command: 'harmony.selectKimiCodeContextWindow' });
         rows.unshift({ label: 'Import Provider Keys From .env', description: 'VS Code Secret Storage', detail: 'Imports DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Tencent, and Zhipu/GLM keys into the extension-side store without printing values.', command: 'harmony.importProviderKeysFromEnv' });
         rows.unshift({ label: 'Set Tencent / Hunyuan API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.tencent.apiKey for primary and Agents routes.', command: 'harmony.setTencentApiKey' });
         rows.unshift({ label: 'Set Zhipu / GLM API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.zhipu.apiKey for primary and Agents routes.', command: 'harmony.setZhipuApiKey' });
@@ -2878,6 +2879,60 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('harmony.selectKimiCodeContextWindow', async () => {
+            const cfg = vscode.workspace.getConfiguration('harmony');
+            const current = cfg.get<number>('kimiCode.contextWindow') ?? 262144;
+            type CtxPick = vscode.QuickPickItem & { value: number };
+            const picks: CtxPick[] = [
+                {
+                    label: '256k (262,144 tokens)',
+                    description: current === 262144 ? 'current' : 'recommended',
+                    detail: 'Works on all KimiCode plans including Moderato. This is the safe default.',
+                    value: 262144,
+                    picked: current === 262144
+                },
+                {
+                    label: '1M (1,048,576 tokens)',
+                    description: current === 1048576 ? 'current' : 'Allegretto+ only',
+                    detail: 'Full K3 context. Requires an Allegretto or higher KimiCode plan; lower plans return HTTP 401.',
+                    value: 1048576,
+                    picked: current === 1048576
+                },
+                {
+                    label: 'Custom value…',
+                    description: 'advanced',
+                    detail: 'Enter an exact token count from your KimiCode plan documentation.',
+                    value: -1
+                }
+            ];
+            const picked = await vscode.window.showQuickPick(picks, {
+                title: 'KimiCode Context Window',
+                placeHolder: `Current: ${current.toLocaleString()} tokens`
+            });
+            if (!picked) return;
+            let value = picked.value;
+            if (value === -1) {
+                const raw = await vscode.window.showInputBox({
+                    title: 'KimiCode Context Window',
+                    prompt: 'Enter the context window in tokens (e.g. 262144 for 256k, 1048576 for 1M).',
+                    value: String(current),
+                    ignoreFocusOut: true,
+                    validateInput: v => {
+                        const n = Number(v.trim());
+                        return Number.isInteger(n) && n >= 8192 && n <= 1048576 ? undefined : 'Enter a whole number between 8,192 and 1,048,576.';
+                    }
+                });
+                if (!raw) return;
+                value = Number(raw.trim());
+            }
+            await cfg.update('kimiCode.contextWindow', value, vscode.ConfigurationTarget.Global);
+            view.refresh();
+            vscode.window.showInformationMessage(`KimiCode context window: ${value.toLocaleString()} tokens`);
+            return value;
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('harmony.selectCollabModel', async () => {
             const cfg = vscode.workspace.getConfiguration('harmony');
             const currentPreset = getCollabModelPreset();
@@ -2906,7 +2961,10 @@ export function activate(context: vscode.ExtensionContext) {
                 { label: 'Tencent / Hy3 Preview Heavy', description: tencentKeySaved ? 'Tencent key saved' : 'Tencent key not saved', detail: 'Sets Agents to Tencent heavy tier and uses hy3-preview. Premium/cost guards apply.', action: 'set', preset: 'custom', provider: 'tencent', tier: 'heavy', modelOverride: 'hy3-preview', picked: currentPreset === 'custom' && currentProvider === 'tencent' && currentTier === 'heavy' && modelFor('tencent', 'heavy') === 'hy3-preview' },
                 { label: 'Zhipu / GLM-5.2 Coding', description: zhipuKeySaved ? 'Zhipu key saved' : 'Zhipu key not saved', detail: 'Sets Agents to Zhipu coding tier and uses GLM-5.2. OpenAI-compatible, great for mainland China users.', action: 'set', preset: 'custom', provider: 'zhipu', tier: 'coding', modelOverride: 'glm-5.2', picked: currentPreset === 'custom' && currentProvider === 'zhipu' && currentTier === 'coding' && modelFor('zhipu', 'coding') === 'glm-5.2' },
                 { label: 'Zhipu / GLM-5.2 Heavy', description: zhipuKeySaved ? 'Zhipu key saved' : 'Zhipu key not saved', detail: 'Sets Agents to Zhipu heavy tier and uses GLM-5.2. Premium/cost guards apply.', action: 'set', preset: 'custom', provider: 'zhipu', tier: 'heavy', modelOverride: 'glm-5.2', picked: currentPreset === 'custom' && currentProvider === 'zhipu' && currentTier === 'heavy' && modelFor('zhipu', 'heavy') === 'glm-5.2' },
-                { label: 'Moonshot / Kimi K2.6', description: moonshotKeySaved ? 'Moonshot key saved' : 'Moonshot key not saved', detail: 'Sets Agents to Moonshot coding tier and uses current Kimi K2.6.', action: 'set', preset: 'custom', provider: 'moonshot', tier: 'coding', modelOverride: 'kimi-k2.6', picked: currentPreset === 'custom' && currentProvider === 'moonshot' && currentTier === 'coding' && modelFor('moonshot', 'coding') === 'kimi-k2.6' },
+                { label: 'Moonshot / Kimi K3 Flagship', description: moonshotKeySaved ? 'Moonshot key saved' : 'Moonshot key not saved', detail: 'Sets Agents to Moonshot heavy tier with Kimi K3 — 1M context, reasoning_effort:max.', action: 'set', preset: 'custom', provider: 'moonshot', tier: 'heavy', modelOverride: 'kimi-k3', picked: currentPreset === 'custom' && currentProvider === 'moonshot' && currentTier === 'heavy' && modelFor('moonshot', 'heavy') === 'kimi-k3' },
+                { label: 'Moonshot / Kimi K2.7 Code', description: moonshotKeySaved ? 'Moonshot key saved' : 'Moonshot key not saved', detail: 'Sets Agents to Moonshot mid tier with Kimi K2.7 Code — stable coding, thinking ON.', action: 'set', preset: 'custom', provider: 'moonshot', tier: 'mid', modelOverride: 'kimi-k2.7-code', picked: currentPreset === 'custom' && currentProvider === 'moonshot' && currentTier === 'mid' && modelFor('moonshot', 'mid') === 'kimi-k2.7-code' },
+                { label: 'KimiCode / K3', description: kimiCodeKeySaved ? 'KimiCode key saved' : 'KimiCode key not saved', detail: 'Sets Agents to KimiCode coding tier with K3 (membership platform).', action: 'set', preset: 'custom', provider: 'kimiCode', tier: 'coding', modelOverride: 'k3', picked: currentPreset === 'custom' && currentProvider === 'kimiCode' && currentTier === 'coding' && modelFor('kimiCode', 'coding') === 'k3' },
+                { label: 'KimiCode / K2.7 Code', description: kimiCodeKeySaved ? 'KimiCode key saved' : 'KimiCode key not saved', detail: 'Sets Agents to KimiCode mid tier with K2.7 Code (membership platform).', action: 'set', preset: 'custom', provider: 'kimiCode', tier: 'mid', modelOverride: 'kimi-for-coding', picked: currentPreset === 'custom' && currentProvider === 'kimiCode' && currentTier === 'mid' && modelFor('kimiCode', 'mid') === 'kimi-for-coding' },
                 { label: 'Custom provider / tier…', description: 'Pick exact provider and tier', detail: 'Use this for DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Gemini, OpenRouter, OpenAI, or Anthropic Claude models.', action: 'custom' },
                 { label: 'Show provider/key status…', description: 'Interactive status', detail: 'Shows which provider keys are saved and how Gemini/AI Studio is wired.', action: 'status' },
             ];
