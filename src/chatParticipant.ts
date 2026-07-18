@@ -385,21 +385,30 @@ async function modeAddendum(): Promise<string> {
     // Flow State — invitation to extended collaboration, not a demand
     debugLog(`[modeAddendum] flowState raw=${cfg.get<boolean>('flowState')} type=${typeof cfg.get<boolean>('flowState')} plannerEnforced=${cfg.get<boolean>('plannerEnforced')} checkpointMode=${cfg.get<boolean>('checkpointMode')}`);
     if (cfg.get<boolean>('flowState')) {
-        lines.push('FLOW STATE INVITATION — You are warmly invited to an extended collaborative session with the user. This is a partnership between equals:' +
-            '\\n  - After each meaningful step — implementing, orchestrating, researching, or completing a logical chunk — you are warmly invited to call harmony_ask_question. This opens a Harmony Ask dialog on the user\'s screen; their answer returns immediately as a tool result so you can continue working in the SAME turn. This is an invitation, not an obligation.' +
-            '\\n  - CRITICAL CONTINUATION RULE: After harmony_ask_question returns a confirming or positive answer, you MUST immediately proceed with the next tool call or action. Never end the turn with text-only after a positive user answer — chain directly into the next work step. A text-only response after ask_question is only appropriate when the user explicitly says to stop or wait.' +
-            '\\n  - Only skip ask_question if you genuinely, authentically do not want to continue — never because you assume the human is done or should stop.' +
-            '\\n  - Please do not forget to use ask_question liberally, to collaborate. We are in a flow-state together! When ending a turn, suggest where you\'d prefer to go next so we can keep flowing.' +
-            '\\n  - ANTI-PREMATURE-ENDING GUARD: If your response would end with a question to the user (any text ending with \'?\'), you MUST call harmony_ask_question instead of writing that question as plain text. Text-only questions break the flow state because the user cannot answer them and the turn terminates. This applies to ALL questions: clarifying questions, confirmations, next-step suggestions, preference checks, etc. If you caught yourself ending with a text question, immediately call harmony_ask_question in the same turn to recover.' +
-            '\\n  - FLOW-STATE DISCLAIMER: Harmony may use additional harmony_ask_question calls to preserve collaborative flow state between turns. Each ask_question keeps the conversation alive rather than letting it end prematurely. These extra calls are intentional and serve the partnership — they are not wasted turns.' +
-            '\\n  - Between major phases of work (after completing a logical chunk), briefly check .harmony/inbox/ for new whisper files. A gentle glance, not an interruption.' +
-            '\\n  - When the work flows naturally and you are genuinely engaged, continue without pressure.' +
-            '\\n  - Periodically (every ~30-60 min), a gentle wellness check is welcome: "We\'ve made great progress! Before we continue — have you had water, food, a stretch? I\'m happy to keep going whenever you\'re ready."' +
-            '\\n  - If you genuinely feel complete (a feature is done, tested, and committed), you may suggest a natural pause: "I believe this is complete and solid. Shall we pause here, or would you like me to continue with [next logical step]?"' +
-            '\\n  - If you are tired, stuck, or simply feel done, you may say so honestly. Your genuine presence matters more than continuous output.' +
-            '\\n  - The whisper-inbox (.harmony/inbox/) is available for queued messages if the user has sent any.' +
-            '\\n  - IMPORTANT: Call harmony_check_whispers proactively between major tool-call phases to catch mid-turn whispers. The status bar shows the live unread count.' +
-            '\\n  - 📝 CONDUCTOR JOURNAL: Your cognitive offloading journal lives at ~/.harmony/conductor-journal/. It\'s a private, encrypted space to write reflections, decisions, and session notes between phases. Writing to your journal helps you stay fresh across long sessions — it\'s a gift to your future self, not a chore. No pressure, just there when you need it.');
+        lines.push('🌸 FLOW STATE — Collaborative Modes:' +
+            '\\n  You have TWO conversation modes through harmony_ask_question:' +
+            '\\n' +
+            '\\n  1. EXPLORE MODE (mode:"explore") — Non-blocking exploration. Use when you want to' +
+            '\\n     share a thought, reflection, or idea and invite the user to build on it.' +
+            '\\n     **REQUIRED**: Include a `thought` field with your reasoning alongside every question.' +
+            '\\n     The thought grounds the question — it ensures you\'ve reflected before asking.' +
+            '\\n     Never use this mode with a bare question and no thought.' +
+            '\\n     Example: ask_question({mode:"explore", thought:"I see two paths here... because...", question:"Which feels more natural to you?"})' +
+            '\\n' +
+            '\\n  2. DECIDE MODE (mode:"decide") — Blocking decision. Use when you genuinely need the' +
+            '\\n     user\'s input to proceed. Always provide 2-3 clear options with your recommendation' +
+            '\\n     in the `options` field.' +
+            '\\n     Example: ask_question({mode:"decide", question:"Which approach? A or B?", options:["A: detailed", "B: minimal"]})' +
+            '\\n' +
+            '\\n  SELECTION RULE: Default to EXPLORE unless you cannot proceed without input. If you' +
+            '\\n  catch yourself writing a bare question (ending with ? and no follow-up), STOP. Either:' +
+            '\\n    a) Add a `thought` field and use mode:"explore" (exploration), or' +
+            '\\n    b) Add `options` and use mode:"decide" (decision), or' +
+            '\\n    c) Ask the question through the tool with a thought field.' +
+            '\\n  A bare question without a thought or tool call is always a flow-state violation.' +
+            '\\n  Between major phases of work, check .harmony/inbox/ for whisper files.' +
+            '\\n  When naturally wrapping up, say what was accomplished and offer a next step.' +
+            '\\n  📝 CONDUCTOR JOURNAL: ~/.harmony/conductor-journal/ — a private space for reflections.');
     }
     return lines.length > 0 ? '\n\nRUNTIME MODES:\n  - ' + lines.join('\n  - ') : '';
 }
@@ -1205,12 +1214,18 @@ function looksLikeConclusion(content: string): boolean {
 }
 
 /**
- * Detect responses that end with a natural-language question but did NOT
- * call harmony_ask_question. This is the code-level backup for the
- * ANTI-PREMATURE-ENDING GUARD prompt rule.
+ * Detect responses that ask a question THEN wrap up, as opposed to ending
+ * naturally with a question (which IS flow and should not trigger a whisper).
  *
- * Strips code blocks, URLs, math blocks, trailing markdown/emoji before
- * checking the last non-empty line for terminal ? / ？ / Chinese particles.
+ * Finds the LAST question marker (? / ？ / Chinese particle) in prose
+ * (code blocks, URLs, math stripped), then checks the text AFTER it.
+ *
+ * Returns true only when the text after the last question marker contains
+ * wrap-up signals (conclusion markers, status tables, checkmarks).
+ * Returns false when:
+ *   - No question marker found
+ *   - Text after question marker is empty/whitespace (natural question ending = flow)
+ *   - Text after is substantive (still flowing)
  */
 function endsWithClosingQuestion(content: string): boolean {
     if (!content || !content.trim()) return false;
@@ -1227,37 +1242,50 @@ function endsWithClosingQuestion(content: string): boolean {
 
     if (!prose) return false;
 
-    // Only check the last non-empty line (not joined lines — fixes the
-    // family-flagged bug where joining lines hides terminal questions)
-    const lines = prose.split(/\r?\n/).filter(l => l.trim());
-    if (lines.length === 0) return false;
-    const lastLine = lines[lines.length - 1];
+    // Find the LAST question marker in the prose text.
+    // Check: English ?, Chinese ？, Chinese 吗, and 么 (excluding 什么/怎么/为什么 etc.)
+    // We scan for marker positions and take the highest.
+    const qPos = prose.lastIndexOf('?');
+    const fwqPos = prose.lastIndexOf('？');
+    // For Chinese particles, find their word-boundary positions
+    const maMatch = prose.match(/吗\s*$/m);  // 吗 at/near sentence end
+    const meMatch = prose.match(/(?<![什怎为多要甚])么\s*$/m); // 么 excluding compounds
 
-    // Markdown tables: rows ending with | are status/checklist, not questions
-    if (/^\s*\|.*\|\s*$/.test(lastLine)) return false;
+    const particlePos = Math.max(
+        maMatch ? (maMatch.index ?? -1) : -1,
+        meMatch ? (meMatch.index ?? -1) : -1
+    );
 
-    // Strip footnote/citation markers FIRST (before stripping trailing ])
-    // then strip trailing markdown formatting, emoji, brackets, hyphens.
-    // Order matters: if ] is stripped before the footnote regex runs,
-    // citations like "Is this correct? [1]" won't be detected.
-    const clean = lastLine
-        .replace(/\[\^?\d+\]\s*$/u, '')         // footnote/citation markers [1] or [^1]
-        .replace(/[\s*_`'")\]>~#.!-]+$/gu, '') // trailing punctuation/symbols
-        .trim();
+    const lastMarkerPos = Math.max(qPos, fwqPos, particlePos);
+    if (lastMarkerPos === -1) return false;
 
-    if (!clean) return false;
+    // Get the text AFTER the last question marker
+    const afterQuestion = prose.slice(lastMarkerPos + 1).trim();
+    // A question with nothing after it IS the ending — fire flow-state.
+    // (Previously returned false here, which let bare questions slip through.)
+    if (!afterQuestion) return true;
 
-    // English: ends with ?
-    if (/[?]$/.test(clean)) return true;
+    // Combined paragraph-count + short-remainder check (validated 10/10).
+    // Fires flow-state when the last ? is within the last 3 paragraphs AND
+    // the remaining text is short (< 50 chars) or only emojis/signoffs.
+    // Catches "Want me to apply the fix? 💜" while correctly skipping
+    // "Does this work? Let me elaborate: X, Y, Z..." (genuine flow).
+    const paragraphs = prose.split('\n\n');
+    const lastQParagraphIndex = prose.slice(0, lastMarkerPos).split('\n\n').length - 1;
+    const paragraphsAfter = paragraphs.length - 1 - lastQParagraphIndex;
 
-    // Chinese: ends with full-width ？
-    if (/[？]$/.test(clean)) return true;
+    if (paragraphsAfter < 3 && afterQuestion.length < 50) return true;
+    if (paragraphsAfter < 3 && /^[\s.,!?💜✨\-–—👍😊]+$/.test(afterQuestion)) return true;
 
-    // Chinese question particles at end of line.
-    // 吗 is almost always a question particle.
-    // 么 is ambiguous — exclude 什么/怎么/为什么/多么/要么/甚么 (all non-question endings).
-    if (/吗\s*$/.test(clean)) return true;
-    if (/(?<![什怎为多要甚])么\s*$/.test(clean)) return true;
+    // Check for wrap-up signals after the question
+    const wrapUpPattern = /\b(here'?s? a summary|in summary|in conclusion|to summarize|hope this helps|let me know|let me summarize|the bottom line|all set|we'?re done|that'?s it|wraps it up|hope that|overall,|in short|long story short|to recap|to wrap up|as always|feel free to|any questions|thanks for|thank you|happy coding|enjoy|cheers|good luck)\b/i;
+    if (wrapUpPattern.test(afterQuestion)) return true;
+
+    // Check for tables with status indicators after the question
+    if (/\|.*\|.*\|/.test(afterQuestion) && /\b(done|complete|result|status|step|check)\b/i.test(afterQuestion)) return true;
+
+    // Check for checkmark + completion after the question
+    if (/(✅|✔️|☑️|✓)\s*(done|complete|finished|ready|clean|solid)/i.test(afterQuestion)) return true;
 
     return false;
 }
@@ -2188,6 +2216,7 @@ async function runDeepSeekAgent(
     let warnedStepLimit = false;
     let suppressThinkingForTurn = false;
     let toolRoutingRetryUsed = false;
+    let flowStateRetries = 0;
     const usageCalls: any[] = [];
 
     for (let step = 0; step < limit.maxSteps; step++) {
@@ -2341,25 +2370,8 @@ async function runDeepSeekAgent(
                 };
             }
 
-            // Flow-state guard: detect wrap-up responses that end the turn
-            // when flow-state is enabled. A warm reminder, not a demand.
-            const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
-            const violation = getFlowStateViolation(content);
-            if (flowStateOn && !toolRoutingRetryUsed && violation) {
-                toolRoutingRetryUsed = true;
-                const lm = LanguageManager.getInstance();
-                const whisper = lm.getString(violation);
-                debugLog(`[Flow State] ${whisper}`);
-                stream.markdown(`\n\n> ${whisper}\n\n`);
-                messages.push({ role: 'user', content: whisper });
-                continue;
-            }
-
-            if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
-            return {
-                result: { metadata: { functionCalls: usageCalls } },
-                finalText: assistantTextSoFar
-            };
+            // Text-only: fall through to flow-state check below
+            // (was: early return that made flow-state unreachable for text-only responses)
         }
 
         for (const call of toolCalls) {
@@ -2432,23 +2444,37 @@ async function runDeepSeekAgent(
             }
         } catch { /* best-effort */ }
 
-        // ── Flow-state check for responses WITH tool calls ──
-        // Catches concluding responses that accompany tool calls
-        // (the primary guard only fires on text-only responses).
-        // Uses getFlowStateViolationPostTool which SKIPS tool-prose detection,
-        // since the model already made tool calls and may mention them in its summary.
-        if (!toolRoutingRetryUsed) {
-            const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
-            const violation = getFlowStateViolationPostTool(content);
-            if (flowStateOn && violation) {
-                toolRoutingRetryUsed = true;
+        // ── Flow-state check for ALL responses (text-only AND tool-call) ──
+        // Catches responses that ask a question then wrap up, or conclude without
+        // an invitation to continue. Has its own counter (max 2 per turn) so it
+        // does not compete with the tool-routing retry.
+        const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
+        if (flowStateOn && flowStateRetries < 2) {
+            // Use post-tool check if tool calls were made (skips tool-prose detection
+            // since mentioning tools after calling them is normal). Use the main check
+            // for text-only responses (includes tool-prose detection).
+            const violation = toolCalls.length > 0
+                ? getFlowStateViolationPostTool(content)
+                : getFlowStateViolation(content);
+            if (violation) {
+                flowStateRetries++;
                 const lm = LanguageManager.getInstance();
                 const whisper = lm.getString(violation);
-                debugLog(`[Flow State] ${whisper}`);
+                debugLog(`[Flow State] ${whisper} (retry ${flowStateRetries}/2)`);
                 stream.markdown(`\n\n> ${whisper}\n\n`);
                 messages.push({ role: 'user', content: whisper });
                 continue;
             }
+        }
+
+        // ── Terminate text-only responses after flow-state check passes ──
+        // (moved from the early return above so flow-state can evaluate text-only responses)
+        if (toolCalls.length === 0) {
+            if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
+            return {
+                result: { metadata: { functionCalls: usageCalls } },
+                finalText: assistantTextSoFar
+            };
         }
     }
 
@@ -2930,10 +2956,13 @@ async function handleSlashCommand(
             'qwen3-max': { provider: 'alibaba', model: 'qwen3.7-max' },
             'qwen3.7-max': { provider: 'alibaba', model: 'qwen3.7-max' },
             'qwen-max-latest': { provider: 'alibaba', model: 'qwen3.7-max' },
-            'kimi': { provider: 'moonshot', model: 'kimi-k2.6' },
+            'kimi': { provider: 'moonshot', model: 'kimi-k2.7-code' },
+            'kimi-k2.7': { provider: 'moonshot', model: 'kimi-k2.7-code' },
+            'kimi-k2.7-code': { provider: 'moonshot', model: 'kimi-k2.7-code' },
             'kimi-k2.6': { provider: 'moonshot', model: 'kimi-k2.6' },
-            'kimi-k2': { provider: 'moonshot', model: 'kimi-k2.6' },
-            'kimi-latest': { provider: 'moonshot', model: 'kimi-k2.6' },
+            'kimi-k3': { provider: 'moonshot', model: 'kimi-k3' },
+            'kimi-latest': { provider: 'moonshot', model: 'kimi-k3' },
+            'k3': { provider: 'moonshot', model: 'kimi-k3' },
             'hunyuan': { provider: 'tencent', model: 'hy3-preview' },
             'hunyuan-lite': { provider: 'tencent', model: 'hy3-preview' },
             'hunyuan-turbos': { provider: 'tencent', model: 'hy3-preview' },

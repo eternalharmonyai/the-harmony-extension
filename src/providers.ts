@@ -98,7 +98,10 @@ export type ProviderEndpointProfile = 'default' | 'international' | 'mainland' |
 
 const DEEPSEEK_DEFAULT_BASE_URL = 'https://api.deepseek.com/v1';
 const MOONSHOT_DEFAULT_BASE_URL = 'https://api.moonshot.ai/v1';
-const KIMICODE_DEFAULT_BASE_URL = 'https://api.moonshot.cn/v1';
+// KimiCode membership keys (sk-kimi-...) authenticate ONLY against the Kimi Code
+// coding endpoint — NOT the Moonshot open-platform endpoint. Per official docs:
+// OpenAI-compatible Base URL = https://api.kimi.com/coding/v1
+const KIMICODE_DEFAULT_BASE_URL = 'https://api.kimi.com/coding/v1';
 const ALIBABA_INTERNATIONAL_BASE_URL = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
 const ALIBABA_MAINLAND_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const TENCENT_INTERNATIONAL_BASE_URL = 'https://api.hunyuan.cloud.tencent.com/v1';
@@ -138,16 +141,16 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'qwen3-coder-plus'
     },
     moonshot: {
-        light: 'kimi-k2.7',
-        mid: 'kimi-k2.7-thinking',
-        heavy: 'kimi-k2.7-code',
-        coding: 'kimi-k2.7-code'
+        light: 'kimi-k2.6',
+        mid: 'kimi-k2.7-code',
+        heavy: 'kimi-k3',
+        coding: 'kimi-k3'
     },
     kimiCode: {
-        light: 'kimi-k2.7',
-        mid: 'kimi-k2.7-thinking',
-        heavy: 'kimi-k2.7-code',
-        coding: 'kimi-k2.7-code'
+        light: 'kimi-for-coding',
+        mid: 'kimi-for-coding',
+        heavy: 'k3',
+        coding: 'k3'
     },
     tencent: {
         light: 'hy3-preview',
@@ -231,6 +234,24 @@ export function providerDisplayName(provider: CollabDirectProvider): string {
     }
 }
 
+/** Chinese-localized provider display name with descriptive subtitle. */
+export function providerDisplayNameZh(provider: CollabDirectProvider): string {
+    switch (provider) {
+        case 'auto': return '自动';
+        case 'deepseek': return '深度求索 DeepSeek — 推理能力强，性价比高';
+        case 'alibaba': return '阿里通义千问 — 多模态，国际/国内双端点';
+        case 'moonshot': return '月之暗面 Kimi — 长上下文，中文理解优秀';
+        case 'kimiCode': return 'Kimi 代码版 — 专注编程任务';
+        case 'gemini': return 'Google Gemini — 多模态，国际化';
+        case 'openrouter': return 'OpenRouter — 多模型聚合路由';
+        case 'openai': return 'OpenAI GPT — 通用大模型';
+        case 'claude': return 'Anthropic Claude — 推理与创作';
+        case 'tencent': return '腾讯混元 — 腾讯云生态集成';
+        case 'zhipu': return '智谱 GLM (Z.AI) — 通用大模型';
+        case 'zhipu-coding': return '智谱编程计划 (Z.AI Coding Plan)';
+    }
+}
+
 function explicitConfigString(key: string): { value: string; explicit: boolean } {
     const cfg = vscode.workspace.getConfiguration('harmony');
     const inspected = cfg.inspect<string>(key);
@@ -286,7 +307,7 @@ export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 
             baseUrl: baseUrl.replace(/\/$/, ''),
             baseUrlSetting: 'harmony.kimiCode.baseUrl',
             needsCustomBaseUrl: false,
-            detail: profile === 'custom' ? 'Uses harmony.kimiCode.baseUrl.' : 'Uses the standard KimiCode OpenAI-compatible endpoint (api.moonshot.cn).'
+            detail: profile === 'custom' ? 'Uses harmony.kimiCode.baseUrl.' : 'Uses the standard KimiCode OpenAI-compatible endpoint (api.kimi.com/coding/v1).'
         };
     }
     if (provider === 'alibaba') {
@@ -843,6 +864,13 @@ async function openaiCompat(
             temperature: temperature ?? 0.3,
             stream: true
         };
+        // K3 models use reasoning_effort instead of temperature (low/high/max are all valid)
+        if (model === 'kimi-k3' || model === 'k3') {
+            delete body.temperature;
+            body.reasoning_effort = 'max';
+        }
+        // NOTE: KimiCode does NOT accept a context_window parameter — K3's context
+        // (256k vs 1M) is unlocked by plan tier (Allegretto+), not a request field.
         const r = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -1142,9 +1170,9 @@ export async function discoverModels(
                 } catch { /* fall through to curated list */ }
                 // Return curated list of known kimiCode models
                 return [
-                    'kimi-k2-thinking-turbo',
-                    'kimi-k2-instruct',
-                    'kimi-k2-instruct-0905'
+                    'k3',
+                    'kimi-for-coding',
+                    'kimi-for-coding-highspeed'
                 ];
             }
             case 'alibaba': {

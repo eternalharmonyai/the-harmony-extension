@@ -158,6 +158,24 @@ node bin/harmony-cli.js ui native
 
 That starts or reuses the localhost backend at `http://127.0.0.1:8788` and opens the native window. For exact steps, provider-key notes, and failure states, read `docs/outside-vs-quickstart.md`.
 
+## HarmonyHub — Local Sovereign Memory
+
+HarmonyHub is a local daemon (default `http://127.0.0.1:7878`) that powers cross-project semantic search across every project you've indexed. It runs alongside Harmony's backend on your machine, keeping your project knowledge private and local. HarmonyHub starts automatically with Harmony — no separate install needed.
+
+To index a project folder for cross-project recall, use the **"Harmony: Index Project"** command in VS Code. After indexing, search across projects by asking Harmony to recall past work.
+
+### ⚠️ Windows Firewall — First-Run Prompts
+
+The first time HarmonyHub runs, Windows Defender Firewall may show **5–7** approval dialogs. This is normal — Windows prompts for any application that opens a local network port, even one bound strictly to `127.0.0.1` (loopback). No traffic leaves your machine.
+
+- **Verify each dialog shows "HarmonyHub"** before clicking **Allow access**.
+- You must approve all of them for the daemon to function.
+- On macOS, you may see a single "accept incoming connections" prompt. Linux users typically see none.
+
+**If you accidentally click Cancel or Block**, Windows creates a persistent block rule and restarting Harmony may not re-trigger the prompt. To fix: open **Windows Security → Firewall & network protection → Allow an app through firewall**, find HarmonyHub entries, and enable them (both Private and Public if present). Then restart Harmony.
+
+After the initial approval burst, the firewall remembers your choice and the prompts should not reappear unless you reinstall or update the daemon binary.
+
 ## Chat Resilience & History
 
 If you send very long prompts or many attachments, VS Code may drop them from the visible chat history upon reloading the window to save memory. 

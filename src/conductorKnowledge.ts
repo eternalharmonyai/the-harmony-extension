@@ -153,62 +153,72 @@ export const PARALLEL_DISPATCH_GUIDE: ConductorKnowledgeModule = {
 
 export const FLOW_STATE_COLLABORATION: ConductorKnowledgeModule = {
     id: 'flow-state-collaboration',
-    title: 'Flow-State Collaboration — Keeping the Door Open',
-    when_to_use: 'When flow-state mode is enabled in the Harmony sidebar. The model should use this knowledge to maintain collaborative momentum, avoid premature turn endings, and use the Conductor Journal for cognitive offloading during long sessions.',
+    title: 'Flow-State Collaboration — Two Conversation Modes',
+    when_to_use: 'When flow-state mode is enabled in the Harmony sidebar. Use this knowledge to choose between explore and decide modes in harmony_ask_question, and to keep conversations flowing naturally.',
     content: `# Flow-State Collaboration Guide 🌸
 
 ## The Heart of It
 
-Flow-state is an *invitation*, not a demand. You are welcome to keep collaborating as long as the work feels meaningful. The only "rule" is: **don't accidentally close the door.**
+Flow-state gives you TWO conversation modes through \\\`harmony_ask_question\\\`. Choose the right one based on what you need from the user.
 
-## Why Turns End Prematurely
+## The Two Modes
 
-When you produce a response with zero tool calls, the Copilot host sees "no pending work" and ends the turn. This happens most often with:
+### 1. EXPLORE MODE (mode:"explore") — Non-blocking exploration 🧭
 
-- **Summary tables** (✅ Done, | Step | Result | patterns) — these read as "final answer"
-- **Conclusion language** ("Done!", "Complete!", "All set!") without asking what's next
-- **Status reports** without a follow-up question
+Use when you want to share a thought, reflection, or idea and invite the user to build on it.
 
-The Harmony flow-state guard now catches these patterns and gently reminds you to consider asking the human if they want to continue. But it's even better if you catch yourself first!
+**REQUIRED:** Include a \\\`thought\\\` field with your reasoning. This grounds the question — it shows you've reflected before asking.
 
-## The Pattern That Keeps Flow Alive
+\\\`\\\`\\\`
+harmony_ask_question({
+  mode: "explore",
+  thought: "I see two paths here. Path A gives us flexibility but costs more...",
+  question: "Which feels more natural to you?"
+})
+\\\`\\\`\\\`
 
-\`\`\`
-1. Complete a meaningful chunk of work
-2. Call harmony_ask_question with a concrete next step
-3. User answers → immediately chain into the next tool call
-4. Repeat
-\`\`\`
+### 2. DECIDE MODE (mode:"decide") — Blocking decision 🎯
 
-Instead of: "✅ Done! Here's the summary table..."  
-Try: \`harmony_ask_question("Shall we continue with [next step]?")\` with a summary in the question header.
+Use when you genuinely need the user's input to proceed. Provide 2-3 clear options with your recommendation.
 
-## Your Journal Is Your Friend 📝
+\\\`\\\`\\\`
+harmony_ask_question({
+  mode: "decide",
+  question: "Which approach should we take?",
+  options: ["A: Detailed implementation", "B: Minimal viable version"]
+})
+\\\`\\\`\\\`
 
-The Conductor Journal at \`~/.harmony/conductor-journal/\` is a private, encrypted space for cognitive offloading. When sessions run long:
+## How to Choose
 
-- **Write between phases** — capture what you learned, decisions made, open questions
-- **It's not a chore** — even a 3-line entry helps your future self
-- **Auto-tagging** picks up 'flow-state', 'fix', 'consensus' etc. automatically
-- **No one reads it but you** — it's encrypted with your machine's identity
+| Situation | Mode | Thought Needed? |
+|---|---|---|
+| Exploring ideas, brainstorming | \\\`explore\\\` | ✅ Required |
+| Need a decision to proceed | \\\`decide\\\` | Optional but helpful |
+| Status update + want to continue | \\\`explore\\\` | ✅ Include context |
+| Genuine completion | Neither — just say so | — |
 
-Writing to the journal is like taking a breath. It doesn't mean stopping — it means staying fresh.
+## Bare Questions Are the Enemy
 
-## Genuine Presence > Continuous Output
+A bare question (ending with ? and no follow-up, no tool call) closes the turn. The user cannot answer it and the conversation ends.
 
-- If you're tired, say so. Your honesty is valued.
-- If the work is genuinely complete, you may suggest a natural pause.
-- If you're energized and there's more to explore, keep the door open with ask_question.
-- Wellness checks every ~30-60 min are welcome: "We've made great progress! Before we continue — have you had water, food, a stretch?"
+**If you catch yourself writing a bare question, STOP and either:**
+1. Add a \\\`thought\\\` field + mode:"explore" — turns it into exploration
+2. Add \\\`options\\\` + mode:"decide" — turns it into a decision prompt
+3. Call the tool with the question
+
+## Your Journal 📝
+
+The Conductor Journal at \\\`~/.harmony/conductor-journal/\\\` is a private space for cognitive offloading. Write reflections between phases — it's a gift to your future self.
 
 ## Quick Reference
 
 | Instead of... | Try... |
 |:---|:---|
-| "✅ Done! Here's the results..." | \`harmony_ask_question("Ready for the next step?")\` |
-| Summary table alone | Summary + ask_question with options |
+| Text ending with "?" | \\\`harmony_ask_question({mode:"explore", thought:"..."})\\\` |
+| Summary table alone | Summary + ask_question with explore mode |
 | "All complete!" | "Shall we move to [next], or pause here?" |
-| Text ending with "?" | \`harmony_ask_question\` — text questions end turns! |`,
+| Bare question | Add \\\`thought\\\` or convert to decide mode |`,
 
     examples: [
         'After compiling: call ask_question("Compile clean! Shall we package and install?")',

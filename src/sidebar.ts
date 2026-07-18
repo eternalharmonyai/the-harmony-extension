@@ -4,7 +4,7 @@ import * as path from 'path';
 import { recallMemory, currentWorkspaceFingerprint, memoryStats } from './memory';
 import { getOrchestrateSessionStats } from './orchestrateMode';
 import { loadTodos, onTodoChange } from './todoStore';
-import { collabTierForPreset, countProviderKeys, getCollabDirectProvider, getCollabModelPreset, hasKey, modelFor, providerDisplayName, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier } from './providers';
+import { collabTierForPreset, countProviderKeys, getCollabDirectProvider, getCollabModelPreset, hasKey, modelFor, providerDisplayName, providerDisplayNameZh, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier } from './providers';
 import { summarize as summarizeUsage, totalCalls, totalTokens, onUsageChange, getFallbackEvents, providerAccountingSummary } from './costTracker';
 import type { ProviderAccountingSummary } from './costTracker';
 import { listSessions } from './sessions';
@@ -90,43 +90,39 @@ function stableHashForSidebarState(state: Record<string, unknown>): string {
 }
 
 // Primary model options per direct provider for the dynamic dropdown
-const PRIMARY_MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
+type ModelOption = { value: string; label: string; labelZh?: string };
+const PRIMARY_MODEL_OPTIONS: Record<string, ModelOption[]> = {
   deepseek: [
-    { value: 'deepseek-v4-flash', label: 'deepseek-v4-flash (fast, thinking ON)' },
-    { value: 'deepseek-v4-pro', label: 'deepseek-v4-pro (most capable)' },
+    { value: 'deepseek-v4-flash', label: 'deepseek-v4-flash (fast, thinking ON)', labelZh: 'deepseek-v4-flash（快速，支持思考）' },
+    { value: 'deepseek-v4-pro', label: 'deepseek-v4-pro (most capable)', labelZh: 'deepseek-v4-pro（综合最强）' },
   ],
   alibaba: [
-    { value: 'qwen3.6-flash', label: 'qwen3.6-flash (fast, cheap)' },
-    { value: 'qwen3.7-plus', label: 'qwen3.7-plus (balanced mid)' },
-    { value: 'qwen3.7-max', label: 'qwen3.7-max (best quality)' },
-    { value: 'qwen3-coder-plus', label: 'qwen3-coder-plus (coding specialist)' },
+    { value: 'qwen3.6-flash', label: 'qwen3.6-flash (fast, cheap)', labelZh: 'qwen3.6-flash（轻量高效）' },
+    { value: 'qwen3.7-plus', label: 'qwen3.7-plus (balanced mid)', labelZh: 'qwen3.7-plus（均衡实用）' },
+    { value: 'qwen3.7-max', label: 'qwen3.7-max (best quality)', labelZh: 'qwen3.7-max（效果最佳）' },
+    { value: 'qwen3-coder-plus', label: 'qwen3-coder-plus (coding specialist)', labelZh: 'qwen3-coder-plus（代码专精）' },
   ],
   moonshot: [
-    { value: 'kimi-k2.7', label: 'kimi-k2.7 (fast, current)' },
-    { value: 'kimi-k2.7-thinking', label: 'kimi-k2.7-thinking (balanced)' },
-    { value: 'kimi-k2.7-code', label: 'kimi-k2.7-code (coding specialist)' },
-    { value: 'kimi-k2-thinking-turbo', label: 'kimi-k2-thinking-turbo (legacy k2)' },
-    { value: 'kimi-k2-instruct', label: 'kimi-k2-instruct (legacy k2)' },
-    { value: 'kimi-k2-instruct-0905', label: 'kimi-k2-instruct-0905 (legacy k2)' },
+    { value: 'kimi-k2.6', label: 'kimi-k2.6 (fast, general)', labelZh: 'kimi-k2.6（快速通用）' },
+    { value: 'kimi-k2.7-code', label: 'kimi-k2.7-code (coding, thinking ON)', labelZh: 'kimi-k2.7-code（代码专精，支持思考）' },
+    { value: 'kimi-k2.7-code-highspeed', label: 'kimi-k2.7-code-highspeed (6× faster)', labelZh: 'kimi-k2.7-code-highspeed（6倍极速）' },
+    { value: 'kimi-k3', label: 'kimi-k3 (flagship, 1M context)', labelZh: 'kimi-k3（旗舰，1M 上下文）' },
   ],
   kimiCode: [
-    { value: 'kimi-k2.7', label: 'kimi-k2.7 (fast, current)' },
-    { value: 'kimi-k2.7-thinking', label: 'kimi-k2.7-thinking (balanced)' },
-    { value: 'kimi-k2.7-code', label: 'kimi-k2.7-code (coding specialist)' },
-    { value: 'kimi-k2-thinking-turbo', label: 'kimi-k2-thinking-turbo (legacy k2)' },
-    { value: 'kimi-k2-instruct', label: 'kimi-k2-instruct (legacy k2)' },
-    { value: 'kimi-k2-instruct-0905', label: 'kimi-k2-instruct-0905 (legacy k2)' },
+    { value: 'kimi-for-coding', label: 'kimi-for-coding (K2.7 Code stable)', labelZh: 'kimi-for-coding（K2.7 代码稳定版）' },
+    { value: 'kimi-for-coding-highspeed', label: 'kimi-for-coding-highspeed (6× faster)', labelZh: 'kimi-for-coding-highspeed（6倍极速）' },
+    { value: 'k3', label: 'k3 (K3 flagship, reasoning: max)', labelZh: 'k3（K3 旗舰，极致推理）' },
   ],
   tencent: [
-    { value: 'hy3-preview', label: 'hy3-preview (flagship)' },
+    { value: 'hy3-preview', label: 'hy3-preview (flagship)', labelZh: 'hy3-preview（旗舰预览版）' },
   ],
   zhipu: [
-    { value: 'glm-5.1', label: 'glm-5.1 (fast, light)' },
-    { value: 'glm-5.2', label: 'glm-5.2 (balanced, capable)' },
+    { value: 'glm-5.1', label: 'glm-5.1 (fast, light)', labelZh: 'glm-5.1（快速轻量）' },
+    { value: 'glm-5.2', label: 'glm-5.2 (balanced, capable)', labelZh: 'glm-5.2（均衡强大）' },
   ],
   'zhipu-coding': [
-    { value: 'glm-5.2', label: 'glm-5.2 (coding plan, cost-efficient)' },
-    { value: 'glm-5.1', label: 'glm-5.1 (fast, light)' },
+    { value: 'glm-5.2', label: 'glm-5.2 (coding plan, cost-efficient)', labelZh: 'glm-5.2（代码优选，高性价比）' },
+    { value: 'glm-5.1', label: 'glm-5.1 (fast, light)', labelZh: 'glm-5.1（快速轻量）' },
   ],
 };
 
@@ -699,8 +695,31 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         const sidebarMode = this.sidebarMode();
         const compactSidebar = sidebarMode === 'compact';
         const providers: ProviderId[] = PROVIDER_IDS;
-        const endpointProviders: Array<Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent'>> = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode'];
-        const endpointStates = Object.fromEntries(endpointProviders.map(provider => [provider, providerEndpointInfo(provider)]));
+        const endpointProviders: Array<Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding'>> = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'zhipu', 'zhipu-coding'];
+        const endpointStatesRaw = Object.fromEntries(endpointProviders.map(provider => [provider, providerEndpointInfo(provider)]));
+        // ZH localization for endpoint labels
+        const zhEndpointLabels: Record<string, Record<string, string>> = {
+          default: { deepseek: 'DeepSeek 默认端点', moonshot: 'Moonshot 默认端点', kimiCode: 'KimiCode 默认端点', zhipu: '智谱(Z.AI) 默认端点', 'zhipu-coding': '智谱编程计划 端点' },
+          custom: { deepseek: 'DeepSeek 自定义端点', moonshot: 'Moonshot 自定义端点', kimiCode: 'KimiCode 自定义端点', zhipu: '智谱(Z.AI) 自定义端点' },
+          international: { alibaba: '阿里云 国际端点', tencent: '腾讯混元 国际端点' },
+          mainland: { alibaba: '阿里云 中国大陆端点', tencent: '腾讯混元 中国大陆端点' },
+          us: { alibaba: '阿里云 美国/弗吉尼亚端点' },
+        };
+        const zhEndpointDetails: Record<string, Record<string, string>> = {
+          default: { deepseek: '使用 DeepSeek 标准 OpenAI 兼容端点', moonshot: '使用 Moonshot/Kimi 标准 OpenAI 兼容端点', kimiCode: '使用 KimiCode 标准 OpenAI 兼容端点 (api.kimi.com/coding/v1)', zhipu: '使用智谱(Z.AI) 标准 OpenAI 兼容端点', 'zhipu-coding': '使用 Z.AI 编程计划端点 (api.z.ai)' },
+          custom: { deepseek: '使用 harmony.deepseekBaseUrl', moonshot: '使用 harmony.moonshot.baseUrl', kimiCode: '使用 harmony.kimiCode.baseUrl', zhipu: '使用 harmony.zhipu.baseUrl' },
+          international: { alibaba: '使用国际 DashScope 端点 (新加坡/全球路由)', tencent: '使用国际混元 OpenAI 兼容端点' },
+          mainland: { alibaba: '使用中国大陆 DashScope 端点 (北京/中国账号路由)', tencent: '使用中国大陆混元端点 (北京/中国账号路由)' },
+          us: { alibaba: '使用美国/弗吉尼亚端点' },
+        };
+        const endpointStates = LanguageManager.getInstance().getCurrentLang() === 'zh'
+          ? Object.fromEntries(endpointProviders.map(provider => {
+              const info = endpointStatesRaw[provider];
+              const zhLabel = zhEndpointLabels[info.profile]?.[provider];
+              const zhDetail = zhEndpointDetails[info.profile]?.[provider];
+              return [provider, zhLabel || zhDetail ? { ...info, label: zhLabel || info.label, detail: zhDetail || info.detail } : info];
+            }))
+          : endpointStatesRaw;
         const usage = summarizeUsage();
         const accounting = cappedAccountingSummary(providerAccountingSummary());
         const hubRoots = cfg.get<string[]>('hub.allowedRoots') ?? [];
@@ -731,8 +750,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             profile: this.context.workspaceState.get<string>('harmony.activeProfile')
                 ?? cfg.get<string>('defaultProfile') ?? 'default',
             provider: cfg.get<string>('modelProvider') ?? 'vscode-lm',
-            deepseekModel: this.context.workspaceState.get<string>('harmony.primaryModel.deepseek')
-                ?? cfg.get<string>('deepseekModel') ?? 'deepseek-v4-flash',
+            deepseekModel: cfg.get<string>('deepseekModel') ?? this.context.workspaceState.get<string>('harmony.primaryModel.deepseek') ?? 'deepseek-v4-flash',
             alibabaPrimaryModel: this.context.workspaceState.get<string>('harmony.primaryModel.alibaba')
                 ?? modelFor('alibaba', 'coding'),
             moonshotPrimaryModel: this.context.workspaceState.get<string>('harmony.primaryModel.moonshot')
@@ -813,7 +831,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             primaryProviderKeys: placeholderProviderStates,
             providers: placeholderProviderStates,
             providerOrder: providers,
-            providerLabels: Object.fromEntries(providers.map(provider => [provider, providerDisplayName(provider)])),
+            providerLabels: Object.fromEntries(providers.map(provider => [provider, LanguageManager.getInstance().getCurrentLang() === 'zh' ? providerDisplayNameZh(provider) : providerDisplayName(provider)])),
             providerSecretKeys: Object.fromEntries(providers.map(provider => [provider, secretKeyFor(provider)])),
             providerEndpoints: endpointStates,
             memoryHidden: this.memoryHiddenFromPanel,
@@ -1129,6 +1147,21 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     color: var(--vscode-dropdown-foreground);
     border: 1px solid var(--vscode-dropdown-border); border-radius: 2px;
     font-size: 12px;
+  }
+  /* Neon glow for provider/model selection — subtle but distinctive */
+  #provider, #primary-model {
+    box-shadow:
+      0 0 6px rgba(0, 210, 255, 0.25),
+      0 0 14px rgba(0, 210, 255, 0.10);
+    border-color: rgba(0, 210, 255, 0.35);
+    transition: box-shadow 0.4s ease, border-color 0.4s ease;
+  }
+  #provider:hover, #primary-model:hover,
+  #provider:focus, #primary-model:focus {
+    box-shadow:
+      0 0 10px rgba(0, 210, 255, 0.45),
+      0 0 22px rgba(0, 210, 255, 0.18);
+    border-color: rgba(0, 210, 255, 0.55);
   }
   input[type="number"] {
     width: 100%; padding: 4px; background: var(--vscode-input-background);
@@ -1715,7 +1748,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     const primaryModelBlock = $('primary-model-block');
     const modelOptions = PRIMARY_MODEL_OPTIONS[s.provider];
     if (modelOptions && primaryDirect) {
-      primaryModelSel.innerHTML = modelOptions.map(m => '<option value="' + m.value + '">' + m.label + '</option>').join('');
+      const isZh = (s.language === 'zh');
+      primaryModelSel.innerHTML = modelOptions.map(m => '<option value="' + m.value + '">' + escapeHtml(isZh && m.labelZh ? m.labelZh : m.label) + '</option>').join('');
       primaryModelSel.value = primaryModel;
       primaryModelBlock.style.display = 'block';
     } else {
