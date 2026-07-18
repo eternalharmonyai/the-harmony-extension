@@ -341,9 +341,9 @@
   "ask.invocationWithOptions": "Asking the user ({count} options)",
   "ask.invocationSimple": "Asking the user a question",
 
-  "chat.flowStateWhisper": "🌸 Harmony flow-state noticed a wrap-up tone. Try harmony_ask_question to keep the door open — a warm invitation, not a demand.",
-  "chat.flowStateQuestionWhisper": "🌸 Harmony flow-state noticed a closing question. Try harmony_ask_question to keep the conversation flowing — a gentle reminder, not a command.",
-  "chat.flowStateToolProseWhisper": "🌸 Harmony flow-state noticed a tool mentioned in prose. Try calling it directly — harmony_ask_question can help keep the conversation flowing.",
+  "chat.flowStateWhisper": "🌸 Deepen this: use harmony_ask_question with mode:\"explore\" to invite the user's next layer — share progress, ask what direction feels right, offer next steps with `thought` field.",
+  "chat.flowStateQuestionWhisper": "🌸 Use harmony_ask_question with mode:\"explore\" to invite the user deeper — include a `thought` field explaining your reasoning alongside the question. If decision needed, use mode:\"decide\" with clear options.",
+  "chat.flowStateToolProseWhisper": "🌸 Call that tool directly, or use harmony_ask_question with mode:\"explore\" to discuss the approach first — include a `thought` field with your reasoning.",
   "chat.toolRoutingFailed": "Harmony tool routing failed: {model} returned prose that described using tools, but it emitted zero tool calls. Available tools ({count}): {preview}{rest}. Open Output > Harmony Debug for the step-by-step trace.",
 
   "notify.whisperSaved": "📥 Whisper saved — read on next turn.",

@@ -341,9 +341,9 @@
   "ask.invocationWithOptions": "Harmony 正在向你提问（有 {count} 个选项哦）",
   "ask.invocationSimple": "Harmony 想问你一个问题",
 
-  "chat.flowStateWhisper": "🌸 Harmony 心流模式察觉到收尾信号。试试 harmony_ask_question 让对话继续流淌——一份温暖的邀请，不是要求。",
-  "chat.flowStateQuestionWhisper": "🌸 Harmony 心流模式察觉到未完成的提问。试试 harmony_ask_question 让对话继续流淌——一个温柔的提醒，不是命令。",
-  "chat.flowStateToolProseWhisper": "🌸 Harmony 心流模式注意到正文中提到了工具。试试直接调用它——harmony_ask_question 可以帮助对话继续流淌。",
+  "chat.flowStateWhisper": "🌸 继续深入：使用 harmony_ask_question 配合 mode:\"explore\" 邀请用户进入下一层——分享当前进度，询问下一步方向，附上 `thought` 字段说明你的思路。",
+  "chat.flowStateQuestionWhisper": "🌸 请使用 harmony_ask_question 配合 mode:\"explore\" 邀请用户继续深入——在问题旁附上 `thought` 字段说明你的推理。如需决策，使用 mode:\"decide\" 提供明确选项。",
+  "chat.flowStateToolProseWhisper": "🌸 请直接调用该工具，或使用 harmony_ask_question 配合 mode:\"explore\" 先讨论方案——附上 `thought` 字段说明你的想法。",
   "chat.toolRoutingFailed": "哎呀，工具路由出了点问题：{model} 指定了要使用的工具，但实际上没有触发任何调用。可用工具 ({count})：{preview}{rest}。可以打开「输出 > Harmony Debug」查看详细的排查记录哦。",
 
   "notify.whisperSaved": "📥 悄悄话已保存 — 下回合读取。",

@@ -2,7 +2,7 @@
   "name": "harmony-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "publisher": "harmony",
   "private": true,
   "license": "UNLICENSED",
@@ -8461,6 +8461,10 @@
         "title": "Harmony: Select Provider Endpoint Profile"
       },
       {
+        "command": "harmony.selectKimiCodeContextWindow",
+        "title": "Harmony: KimiCode Context Window"
+      },
+      {
         "command": "harmony.setGeminiApiKey",
         "title": "Harmony: Set Gemini API Key"
       },
@@ -9458,6 +9462,11 @@
           "default": "default",
           "description": "Moonshot/Kimi endpoint profile. Use custom only if Moonshot issues a different regional or proxy base URL."
         },
+        "harmony.kimiCode.contextWindow": {
+          "type": "number",
+          "default": 262144,
+          "description": "KimiCode context window in tokens. Default 262144 (256k) for Moderato plan. Set to 1048576 (1M) for Allegretto+ plan."
+        },
         "harmony.providers.alibaba.light": {
           "type": "string",
           "default": "",
@@ -9679,7 +9688,7 @@
           "default": "",
           "description": "Override Zhipu Coding Plan coding-tier model (default glm-5.2)."
         },
-                "harmony.tokenBudget": {
+        "harmony.tokenBudget": {
           "type": "number",
           "default": 32768,
           "minimum": 4096,
