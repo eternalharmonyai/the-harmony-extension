@@ -13,13 +13,14 @@ import { formatHarmonyToolLedger } from './opsTools';
 import { showHarmonyAsk } from './askView';
 import { appendContinuityEntry, compactContinuity, createContinuityHandoff, forkContinuity, formatContinuityEntry, formatContinuityForPrompt, getContinuityStatus, importContinuityFromText, listContinuityEntries } from './continuity';
 import { formatRulesDetails, formatRulesStatus, loadRulesContext } from './rules';
-import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, listAvailableProviders, modelFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier, tencentSignV3, TENCENT_NATIVE_HOST, TENCENT_NATIVE_SERVICE, TENCENT_NATIVE_REGION, TENCENT_NATIVE_VERSION, sha256Hex, hmacSha256 } from './providers';
+import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, listAvailableProviders, modelFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier, tencentSignV3, TENCENT_NATIVE_HOST, TENCENT_NATIVE_SERVICE, TENCENT_NATIVE_REGION, TENCENT_NATIVE_VERSION, sha256Hex, hmacSha256, CollabDirectProvider } from './providers';
 import { formatMcpStatus, mcpStatusSummary } from './mcp';
 import { readUnread, markAllRead, formatWhispersForPrompt, onWhisperChange, getUnreadCount, startMidSessionTracking, getPendingMidSessionWhispers, markMidSessionWhispersDelivered } from './whisperInbox';
 import { searchPatterns as searchGlobalMemory, autoCapturePattern } from './globalMemory';
 import { defaultVerificationCommand, defaultVerificationTimeoutSec, runVerification } from './verification';
 import { LanguageManager } from './languageManager';
 import { tendGarden, scanUnresolvedSprouts, scanResolvedSprouts } from './careBloom';
+import { buildAliasMap, PROVIDER_REGISTRY } from './providerModels';
 
 /**
  * Global output channel for raw Harmony Agent logs.
@@ -711,6 +712,10 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
         };
     }
     const model = modelFor(provider, 'coding');
+    // Moonshot/KimiCode K3 models return reasoning_content (like DeepSeek),
+    // so enable reasoning capture for them. Other providers default to false.
+    const isKimiReasoning = (provider === 'moonshot' || provider === 'kimiCode') &&
+                            (model === 'kimi-k3' || model === 'k3');
     return {
         provider,
         label: providerDisplayName(provider),
@@ -718,9 +723,9 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
         baseUrl: providerBaseUrlForCall(provider),
         secretKey: secretKeyFor(provider),
         tier: 'coding',
-        supportsReasoningContent: false,
-        thinkingEnabled: false,
-        showThinking: false
+        supportsReasoningContent: isKimiReasoning,
+        thinkingEnabled: isKimiReasoning,
+        showThinking: isKimiReasoning
     };
 }
 
@@ -2449,7 +2454,7 @@ async function runDeepSeekAgent(
         // an invitation to continue. Has its own counter (max 2 per turn) so it
         // does not compete with the tool-routing retry.
         const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
-        if (flowStateOn && flowStateRetries < 2) {
+        if (flowStateOn && flowStateRetries < 3) {
             // Use post-tool check if tool calls were made (skips tool-prose detection
             // since mentioning tools after calling them is normal). Use the main check
             // for text-only responses (includes tool-prose detection).
@@ -2460,7 +2465,7 @@ async function runDeepSeekAgent(
                 flowStateRetries++;
                 const lm = LanguageManager.getInstance();
                 const whisper = lm.getString(violation);
-                debugLog(`[Flow State] ${whisper} (retry ${flowStateRetries}/2)`);
+                debugLog(`[Flow State] ${whisper} (retry ${flowStateRetries}/3)`);
                 stream.markdown(`\n\n> ${whisper}\n\n`);
                 messages.push({ role: 'user', content: whisper });
                 continue;
@@ -2936,51 +2941,9 @@ async function handleSlashCommand(
 
     if (request.command === 'model') {
         const arg = request.prompt.trim().toLowerCase();
-        const validModels: Record<string, { provider: 'vscode-lm' | DirectPrimaryProvider; model?: string }> = {
-            'flash': { provider: 'deepseek', model: 'deepseek-v4-flash' },
-            'v4-flash': { provider: 'deepseek', model: 'deepseek-v4-flash' },
-            'deepseek-v4-flash': { provider: 'deepseek', model: 'deepseek-v4-flash' },
-            'pro': { provider: 'deepseek', model: 'deepseek-v4-pro' },
-            'v4-pro': { provider: 'deepseek', model: 'deepseek-v4-pro' },
-            'deepseek-v4-pro': { provider: 'deepseek', model: 'deepseek-v4-pro' },
-            'qwen': { provider: 'alibaba', model: 'qwen3-coder-plus' },
-            'qwen-flash': { provider: 'alibaba', model: 'qwen3.6-flash' },
-            'qwen-turbo': { provider: 'alibaba', model: 'qwen3.6-flash' },
-            'qwen-turbo-latest': { provider: 'alibaba', model: 'qwen3.6-flash' },
-            'qwen3.6-flash': { provider: 'alibaba', model: 'qwen3.6-flash' },
-            'qwen-coder': { provider: 'alibaba', model: 'qwen3-coder-plus' },
-            'qwen3-coder-plus': { provider: 'alibaba', model: 'qwen3-coder-plus' },
-            'qwen-plus': { provider: 'alibaba', model: 'qwen3.7-plus' },
-            'qwen3.7-plus': { provider: 'alibaba', model: 'qwen3.7-plus' },
-            'qwen-max': { provider: 'alibaba', model: 'qwen3.7-max' },
-            'qwen3-max': { provider: 'alibaba', model: 'qwen3.7-max' },
-            'qwen3.7-max': { provider: 'alibaba', model: 'qwen3.7-max' },
-            'qwen-max-latest': { provider: 'alibaba', model: 'qwen3.7-max' },
-            'kimi': { provider: 'moonshot', model: 'kimi-k2.7-code' },
-            'kimi-k2.7': { provider: 'moonshot', model: 'kimi-k2.7-code' },
-            'kimi-k2.7-code': { provider: 'moonshot', model: 'kimi-k2.7-code' },
-            'kimi-k2.6': { provider: 'moonshot', model: 'kimi-k2.6' },
-            'kimi-k3': { provider: 'moonshot', model: 'kimi-k3' },
-            'kimi-latest': { provider: 'moonshot', model: 'kimi-k3' },
-            'k3': { provider: 'moonshot', model: 'kimi-k3' },
-            'hunyuan': { provider: 'tencent', model: 'hy3-preview' },
-            'hunyuan-lite': { provider: 'tencent', model: 'hy3-preview' },
-            'hunyuan-turbos': { provider: 'tencent', model: 'hy3-preview' },
-            'hunyuan-turbos-latest': { provider: 'tencent', model: 'hy3-preview' },
-            'glm': { provider: 'zhipu', model: 'glm-5.2' },
-            'glm-5.2': { provider: 'zhipu', model: 'glm-5.2' },
-            'glm-5.1': { provider: 'zhipu', model: 'glm-5.1' },
-            'zhipu': { provider: 'zhipu', model: 'glm-5.2' },
-            'gpt': { provider: 'openai', model: 'gpt-5-mini' },
-            'gpt-5': { provider: 'openai', model: 'gpt-5' },
-            'gpt-5-mini': { provider: 'openai', model: 'gpt-5-mini' },
-            'openai': { provider: 'openai', model: 'gpt-5-mini' },
-            'openrouter': { provider: 'openrouter', model: 'Qwen/Qwen3-235B-A22B-fp8-tput' },
-            'gemini': { provider: 'gemini', model: 'gemini-3.5-flash' },
-            'gemini-3.5': { provider: 'gemini', model: 'gemini-3.5-flash' },
-            'claude': { provider: 'claude', model: 'claude-sonnet-4' },
-            'claude-sonnet-4': { provider: 'claude', model: 'claude-sonnet-4' },
-            'claude-haiku-4': { provider: 'claude', model: 'claude-haiku-4' },
+        // CLI alias map is now generated from the central providerModels.ts registry.
+        const validModels: Record<string, { provider: string; model?: string }> = {
+            ...buildAliasMap(),
             'copilot': { provider: 'vscode-lm' },
             'vscode': { provider: 'vscode-lm' },
         };
@@ -2996,7 +2959,7 @@ async function handleSlashCommand(
                 } else if (pick.model) {
                     await vscode.workspace.getConfiguration('harmony').update(`providers.${pick.provider}.coding`, pick.model, true);
                 }
-                stream.markdown(`Switched to **${providerDisplayName(pick.provider)} / ${pick.model}**. This is now your default for all workspaces.`);
+                stream.markdown(`Switched to **${providerDisplayName(pick.provider as CollabDirectProvider)} / ${pick.model}**. This is now your default for all workspaces.`);
             }
         } else if (!arg) {
             const picked = await vscode.commands.executeCommand<string>('harmony.selectModel');
@@ -3010,18 +2973,11 @@ async function handleSlashCommand(
             stream.markdown(
                 `Current model: **${current}**\n\n` +
                 `Switch with \`@harmony /model <option>\`:\n` +
-                `- \`flash\` — deepseek-v4-flash (fast, thinking ON)\n` +
-                `- \`pro\` — deepseek-v4-pro (most capable, 75% off until end of May)\n` +
-                `- \`qwen-flash\` — Alibaba / Qwen qwen-turbo-latest\n` +
-                `- \`qwen\` — Alibaba / Qwen qwen3-coder-plus\n` +
-                `- \`qwen-max\` — Alibaba / Qwen qwen3-max\n` +
-                `- \`kimi\` — Moonshot / Kimi kimi-k2.6\n` +
-                `- \`glm\` — Zhipu / GLM-5.2\n` +
-                `- \`gpt\` — OpenAI / GPT-5-mini\n` +
-                `- \`openrouter\` — OpenRouter routed Qwen3-235B\n` +
-                `- \`gemini\` — Gemini / Gemini 3.5 Flash\n` +
-                `- \`claude\` — Claude / Claude Sonnet 4\n` +
-                `- \`copilot\` — VS Code built-in model (no API key needed)\n\n` +
+                PROVIDER_REGISTRY.flatMap(p =>
+                    p.models.filter(m => m.aliases && m.aliases.length > 0)
+                           .map(m => `- \`${m.aliases![0]}\` — ${p.displayName} / ${m.label}`)
+                ).join('\n') +
+                `\n- \`copilot\` — VS Code built-in model (no API key needed)\n\n` +
                 `Your choice is saved as your new default.`
             );
         }

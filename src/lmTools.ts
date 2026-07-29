@@ -2206,11 +2206,11 @@ function formatAskQuestionText(input: Pick<AskQuestionInput, 'header' | 'message
 }
 
 // ─── fetch_url ──────────────────────────────────────────────────────────────
-interface FetchUrlInput { url: string; max_chars?: number; }
+interface FetchUrlInput { url: string; max_chars?: number; headers?: Record<string, string>; }
 
 class FetchUrlTool implements vscode.LanguageModelTool<FetchUrlInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<FetchUrlInput>, token: vscode.CancellationToken) {
-        const { url, max_chars } = options.input;
+        const { url, max_chars, headers } = options.input;
         if (!url || typeof url !== 'string') return textResult('error: missing argument: url');
         let parsed: URL;
         try { parsed = new URL(url); } catch { return textResult(`error: invalid URL: ${url}`); }
@@ -2222,9 +2222,16 @@ class FetchUrlTool implements vscode.LanguageModelTool<FetchUrlInput> {
         const sub = token.onCancellationRequested(() => controller.abort());
         const timer = setTimeout(() => controller.abort(), 15000);
         try {
+            // Merge default UA with any caller-supplied headers (e.g. Authorization).
+            const reqHeaders: Record<string, string> = { 'User-Agent': 'Harmony-VSCode-Extension/0.4.0' };
+            if (headers && typeof headers === 'object') {
+                for (const [k, v] of Object.entries(headers)) {
+                    if (typeof k === 'string' && typeof v === 'string') reqHeaders[k] = v;
+                }
+            }
             const r = await fetch(parsed.toString(), {
                 method: 'GET',
-                headers: { 'User-Agent': 'Harmony-VSCode-Extension/0.2.1' },
+                headers: reqHeaders,
                 signal: controller.signal as any,
                 redirect: 'follow'
             });

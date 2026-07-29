@@ -15,6 +15,7 @@ import { registerEvidenceTools } from './evidenceTools';
 import { registerResearchUpgradeTools } from './researchTools';
 import { initializeErrorLearning } from './careBloom';
 import { registerProviderRegistryTools } from './providerRegistryTools';
+import { buildQuickPickEntries } from './providerModels';
 import { registerSwarmTools } from './swarmTools';
 import { registerDeepOrchestrate } from './deepOrchestrate';
 import { getTemplateById, listTemplateIds, runPipeline, formatPipelineResult, detectPipelineType, checkSourceAuthenticity, generateDiffViewer, autoResolveTermDisputes, generateDisputeLedger, processBatch, convertFileToMarkdown, type DeepSwarmPipeline, type ProviderStrategy, type BatchSummary, getStrategyPreset } from './deepSwarm';
@@ -1121,106 +1122,22 @@ export function activate(context: vscode.ExtensionContext) {
             const cfg = vscode.workspace.getConfiguration('harmony');
             const currentProvider = cfg.get<string>('modelProvider') ?? 'vscode-lm';
             const currentDeepSeek = cfg.get<string>('deepseekModel') ?? 'deepseek-v4-flash';
-            const currentAlibaba = modelFor('alibaba', 'coding');
-            const currentMoonshot = modelFor('moonshot', 'coding');
             type ModelPick = vscode.QuickPickItem & { action?: 'set' | 'discover'; provider?: 'vscode-lm' | 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude'; model?: string };
+            // Build model entries from the central registry (providerModels.ts).
+            // This replaces ~100 lines of hardcoded per-model entries.
+            const registryEntries = buildQuickPickEntries(currentProvider, (p) => {
+                if (p === 'deepseek') return currentDeepSeek;
+                return modelFor(p, 'coding');
+            });
             const picks: ModelPick[] = [
-                {
-                    label: 'DeepSeek V4 Pro',
-                    description: 'Harmony direct API',
-                    detail: 'Most capable DeepSeek route. Uses your DeepSeek API key, independent of Copilot plan limits.',
-                    provider: 'deepseek',
-                    model: 'deepseek-v4-pro',
-                    picked: currentProvider === 'deepseek' && currentDeepSeek === 'deepseek-v4-pro'
-                },
-                {
-                    label: 'DeepSeek V4 Flash',
-                    description: 'Harmony direct API',
-                    detail: 'Fast, inexpensive default direct route. Uses your DeepSeek API key.',
-                    provider: 'deepseek',
-                    model: 'deepseek-v4-flash',
-                    picked: currentProvider === 'deepseek' && currentDeepSeek === 'deepseek-v4-flash'
-                },
-                {
-                    label: 'Alibaba / Qwen Turbo Latest',
-                    description: 'Harmony direct API',
-                    detail: 'Fast low-cost Alibaba text route. This is the curated flash-equivalent primary option; advanced model IDs can still be set in settings.',
-                    provider: 'alibaba',
-                    model: 'qwen-turbo-latest',
-                    picked: currentProvider === 'alibaba' && currentAlibaba === 'qwen-turbo-latest'
-                },
-                {
-                    label: 'Alibaba / Qwen3 Coder Plus',
-                    description: 'Harmony direct API',
-                    detail: 'Alibaba DashScope / Model Studio coding route. Uses your Alibaba / Qwen API key, independent of Copilot plan limits.',
-                    provider: 'alibaba',
-                    model: 'qwen3-coder-plus',
-                    picked: currentProvider === 'alibaba' && currentAlibaba === 'qwen3-coder-plus'
-                },
-                {
-                    label: 'Alibaba / Qwen3 Max',
-                    description: 'Harmony direct API',
-                    detail: 'Higher-capability Qwen Max route for hard turns. Use deliberately; pricing is materially higher than Qwen Turbo.',
-                    provider: 'alibaba',
-                    model: 'qwen3-max',
-                    picked: currentProvider === 'alibaba' && currentAlibaba === 'qwen3-max'
-                },
-                {
-                    label: 'Moonshot / Kimi K2.6',
-                    description: 'Harmony direct API',
-                    detail: 'Current Kimi multimodal/coding route with tool calls and 256k context. Uses your Moonshot / Kimi API key.',
-                    provider: 'moonshot',
-                    model: 'kimi-k2.6',
-                    picked: currentProvider === 'moonshot' && currentMoonshot === 'kimi-k2.6'
-                },
-                {
-                    label: 'Zhipu / GLM-5.2',
-                    description: 'Harmony direct API',
-                    detail: 'Zhipu (Z.A.I) GLM-5.2 coding route, OpenAI-compatible. Uses your Zhipu / GLM API key.',
-                    provider: 'zhipu',
-                    model: 'glm-5.2',
-                    picked: currentProvider === 'zhipu'
-                },
-                {
-                    label: 'Zhipu Coding (GLM Coding Plan)',
-                    description: 'Harmony direct API',
-                    detail: 'Z.AI Coding Plan endpoint via api.z.ai, cost-efficient coding. Uses same API key as Zhipu.',
-                    provider: 'zhipu-coding',
-                    model: 'glm-5.2',
-                    picked: currentProvider === 'zhipu-coding'
-                },
-                {
-                    label: 'OpenAI / GPT-5-mini',
-                    description: 'Harmony direct API',
-                    detail: 'OpenAI GPT-5-mini fast coding route. Uses your OpenAI API key.',
-                    provider: 'openai',
-                    model: 'gpt-5-mini',
-                    picked: currentProvider === 'openai'
-                },
-                {
-                    label: 'OpenRouter / Qwen3-235B',
-                    description: 'Harmony direct API',
-                    detail: 'OpenRouter routed Qwen3-235B-A22B. Uses your OpenRouter API key.',
-                    provider: 'openrouter',
-                    model: 'Qwen/Qwen3-235B-A22B-fp8-tput',
-                    picked: currentProvider === 'openrouter'
-                },
-                {
-                    label: 'Gemini / Gemini 3.5 Flash',
-                    description: 'Harmony direct API',
-                    detail: 'Google Gemini 3.5 Flash via OpenAI-compatible endpoint. Uses your Gemini API key.',
-                    provider: 'gemini',
-                    model: 'gemini-3.5-flash',
-                    picked: currentProvider === 'gemini'
-                },
-                {
-                    label: 'Claude / Claude Sonnet 4',
-                    description: 'Harmony direct API',
-                    detail: 'Anthropic Claude Sonnet 4. Uses your Claude API key.',
-                    provider: 'claude',
-                    model: 'claude-sonnet-4',
-                    picked: currentProvider === 'claude'
-                },
+                ...registryEntries.map(e => ({
+                    label: e.label,
+                    description: e.description,
+                    detail: e.detail,
+                    provider: e.provider,
+                    model: e.model,
+                    picked: currentProvider === e.provider
+                })),
                 {
                     label: 'VS Code / Copilot dropdown',
                     description: 'VS Code Language Model API',
@@ -1316,6 +1233,25 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
             view.refresh();
+        })
+    );
+
+    // ── Provider Sync Checker ───────────────────────────────────────
+    // Verifies that all provider/model surfaces (sidebar, QuickPick, CLI
+    // aliases) are consistent with the central providerModels.ts registry.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('harmony.checkProviderSync', async () => {
+            const { checkProviderSync } = await import('./providerModels');
+            const result = checkProviderSync();
+            if (result.ok) {
+                vscode.window.showInformationMessage(
+                    '✅ Provider Sync: All model surfaces are consistent with the central registry.'
+                );
+            } else {
+                const msg = `⚠️ Provider Sync Issues (${result.issues.length}):\n\n${result.issues.join('\n')}`;
+                const doc = await vscode.workspace.openTextDocument({ content: msg });
+                await vscode.window.showTextDocument(doc, { preview: true });
+            }
         })
     );
 
