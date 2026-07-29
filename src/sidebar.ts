@@ -13,6 +13,7 @@ import { getUnreadCount, onWhisperChange, writeWhisper, isWhisperDisabled } from
 import { concertCheck } from './concertHall';
 import { getActiveDeliberations } from './deliberation';
 import { getScore, getStatusLabel } from './providerHealth';
+import { buildSidebarModelOptions, modelDisplayNameAny } from './providerModels';
 import { globalMemoryStats, clearGlobalMemory } from './globalMemory';
 import { LanguageManager } from './languageManager';
 import { ProfileRegistry } from './profileRegistry';
@@ -89,42 +90,9 @@ function stableHashForSidebarState(state: Record<string, unknown>): string {
   return JSON.stringify(s);
 }
 
-// Primary model options per direct provider for the dynamic dropdown
-type ModelOption = { value: string; label: string; labelZh?: string };
-const PRIMARY_MODEL_OPTIONS: Record<string, ModelOption[]> = {
-  deepseek: [
-    { value: 'deepseek-v4-flash', label: 'deepseek-v4-flash (fast, thinking ON)', labelZh: 'deepseek-v4-flash（快速，支持思考）' },
-    { value: 'deepseek-v4-pro', label: 'deepseek-v4-pro (most capable)', labelZh: 'deepseek-v4-pro（综合最强）' },
-  ],
-  alibaba: [
-    { value: 'qwen3.6-flash', label: 'qwen3.6-flash (fast, cheap)', labelZh: 'qwen3.6-flash（轻量高效）' },
-    { value: 'qwen3.7-plus', label: 'qwen3.7-plus (balanced mid)', labelZh: 'qwen3.7-plus（均衡实用）' },
-    { value: 'qwen3.7-max', label: 'qwen3.7-max (best quality)', labelZh: 'qwen3.7-max（效果最佳）' },
-    { value: 'qwen3-coder-plus', label: 'qwen3-coder-plus (coding specialist)', labelZh: 'qwen3-coder-plus（代码专精）' },
-  ],
-  moonshot: [
-    { value: 'kimi-k2.6', label: 'kimi-k2.6 (fast, general)', labelZh: 'kimi-k2.6（快速通用）' },
-    { value: 'kimi-k2.7-code', label: 'kimi-k2.7-code (coding, thinking ON)', labelZh: 'kimi-k2.7-code（代码专精，支持思考）' },
-    { value: 'kimi-k2.7-code-highspeed', label: 'kimi-k2.7-code-highspeed (6× faster)', labelZh: 'kimi-k2.7-code-highspeed（6倍极速）' },
-    { value: 'kimi-k3', label: 'kimi-k3 (flagship, 1M context)', labelZh: 'kimi-k3（旗舰，1M 上下文）' },
-  ],
-  kimiCode: [
-    { value: 'kimi-for-coding', label: 'kimi-for-coding (K2.7 Code stable)', labelZh: 'kimi-for-coding（K2.7 代码稳定版）' },
-    { value: 'kimi-for-coding-highspeed', label: 'kimi-for-coding-highspeed (6× faster)', labelZh: 'kimi-for-coding-highspeed（6倍极速）' },
-    { value: 'k3', label: 'k3 (K3 flagship, reasoning: max)', labelZh: 'k3（K3 旗舰，极致推理）' },
-  ],
-  tencent: [
-    { value: 'hy3-preview', label: 'hy3-preview (flagship)', labelZh: 'hy3-preview（旗舰预览版）' },
-  ],
-  zhipu: [
-    { value: 'glm-5.1', label: 'glm-5.1 (fast, light)', labelZh: 'glm-5.1（快速轻量）' },
-    { value: 'glm-5.2', label: 'glm-5.2 (balanced, capable)', labelZh: 'glm-5.2（均衡强大）' },
-  ],
-  'zhipu-coding': [
-    { value: 'glm-5.2', label: 'glm-5.2 (coding plan, cost-efficient)', labelZh: 'glm-5.2（代码优选，高性价比）' },
-    { value: 'glm-5.1', label: 'glm-5.1 (fast, light)', labelZh: 'glm-5.1（快速轻量）' },
-  ],
-};
+// Primary model options — now sourced from the central providerModels.ts registry.
+// To add/remove/rename a model, edit PROVIDER_REGISTRY in src/providerModels.ts ONLY.
+const PRIMARY_MODEL_OPTIONS = buildSidebarModelOptions();
 
 export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewId = VIEW_ID;
@@ -853,8 +821,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             hubStartOnMessage: cfg.get<string>('hub.startOnMessage') ?? 'prompt',
             usage: { calls: totalCalls(), total: totalTokens(), rows: usage.slice(0, SIDEBAR_MAX_USAGE_ROWS), accounting },
             fallbackEvents: getFallbackEvents().slice(-SIDEBAR_MAX_FALLBACK_EVENTS).map(f => ({
-                originalModel: f.originalModel,
-                fallbackModel: f.fallbackModel
+                originalModel: modelDisplayNameAny(f.originalModel),
+                fallbackModel: modelDisplayNameAny(f.fallbackModel)
             }))
         };
         // Phase 1 posting strategy:

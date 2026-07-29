@@ -159,10 +159,10 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'hy3-preview'
     },
     gemini: {
-        light: 'gemini-3.1-flash-lite',
-        mid: 'gemini-3.5-flash',
+        light: 'gemini-3.6-flash',
+        mid: 'gemini-3.6-flash',
         heavy: 'gemini-3.1-pro-preview',
-        coding: 'gemini-3.5-flash'
+        coding: 'gemini-3.6-flash'
     },
     openrouter: {
         light: 'tencent/hy3-preview',

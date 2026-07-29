@@ -80,6 +80,27 @@ The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each pro
 
 **Legacy key migration:** If you previously configured a single API key for a provider, Harmony automatically migrates it to slot 0 (Chat) on first launch. No manual reconfiguration is needed — your existing keys continue to work.
 
+## What's New in v0.4.1
+
+### 🏗️ Centralized Provider Registry
+
+All provider and model metadata now lives in a single source of truth: `src/providerModels.ts`. Adding or updating a model requires editing **one file** instead of five. The sidebar dropdown, QuickPick model picker, CLI `/model` command, and provider sync checker all derive from this registry automatically.
+
+New command: **`Harmony: Check Provider Sync`** — verifies that all surfaces (sidebar, QuickPick, CLI, providers) are consistent.
+
+### ✨ New & Improved
+
+- **Gemini 3.6 Flash** — newest Gemini model now available through the sidebar and QuickPick
+- **K3 reasoning capture** — Moonshot/KimiCode K3 models now properly capture reasoning in collapsible thinking blocks (no more inline leaking)
+- **Fallback model labels** — sidebar now shows friendly display names instead of raw model IDs
+- **fetch_url headers** — optional `headers` parameter enables authenticated API calls (Cloudflare, GitHub, etc.)
+- **Flow-state guardian** — raised retry limit from 2→3 to handle multi-question checklist responses gracefully
+
+### 🔧 Fixes
+
+- **Ask-question validation** — empty submit now shows a visible warning instead of silently canceling
+- **~200 lines of hardcoded model lists eliminated** across 5 files, replaced with registry imports
+
 ## ⚠️ Before You Use Harmony
 
 Harmony is a **multi-provider AI orchestration tool**. Every feature that calls an AI model — chat, swarm planning, translation, orchestration, deep analysis — may trigger **one or many paid API calls** across providers you've configured. This is by design: Harmony's power comes from consulting multiple models in parallel, cross-verifying results, and building consensus. That power has a cost.
