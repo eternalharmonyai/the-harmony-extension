@@ -261,7 +261,23 @@ function toggleExpand() {
 }
 function submit() {
     const ready = document.getElementById('readyCheck');
-    vscode.postMessage({ type: 'answer', selected: selectedChoice(), text: answer ? answer.value : '', ready: ready ? ready.checked : false });
+    const choices = selectedChoice();
+    const text = answer ? answer.value.trim() : '';
+    const isReady = ready ? ready.checked : false;
+    // Validation: if nothing is selected, nothing typed, and ready isn't checked,
+    // show a visual hint instead of sending an empty answer (which would be
+    // indistinguishable from Cancel).
+    if (choices.length === 0 && !text && !isReady) {
+        answerBtn.textContent = '⚠️ Please type an answer or pick an option';
+        answerBtn.style.borderColor = 'var(--vscode-inputValidation-warningBorder, #cca700)';
+        setTimeout(() => {
+            answerBtn.textContent = ${JSON.stringify(lm.getString('ask.answer'))};
+            answerBtn.style.borderColor = '';
+        }, 2500);
+        if (answer) answer.focus();
+        return;
+    }
+    vscode.postMessage({ type: 'answer', selected: choices, text: text, ready: isReady });
 }
 
 if (answer) answer.addEventListener('keydown', (e) => {

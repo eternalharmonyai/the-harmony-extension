@@ -2,7 +2,7 @@
   "name": "harmony-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "harmony",
   "private": true,
   "license": "UNLICENSED",
@@ -1586,7 +1586,7 @@
       {
         "name": "harmony_fetch_url",
         "displayName": "Fetch URL",
-        "modelDescription": "Fetch a URL via HTTPS/HTTP and return its text content (HTML stripped to text). Use for web research when the user references a URL or you need current information from a known site. Do not guess URLs.",
+        "modelDescription": "Fetch a URL via HTTPS/HTTP and return its text content (HTML stripped to text). Use for web research when the user references a URL or you need current information from a known site. Do not guess URLs. Supports optional headers for authenticated API calls.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonyFetch",
         "tags": [
@@ -1603,6 +1603,10 @@
             "max_chars": {
               "type": "number",
               "description": "Cap on returned characters. Default 8000, max 60000."
+            },
+            "headers": {
+              "type": "object",
+              "description": "Optional HTTP headers for authenticated requests."
             }
           },
           "required": [
