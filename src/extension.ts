@@ -27,7 +27,7 @@ import { registerHarmonyParticipant } from './chatParticipant';
 import { registerDeepSeekProvider } from './deepseekProvider';
 import { registerHarmonyView } from './sidebar';
 import { openComposeView } from './composeView';
-import { CollabDirectProvider, CollabModelPreset, collabTierForPreset, consult, countProviderKeys, discoverModels, getCollabDirectProvider, getCollabModelPreset, getProviderKeys, invalidateKeyCache, isProviderId, KEY_SLOTS, migrateLegacyToSlots, modelFor, providerDisplayName, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, setProviderKeys, Tier } from './providers';
+import { CollabDirectProvider, CollabModelPreset, collabTierForPreset, consult, countProviderKeys, discoverModels, EndpointProviderId, getCollabDirectProvider, getCollabModelPreset, getProviderKeys, invalidateKeyCache, isProviderId, KEY_SLOTS, migrateLegacyToSlots, modelFor, providerDisplayName, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, setProviderKeys, Tier } from './providers';
 import { clearUsage, onUsageChange, summarize as summarizeUsage, totalCalls, totalTokens } from './costTracker';
 import { listSessions, deleteSession } from './sessions';
 import { createHandoffPacket } from './memory';
@@ -2761,16 +2761,16 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.selectProviderEndpointProfile', async (providerArg?: ProviderId) => {
             const cfg = vscode.workspace.getConfiguration('harmony');
-            const directProviders: Array<Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent'>> = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode'];
+            const directProviders: Array<EndpointProviderId> = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'stepfun', 'bytedance'];
             const provider = directProviders.includes(providerArg as any)
-                ? providerArg as Extract<ProviderId, 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode'>
+                ? providerArg as EndpointProviderId
                 : (await vscode.window.showQuickPick(directProviders.map(value => ({ label: providerLabel(value), value })), {
                     title: 'Harmony Provider Endpoint Profile',
                     placeHolder: 'Choose the provider whose endpoint/region you want to configure.'
                 }))?.value;
             if (!provider) return;
             const current = providerEndpointInfo(provider);
-            type EndpointPick = vscode.QuickPickItem & { profile: 'default' | 'international' | 'mainland' | 'us' | 'custom'; needsUrl?: boolean };
+            type EndpointPick = vscode.QuickPickItem & { profile: 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'custom'; needsUrl?: boolean };
             const picks: EndpointPick[] = provider === 'alibaba'
                 ? [
                     { label: 'Alibaba international', description: current.profile === 'international' ? 'current' : 'Singapore/global', detail: 'Use this for international DashScope/Model Studio keys. This is the endpoint that passed the recent live smoke.', profile: 'international' },
@@ -2783,6 +2783,17 @@ export function activate(context: vscode.ExtensionContext) {
                     { label: 'Tencent international', description: current.profile === 'international' ? 'current' : 'api.hunyuan.cloud.tencent.com', detail: 'Use this for international Tencent Hunyuan keys. OpenAI-compatible endpoint.', profile: 'international' },
                     { label: 'Tencent mainland China', description: current.profile === 'mainland' ? 'current' : 'China mainland endpoint', detail: 'Use this for mainland China Tencent Cloud Hunyuan keys.', profile: 'mainland' },
                     { label: 'Tencent custom base URL', description: current.profile === 'custom' ? 'current' : 'advanced', detail: 'Use an exact regional base URL from Tencent Cloud only when issued for the account.', profile: 'custom', needsUrl: true },
+                ]
+                : provider === 'stepfun'
+                ? [
+                    { label: 'StepFun international', description: current.profile === 'international' ? 'current' : 'api.stepfun.ai', detail: 'Use this for international StepFun keys. Accessible globally; recommended for non-China users.', profile: 'international' },
+                    { label: 'StepFun mainland China', description: current.profile === 'mainland' ? 'current' : 'api.stepfun.com', detail: 'Use this for mainland China StepFun keys.', profile: 'mainland' },
+                    { label: 'StepFun custom base URL', description: current.profile === 'custom' ? 'current' : 'advanced', detail: 'Use an exact regional base URL from StepFun only when issued for the account.', profile: 'custom', needsUrl: true },
+                ]
+                : provider === 'bytedance'
+                ? [
+                    { label: 'ByteDance/Doubao Beijing (default)', description: current.profile === 'beijing' ? 'current' : 'ark.cn-beijing.volces.com', detail: 'Standard Volcano Engine Ark endpoint. Activate models in the Ark console first.', profile: 'beijing' },
+                    { label: 'ByteDance/Doubao custom base URL', description: current.profile === 'custom' ? 'current' : 'advanced', detail: 'Use an exact regional Volcano Engine Ark base URL.', profile: 'custom', needsUrl: true },
                 ]
                 : [
                     { label: `${providerLabel(provider)} default`, description: current.profile === 'default' ? 'current' : 'standard endpoint', detail: current.detail, profile: 'default' },

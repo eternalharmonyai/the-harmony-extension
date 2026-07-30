@@ -359,6 +359,24 @@ export interface SyncCheckResult {
 export function checkProviderSync(): SyncCheckResult {
     const issues: string[] = [];
 
+    // ── Cross-file: verify PROVIDER_DEFAULTS (providers.ts) match registry ──
+    // Dynamically import to avoid circular dependency at module load time
+    try {
+        const providersModule = require('./providers');
+        const defaults: Record<string, Record<string, string>> = providersModule.PROVIDER_DEFAULTS;
+        for (const [providerId, tiers] of Object.entries(defaults)) {
+            const registryEntry = PROVIDER_REGISTRY.find(p => p.id === providerId);
+            if (!registryEntry) continue; // provider not in registry yet — skip
+            const registryModelIds = new Set(registryEntry.models.map(m => m.id));
+            for (const [tier, modelId] of Object.entries(tiers)) {
+                if (modelId === 'ep-rewards-placeholder') continue; // special placeholder
+                if (!registryModelIds.has(modelId)) {
+                    issues.push(`${providerId}.${tier} default "${modelId}" not found in providerModels.ts registry`);
+                }
+            }
+        }
+    } catch { /* module not loaded yet — skip cross-file check */ }
+
     // Verify every provider in PROVIDER_REGISTRY has at least one model
     for (const provider of PROVIDER_REGISTRY) {
         if (provider.models.length === 0) {
