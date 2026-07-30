@@ -395,19 +395,32 @@ export function checkProviderSync(): SyncCheckResult {
     }
 
     // Verify no alias collisions across providers
+    // Note: Some providers intentionally share model families (e.g., Moonshot &
+    // KimiCode both offer k3; Zhipu & Zhipu-Coding both offer glm-5.x).
+    // These are expected, so we only flag aliases where the provider is genuinely
+    // different (not a coding-plan / rewards variant of the same company).
     const aliasMap = buildAliasMap();
     const aliasCounts: Record<string, number> = {};
+    const aliasProviders: Record<string, Set<string>> = {};
+    // Provider families that share models intentionally
+    const providerFamily: Record<string, string> = {
+        'moonshot': 'moonshot', 'kimiCode': 'moonshot',
+        'zhipu': 'zhipu', 'zhipu-coding': 'zhipu',
+        'bytedance': 'bytedance', 'bytedance-rewards': 'bytedance',
+    };
     for (const provider of PROVIDER_REGISTRY) {
         for (const model of provider.models) {
             const allNames = [model.id, ...(model.aliases ?? [])];
             for (const name of allNames) {
-                aliasCounts[name] = (aliasCounts[name] ?? 0) + 1;
+                const family = providerFamily[provider.id] ?? provider.id;
+                if (!aliasProviders[name]) aliasProviders[name] = new Set();
+                aliasProviders[name].add(family);
             }
         }
     }
-    for (const [alias, count] of Object.entries(aliasCounts)) {
-        if (count > 1) {
-            issues.push(`Alias "${alias}" is mapped by ${count} models — CLI /model ambiguity`);
+    for (const [alias, families] of Object.entries(aliasProviders)) {
+        if (families.size > 1) {
+            issues.push(`Alias "${alias}" is mapped by ${families.size} different provider families — CLI /model ambiguity`);
         }
     }
 

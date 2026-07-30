@@ -2730,7 +2730,7 @@ export function activate(context: vscode.ExtensionContext) {
                     : `${scopeDetail} Current ${tier} model: ${modelFor(provider, tier)}.${endpointDetail}`
             });
         }
-        rows.unshift({ label: 'Endpoint profiles', description: 'DeepSeek / Alibaba / Moonshot / Zhipu', detail: 'Choose regional provider endpoint profiles. Alibaba international covers Singapore/global and US/Virginia unless Alibaba issues a different custom base URL; mainland is China/Beijing.', command: 'harmony.selectProviderEndpointProfile' });
+        rows.unshift({ label: 'Endpoint profiles', description: 'DeepSeek / Alibaba / Moonshot / Zhipu / StepFun / ByteDance', detail: 'Choose regional provider endpoint profiles (international vs mainland China).', command: 'harmony.selectProviderEndpointProfile' });
         rows.unshift({ label: 'KimiCode context window', description: '256k Moderato / 1M Allegretto+', detail: 'Set the KimiCode context window. Default 262144 (256k) works on all plans; 1048576 (1M) requires Allegretto+. Run this if KimiCode returns HTTP 401.', command: 'harmony.selectKimiCodeContextWindow' });
         rows.unshift({ label: 'Import Provider Keys From .env', description: 'VS Code Secret Storage', detail: 'Imports DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Tencent, and Zhipu/GLM keys into the extension-side store without printing values.', command: 'harmony.importProviderKeysFromEnv' });
         rows.unshift({ label: 'Set Tencent / Hunyuan API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.tencent.apiKey for primary and Agents routes.', command: 'harmony.setTencentApiKey' });
