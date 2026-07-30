@@ -4,7 +4,7 @@ import * as path from 'path';
 import { recallMemory, currentWorkspaceFingerprint, memoryStats } from './memory';
 import { getOrchestrateSessionStats } from './orchestrateMode';
 import { loadTodos, onTodoChange } from './todoStore';
-import { collabTierForPreset, countProviderKeys, getCollabDirectProvider, getCollabModelPreset, hasKey, modelFor, providerDisplayName, providerDisplayNameZh, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier } from './providers';
+import { collabTierForPreset, countProviderKeys, EndpointProviderId, getCollabDirectProvider, getCollabModelPreset, hasKey, modelFor, providerDisplayName, providerDisplayNameZh, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier } from './providers';
 import { summarize as summarizeUsage, totalCalls, totalTokens, onUsageChange, getFallbackEvents, providerAccountingSummary } from './costTracker';
 import type { ProviderAccountingSummary } from './costTracker';
 import { listSessions } from './sessions';
@@ -663,22 +663,24 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         const sidebarMode = this.sidebarMode();
         const compactSidebar = sidebarMode === 'compact';
         const providers: ProviderId[] = PROVIDER_IDS;
-        const endpointProviders: Array<Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding'>> = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'zhipu', 'zhipu-coding'];
+        const endpointProviders: Array<EndpointProviderId> = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'zhipu', 'zhipu-coding', 'stepfun', 'bytedance'];
         const endpointStatesRaw = Object.fromEntries(endpointProviders.map(provider => [provider, providerEndpointInfo(provider)]));
         // ZH localization for endpoint labels
         const zhEndpointLabels: Record<string, Record<string, string>> = {
           default: { deepseek: 'DeepSeek 默认端点', moonshot: 'Moonshot 默认端点', kimiCode: 'KimiCode 默认端点', zhipu: '智谱(Z.AI) 默认端点', 'zhipu-coding': '智谱编程计划 端点' },
           custom: { deepseek: 'DeepSeek 自定义端点', moonshot: 'Moonshot 自定义端点', kimiCode: 'KimiCode 自定义端点', zhipu: '智谱(Z.AI) 自定义端点' },
-          international: { alibaba: '阿里云 国际端点', tencent: '腾讯混元 国际端点' },
-          mainland: { alibaba: '阿里云 中国大陆端点', tencent: '腾讯混元 中国大陆端点' },
+          international: { alibaba: '阿里云 国际端点', tencent: '腾讯混元 国际端点', stepfun: '阶跃星辰 国际端点' },
+          mainland: { alibaba: '阿里云 中国大陆端点', tencent: '腾讯混元 中国大陆端点', stepfun: '阶跃星辰 中国大陆端点' },
           us: { alibaba: '阿里云 美国/弗吉尼亚端点' },
+          beijing: { bytedance: '字节跳动豆包 北京端点' },
         };
         const zhEndpointDetails: Record<string, Record<string, string>> = {
           default: { deepseek: '使用 DeepSeek 标准 OpenAI 兼容端点', moonshot: '使用 Moonshot/Kimi 标准 OpenAI 兼容端点', kimiCode: '使用 KimiCode 标准 OpenAI 兼容端点 (api.kimi.com/coding/v1)', zhipu: '使用智谱(Z.AI) 标准 OpenAI 兼容端点', 'zhipu-coding': '使用 Z.AI 编程计划端点 (api.z.ai)' },
-          custom: { deepseek: '使用 harmony.deepseekBaseUrl', moonshot: '使用 harmony.moonshot.baseUrl', kimiCode: '使用 harmony.kimiCode.baseUrl', zhipu: '使用 harmony.zhipu.baseUrl' },
-          international: { alibaba: '使用国际 DashScope 端点 (新加坡/全球路由)', tencent: '使用国际混元 OpenAI 兼容端点' },
-          mainland: { alibaba: '使用中国大陆 DashScope 端点 (北京/中国账号路由)', tencent: '使用中国大陆混元端点 (北京/中国账号路由)' },
+          custom: { deepseek: '使用 harmony.deepseekBaseUrl', moonshot: '使用 harmony.moonshot.baseUrl', kimiCode: '使用 harmony.kimiCode.baseUrl', zhipu: '使用 harmony.zhipu.baseUrl', stepfun: '使用 harmony.stepfun.baseUrl', bytedance: '使用 harmony.bytedance.baseUrl' },
+          international: { alibaba: '使用国际 DashScope 端点 (新加坡/全球路由)', tencent: '使用国际混元 OpenAI 兼容端点', stepfun: '使用国际 StepFun 端点 (api.stepfun.ai)' },
+          mainland: { alibaba: '使用中国大陆 DashScope 端点 (北京/中国账号路由)', tencent: '使用中国大陆混元端点 (北京/中国账号路由)', stepfun: '使用中国大陆 StepFun 端点 (api.stepfun.com)' },
           us: { alibaba: '使用美国/弗吉尼亚端点' },
+          beijing: { bytedance: '使用火山引擎 Ark 端点 (北京区域)。需先在 Ark 控制台激活模型。' },
         };
         const endpointStates = LanguageManager.getInstance().getCurrentLang() === 'zh'
           ? Object.fromEntries(endpointProviders.map(provider => {
