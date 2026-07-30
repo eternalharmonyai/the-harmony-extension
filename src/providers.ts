@@ -211,7 +211,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         mid: 'ep-rewards-placeholder',
         heavy: 'ep-rewards-placeholder',
         coding: 'ep-rewards-placeholder'
-    }
+    },
 };
 
 // StepFun dual-region endpoints

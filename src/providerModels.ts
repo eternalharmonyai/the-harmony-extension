@@ -118,6 +118,7 @@ const BYTEDANCE_MODELS: ModelMeta[] = [
     { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'ByteDance flagship model — auto-updates to the latest version weekly. Activate in Ark console first. 6¥/M input, 30¥/M output.' },
     { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship snapshot. Best quality for hard reasoning tasks. Activate in Ark console first. 6¥/M input, 30¥/M output.' },
     { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（快速，高性价比）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version. Activate in Ark console first. 3¥/M input, 15¥/M output — excellent cost/quality for routine tasks.' },
+    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized, Coding Plan)', labelZh: 'Seed-Code（编程专精，编码计划）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model. ~256K context, optimized for agentic programming. Available via the Volcano Engine Coding Plan (编码计划) — same base URL and key as standard Doubao. Verify exact model ID via Discover Models.' },
 ];
 
 const BYTEDANCE_REWARDS_MODELS: ModelMeta[] = [
