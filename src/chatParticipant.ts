@@ -746,7 +746,8 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
         };
     }
     // StepFun — OpenAI-compatible. Dual-region: international (.ai) vs mainland (.com).
-    // step-3.7-flash may return reasoning_content.
+    // step-3.7-flash supports reasoning effort control and returns reasoning_content
+    // in SSE deltas (DeepSeek/Doubao-style). Enable capture so thinking doesn't leak.
     if (provider === 'stepfun') {
         const stepModel = modelFor('stepfun', 'coding');
         return {
@@ -756,8 +757,8 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
             baseUrl: providerBaseUrlForCall('stepfun'),
             secretKey: secretKeyFor('stepfun'),
             tier: 'coding',
-            supportsReasoningContent: false,
-            thinkingEnabled: false,
+            supportsReasoningContent: true,
+            thinkingEnabled: true,
             showThinking: false
         };
     }
