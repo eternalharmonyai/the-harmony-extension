@@ -9726,6 +9726,11 @@
           "default": false,
           "description": "When ON, Harmony automatically runs a lightweight safety audit on code changes after every chat turn. Uses API calls -- review all provider settings and cost expectations before enabling."
         },
+        "harmony.snapshotMaxBytes": {
+          "type": "number",
+          "default": 524288,
+          "description": "Maximum file size (in bytes) for pre-action snapshots. Files exceeding this are edited without a backup snapshot. Default 512KB."
+        },
         "harmony.vision.skipOcr": {
           "type": "boolean",
           "default": false,

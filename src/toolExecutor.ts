@@ -397,7 +397,9 @@ async function createRequiredPreActionSnapshot(root: string, relativePaths: stri
     const id = `snapshot-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}-chat`;
     const snapshotDir = path.join(root, '.harmony', 'snapshots', id);
     const filesDir = path.join(snapshotDir, 'files');
-    const maxBytes = 256 * 1024;
+    // Configurable max file size for pre-action snapshots (default 512KB)
+    const snapshotMaxBytes = vscode.workspace.getConfiguration('harmony').get<number>('snapshotMaxBytes') ?? (512 * 1024);
+    const maxBytes = Math.max(256 * 1024, snapshotMaxBytes);
     const records: PreActionSnapshotRecord[] = [];
     const failures: string[] = [];
 
@@ -431,8 +433,7 @@ async function createRequiredPreActionSnapshot(root: string, relativePaths: stri
             continue;
         }
         if (stat.size > maxBytes) {
-            record.reason = `file exceeds ${maxBytes} byte pre-action snapshot limit`;
-            failures.push(`${normalized}: ${record.reason}`);
+            record.reason = `file exceeds ${maxBytes} byte pre-action snapshot limit — skipped (edit proceeds without snapshot)`;
             records.push(record);
             continue;
         }
