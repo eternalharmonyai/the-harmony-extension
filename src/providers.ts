@@ -94,7 +94,7 @@ export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gem
 export type Tier = 'light' | 'mid' | 'heavy' | 'coding';
 export type CollabModelPreset = 'auto' | 'economy' | 'balanced' | 'power' | 'custom';
 export type CollabDirectProvider = ProviderId | 'auto';
-export type ProviderEndpointProfile = 'default' | 'international' | 'mainland' | 'us' | 'custom';
+export type ProviderEndpointProfile = 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'custom';
 
 const DEEPSEEK_DEFAULT_BASE_URL = 'https://api.deepseek.com/v1';
 const MOONSHOT_DEFAULT_BASE_URL = 'https://api.moonshot.ai/v1';
@@ -110,7 +110,7 @@ const ZHIPU_DEFAULT_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
 const ZHIPU_CODING_BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
 
 export interface ProviderEndpointInfo {
-    provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding'>;
+    provider: EndpointProviderId;
     profile: ProviderEndpointProfile;
     label: string;
     baseUrl?: string;
@@ -298,7 +298,9 @@ function configuredEndpointProfile(key: string, fallback: ProviderEndpointProfil
     return raw && allowed.includes(raw as ProviderEndpointProfile) ? raw as ProviderEndpointProfile : fallback;
 }
 
-export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding'>): ProviderEndpointInfo {
+export type EndpointProviderId = Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'stepfun' | 'bytedance'>;
+
+export function providerEndpointInfo(provider: EndpointProviderId): ProviderEndpointInfo {
     if (provider === 'deepseek') {
         const profile = configuredEndpointProfile('deepseek.endpointProfile', 'default', ['default', 'custom']);
         const custom = explicitConfigString('deepseekBaseUrl');
@@ -456,10 +458,73 @@ export function providerEndpointInfo(provider: Extract<ProviderId, 'deepseek' | 
             detail: 'Uses the Z.AI Coding Plan endpoint (api.z.ai). Reuses the same API key as the standard Zhipu provider.'
         };
     }
+    // --- StepFun / 阶跃星辰 ---
+    if (provider === 'stepfun') {
+        const profile = configuredEndpointProfile('stepfun.endpointProfile', 'international', ['international', 'mainland', 'custom'] as ProviderEndpointProfile[]);
+        const custom = explicitConfigString('stepfun.baseUrl');
+        if (profile === 'mainland') {
+            return {
+                provider,
+                profile,
+                label: 'StepFun mainland China endpoint',
+                baseUrl: STEPFUN_MAINLAND_BASE_URL,
+                baseUrlSetting: 'harmony.stepfun.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: 'Uses the mainland China StepFun endpoint (api.stepfun.com). Use this for China-based accounts.'
+            };
+        }
+        if (profile === 'custom') {
+            const baseUrl = custom.value || STEPFUN_INTERNATIONAL_BASE_URL;
+            return {
+                provider,
+                profile,
+                label: 'StepFun custom endpoint',
+                baseUrl: baseUrl.replace(/\/$/, ''),
+                baseUrlSetting: 'harmony.stepfun.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: 'Uses harmony.stepfun.baseUrl exactly, for provider-issued regional endpoints.'
+            };
+        }
+        return {
+            provider,
+            profile,
+            label: 'StepFun international endpoint',
+            baseUrl: STEPFUN_INTERNATIONAL_BASE_URL,
+            baseUrlSetting: 'harmony.stepfun.baseUrl',
+            needsCustomBaseUrl: false,
+            detail: 'Uses the international StepFun endpoint (api.stepfun.ai). Accessible globally; recommended for non-China users.'
+        };
+    }
+    // --- ByteDance / Doubao (Volcano Engine Ark) ---
+    if (provider === 'bytedance') {
+        const profile = configuredEndpointProfile('bytedance.endpointProfile', 'beijing', ['beijing', 'custom'] as ProviderEndpointProfile[]);
+        const custom = explicitConfigString('bytedance.baseUrl');
+        if (profile === 'custom') {
+            const baseUrl = custom.value || 'https://ark.cn-beijing.volces.com/api/v3';
+            return {
+                provider,
+                profile,
+                label: 'ByteDance / Doubao custom endpoint',
+                baseUrl: baseUrl.replace(/\/$/, ''),
+                baseUrlSetting: 'harmony.bytedance.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: 'Uses harmony.bytedance.baseUrl exactly, for Volcano Engine regional endpoints.'
+            };
+        }
+        return {
+            provider,
+            profile,
+            label: 'ByteDance / Doubao Beijing endpoint',
+            baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+            baseUrlSetting: 'harmony.bytedance.baseUrl',
+            needsCustomBaseUrl: false,
+            detail: 'Uses the standard Volcano Engine Ark endpoint (Beijing region). Activate models in the Ark console first.'
+        };
+    }
     throw new Error(`Unsupported endpoint provider: ${provider}`);
 }
 
-export function providerBaseUrlForCall(provider: Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding'>): string {
+export function providerBaseUrlForCall(provider: EndpointProviderId): string {
     const endpoint = providerEndpointInfo(provider);
     if (!endpoint.baseUrl) {
         throw new Error(`${providerDisplayName(provider)} endpoint profile "${endpoint.profile}" needs a custom base URL. Set ${endpoint.baseUrlSetting} to the provider-issued regional URL.`);
