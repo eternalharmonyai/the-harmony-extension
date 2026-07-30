@@ -1733,7 +1733,7 @@ ${PROVIDER_IDS.map(p => {
         LOC.sidebar_key + ' ' + (primaryKeySaved ? LOC.provider_key_set_in_vscode : '<em>' + LOC.provider_key_none_in_vscode + '</em>') +
         (primaryEndpoint ? '<br>' + LOC.provider_endpoint_label + ' <code>' + escapeHtml(primaryEndpoint.label) + '</code>' + (primaryEndpoint.baseUrl ? '<br>' + LOC.provider_base_label + ' <code>' + escapeHtml(primaryEndpoint.baseUrl) + '</code>' : '<br><em>' + escapeHtml(primaryEndpoint.detail) + '</em>') : '') +
         (primarySecretKey ? '<br>' + LOC.provider_secret_label + ' <code>' + escapeHtml(primarySecretKey) + '</code>' : '') +
-        (!primaryKeySaved && ['deepseek', 'alibaba', 'moonshot', 'tencent', 'zhipu'].includes(s.provider) ? '<br>' + LOC.provider_import_hint : '')
+        (!primaryKeySaved && s.provider !== 'vscode-lm' ? '<br>' + LOC.provider_import_hint : '')
       : '';
     $('set-key').style.display = primaryDirect ? 'block' : 'none';
     $('agent-steps').value = String(s.agentMaxSteps ?? 1);
