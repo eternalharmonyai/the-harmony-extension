@@ -59,6 +59,9 @@
   "provider.setKey": "设置 / 替换所选服务商的 API 密钥…",
   "provider.setKey.short": "设置密钥",
   "provider.replaceKey": "替换",
+  "provider.save": "保存",
+  "provider.rewardsHint": "粘贴火山引擎协作激励接入点 ID（ep-xxx），从 Ark 控制台获取。",
+  "provider.endpointSwitch": "切换端点区域…",
   "provider.secretStorage": "VS Code Secret Storage：",
 
   "steering.title": "指挥模式",

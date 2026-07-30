@@ -1292,6 +1292,11 @@ ${PROVIDER_IDS.map(p => {
   <div id="primary-model-block" style="display:none; margin-top:4px;">
     <select id="primary-model"></select>
   </div>
+  <div id="rewards-input-block" style="display:none; margin-top:4px;">
+    <input type="text" id="rewards-endpoint-id" placeholder="ep-xxxxxxxx" style="width:65%; font-size:11px;" />
+    <button class="subtle" id="rewards-save-btn" style="width:30%; font-size:11px;">${lm.getString('provider.save')}</button>
+    <div class="hint" style="font-size:10px; margin-top:2px;">${lm.getString('provider.rewardsHint')}</div>
+  </div>
 
   <h3>${lm.getString('steering.title')}</h3>
   <div class="status" id="steering-status" style="margin-bottom:6px;"></div>
@@ -1587,6 +1592,7 @@ ${PROVIDER_IDS.map(p => {
     provider_key_set_in_vscode: lm.getString('provider.keySetInVscode'),
     provider_key_none_in_vscode: lm.getString('provider.keyNoneInVscode'),
     provider_endpoint_label: lm.getString('provider.endpointLabel'),
+    provider_endpoint_switch: lm.getString('provider.endpointSwitch'),
     provider_base_label: lm.getString('provider.baseLabel'),
     provider_secret_label: lm.getString('provider.secretLabel'),
     provider_import_hint: lm.getString('provider.importHint'),
@@ -1718,8 +1724,10 @@ ${PROVIDER_IDS.map(p => {
     // Populate primary model dropdown dynamically
     const primaryModelSel = $('primary-model');
     const primaryModelBlock = $('primary-model-block');
+    const rewardsBlock = $('rewards-input-block');
+    const isRewards = (s.provider === 'bytedance-rewards');
     const modelOptions = PRIMARY_MODEL_OPTIONS[s.provider];
-    if (modelOptions && primaryDirect) {
+    if (modelOptions && primaryDirect && !isRewards) {
       const isZh = (s.language === 'zh');
       primaryModelSel.innerHTML = modelOptions.map(m => '<option value="' + m.value + '">' + escapeHtml(isZh && m.labelZh ? m.labelZh : m.label) + '</option>').join('');
       primaryModelSel.value = primaryModel;
@@ -1727,14 +1735,33 @@ ${PROVIDER_IDS.map(p => {
     } else {
       primaryModelBlock.style.display = 'none';
     }
+    rewardsBlock.style.display = (isRewards && primaryDirect) ? 'block' : 'none';
+    if (isRewards) {
+      $('rewards-endpoint-id').value = primaryModel && primaryModel !== 'ep-rewards-placeholder' ? primaryModel : '';
+    }
     $('direct-primary-block').style.display = primaryDirect ? 'block' : 'none';
+    const endpointSwitchable = ['alibaba', 'tencent', 'stepfun', 'bytedance', 'bytedance-coding'].includes(s.provider);
+    const endpointLabelHtml = primaryEndpoint
+      ? '<br>' + LOC.provider_endpoint_label + ' ' + (endpointSwitchable
+          ? '<a href="#" id="switch-endpoint-link" style="cursor:pointer;"><code>' + escapeHtml(primaryEndpoint.label) + '</code> → ' + LOC.provider_endpoint_switch + '</a>'
+          : '<code>' + escapeHtml(primaryEndpoint.label) + '</code>')
+        + (primaryEndpoint.baseUrl ? '<br>' + LOC.provider_base_label + ' <code>' + escapeHtml(primaryEndpoint.baseUrl) + '</code>' : (!endpointSwitchable ? '<br><em>' + escapeHtml(primaryEndpoint.detail) + '</em>' : ''))
+      : '';
     $('direct-primary-block').innerHTML = primaryDirect
       ? LOC.provider_primary_model + ' <code>' + escapeHtml(primaryModel) + '</code><br>' +
         LOC.sidebar_key + ' ' + (primaryKeySaved ? LOC.provider_key_set_in_vscode : '<em>' + LOC.provider_key_none_in_vscode + '</em>') +
-        (primaryEndpoint ? '<br>' + LOC.provider_endpoint_label + ' <code>' + escapeHtml(primaryEndpoint.label) + '</code>' + (primaryEndpoint.baseUrl ? '<br>' + LOC.provider_base_label + ' <code>' + escapeHtml(primaryEndpoint.baseUrl) + '</code>' : '<br><em>' + escapeHtml(primaryEndpoint.detail) + '</em>') : '') +
+        endpointLabelHtml +
         (primarySecretKey ? '<br>' + LOC.provider_secret_label + ' <code>' + escapeHtml(primarySecretKey) + '</code>' : '') +
         (!primaryKeySaved && s.provider !== 'vscode-lm' ? '<br>' + LOC.provider_import_hint : '')
       : '';
+    // Wire up endpoint switch link if present
+    const switchLink = document.getElementById('switch-endpoint-link');
+    if (switchLink) {
+      switchLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        vscode.postMessage({ type: 'configureProviderEndpoints' });
+      });
+    }
     $('set-key').style.display = primaryDirect ? 'block' : 'none';
     $('agent-steps').value = String(s.agentMaxSteps ?? 1);
     $('auto-approve').checked = !!s.autoApprove;
@@ -2244,6 +2271,10 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
   $('profile').addEventListener('change', (e) => vscode.postMessage({ type: 'setProfile', value: e.target.value }));
   $('provider').addEventListener('change', (e) => vscode.postMessage({ type: 'setProvider', value: e.target.value }));
   $('primary-model').addEventListener('change', (e) => vscode.postMessage({ type: 'setPrimaryModel', provider: $('provider').value, value: e.target.value }));
+  $('rewards-save-btn').addEventListener('click', () => {
+    const epId = $('rewards-endpoint-id').value.trim();
+    if (epId) vscode.postMessage({ type: 'setPrimaryModel', provider: 'bytedance-rewards', value: epId });
+  });
   $('agent-steps').addEventListener('change', (e) => vscode.postMessage({ type: 'setAgentMaxSteps', value: e.target.value }));
   $('agent-steps-1').addEventListener('click', () => { $('agent-steps').value = '1'; vscode.postMessage({ type: 'setAgentMaxSteps', value: 1 }); });
   $('agent-steps-11').addEventListener('click', () => { $('agent-steps').value = '11'; vscode.postMessage({ type: 'setAgentMaxSteps', value: 11 }); });
