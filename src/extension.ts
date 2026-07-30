@@ -1122,7 +1122,7 @@ export function activate(context: vscode.ExtensionContext) {
             const cfg = vscode.workspace.getConfiguration('harmony');
             const currentProvider = cfg.get<string>('modelProvider') ?? 'vscode-lm';
             const currentDeepSeek = cfg.get<string>('deepseekModel') ?? 'deepseek-v4-flash';
-            type ModelPick = vscode.QuickPickItem & { action?: 'set' | 'discover'; provider?: 'vscode-lm' | 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude'; model?: string };
+            type ModelPick = vscode.QuickPickItem & { action?: 'set' | 'discover'; provider?: 'vscode-lm' | 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude' | 'bytedance' | 'bytedance-rewards' | 'stepfun'; model?: string };
             // Build model entries from the central registry (providerModels.ts).
             // This replaces ~100 lines of hardcoded per-model entries.
             const registryEntries = buildQuickPickEntries(currentProvider, (p) => {
