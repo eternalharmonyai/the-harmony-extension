@@ -1165,7 +1165,7 @@ export function activate(context: vscode.ExtensionContext) {
             await cfg.update('modelProvider', pick.provider, vscode.ConfigurationTarget.Global);
             if (pick.provider === 'deepseek' && pick.model) {
                 await cfg.update('deepseekModel', pick.model, vscode.ConfigurationTarget.Global);
-            } else if ((pick.provider === 'alibaba' || pick.provider === 'tencent' || pick.provider === 'moonshot' || pick.provider === 'zhipu' || pick.provider === 'zhipu-coding' || pick.provider === 'openai' || pick.provider === 'openrouter' || pick.provider === 'gemini' || pick.provider === 'claude') && pick.model) {
+            } else if (pick.provider && pick.provider !== 'vscode-lm' && pick.model) {
                 await cfg.update(`providers.${pick.provider}.coding`, pick.model, vscode.ConfigurationTarget.Global);
             }
             const summary = pick.provider === 'vscode-lm'
@@ -2508,11 +2508,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Persistent status bar launcher — always visible at the bottom of VS Code.
     const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, harmonyStatusPriority.primary);
-    const DIRECT_PRIMARY = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'zhipu', 'openai', 'openrouter', 'gemini', 'claude'];
+    const DIRECT_PRIMARY = PROVIDER_IDS;
     const refreshHarmonyBar = () => {
         const cfg = vscode.workspace.getConfiguration('harmony');
         const provider = cfg.get<string>('modelProvider') ?? 'vscode-lm';
-        if (DIRECT_PRIMARY.includes(provider)) {
+        if (DIRECT_PRIMARY.includes(provider as ProviderId)) {
             const label = providerDisplayName(provider as CollabDirectProvider);
             // Read per-provider model: DeepSeek from config setting, others from workspaceState
             let model: string;
