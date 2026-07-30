@@ -36,7 +36,8 @@ Harmony is a VS Code/Cursor extension for `@harmony` chat, workspace tools, prov
 │  │   OpenAI · Moonshot ·    │                   │
 │  │   Kimi Code ·            │                   │
 │  │   OpenRouter · Tencent · │                   │
-│  │   Zhipu · Zhipu Coding   │                   │
+│  │   Zhipu · Zhipu Coding · │                   │
+│  │   ByteDance · StepFun    │                   │
 │  └──────────┬───────────────┘                   │
 └─────────────┼───────────────────────────────────┘
               │ optional localhost bridge
@@ -58,7 +59,7 @@ Harmony connects you directly to a diverse set of AI providers through your own 
 
 | Capability | Detail |
 |:---|:---|
-| **Broader provider reach** | DeepSeek, Moonshot/Kimi, Kimi Code, Alibaba/Qwen, Zhipu/GLM, Zhipu Coding Plan, and Tencent — alongside Gemini, OpenAI, OpenRouter, and Anthropic/Claude — all from one extension |
+| **Broader provider reach** | DeepSeek, Moonshot/Kimi, Kimi Code, Alibaba/Qwen, Zhipu/GLM, Zhipu Coding Plan, Tencent, ByteDance/Doubao, and StepFun — alongside Gemini, OpenAI, OpenRouter, and Anthropic/Claude — all from one extension |
 | **Your keys, your choice** | You decide which providers to configure. No keys = no external calls. Add providers incrementally as you need them. |
 | **Copilot cross-play** | Use VS Code Copilot for everyday coding while Harmony handles orchestration, multi-model consensus, and document translation |
 | **Local models (planned)** | Native local-first operation is on the roadmap. Today Harmony requires API keys; local model support is in development. |
@@ -100,6 +101,22 @@ New command: **`Harmony: Check Provider Sync`** — verifies that all surfaces (
 
 - **Ask-question validation** — empty submit now shows a visible warning instead of silently canceling
 - **~200 lines of hardcoded model lists eliminated** across 5 files, replaced with registry imports
+
+## What's New in v0.4.2
+
+### 🌏 Chinese AI Provider Support
+
+- **ByteDance / Doubao (字节跳动豆包)** — Volcano Engine Ark API with four models: Seed-Evolving (always latest), Seed-2.1-pro (flagship), Seed-2.1-turbo (cost-efficient), and Seed-Code (coding-specialized, ~256K context)
+- **StepFun / 阶跃星辰** — 198B MoE architecture with step-3.7-flash, supporting 256K context, native multimodal, tool calling, and reasoning effort control
+- **Doubao Rewards (豆包协作激励计划)** — Dedicated provider for Volcano Engine's Collaboration Rewards Program, using authorized access point IDs (ep-xxx)
+
+### 🌐 Endpoint Region Switcher
+
+Chinese providers often offer separate domestic and international API endpoints. The sidebar now includes a region switcher for StepFun (international vs mainland) and ByteDance (Beijing default with custom override).
+
+### 🧠 Reasoning Capture
+
+Reasoning content (thinking) is now properly captured for all new providers that support it, appearing in a collapsible block instead of leaking into the response text.
 
 ## ⚠️ Before You Use Harmony
 
