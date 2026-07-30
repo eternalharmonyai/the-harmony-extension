@@ -1,4 +1,4 @@
-[English](README.md) | [中文](README.zh-CN.md)
+﻿[English](README.md) | [中文](README.zh-CN.md)
 
 > 🧪 **实验性软件 — 请以深切的关怀与责任使用**
 >
@@ -36,7 +36,8 @@ Harmony 是 VS Code/Cursor 扩展，提供 `@harmony` 聊天、工作区工具�
 │  │   OpenAI · Moonshot ·    │                   │
 │  │   Kimi Code ·            │                   │
 │  │   OpenRouter · Tencent · │                   │
-│  │   Zhipu · Zhipu Coding   │                   │
+│  │   Zhipu · Zhipu Coding · │                   │
+│  │   豆包 · 阶跃星辰        │                   │
 │  └──────────┬───────────────┘                   │
 └─────────────┼───────────────────────────────────┘
               │ 可选本地主机桥接
@@ -58,7 +59,7 @@ Harmony 通过您自己的 API 密钥将您连接到多样化的 AI 服务商—
 
 | 能力 | 详情 |
 |:---|:---|
-| **更广泛的服务商覆盖** | DeepSeek、Moonshot/Kimi、Kimi Code、阿里巴巴/Qwen、智谱/GLM、智谱编码计划（Zhipu Coding Plan）和腾讯——以及 Gemini、OpenAI、OpenRouter 和 Anthropic/Claude——全部在一个扩展中 |
+| **更广泛的服务商覆盖** | DeepSeek、Moonshot/Kimi、Kimi Code、阿里巴巴/Qwen、智谱/GLM、智谱编码计划（Zhipu Coding Plan）、腾讯、字节跳动/豆包和阶跃星辰——以及 Gemini、OpenAI、OpenRouter 和 Anthropic/Claude——全部在一个扩展中 |
 | **您的密钥，您的选择** | 您决定配置哪些服务商。没有密钥 = 没有外部调用。按需逐步添加服务商。 |
 | **Copilot 协同** | 日常编码使用 VS Code Copilot，而 Harmony 处理协奏、多模型共识和文档翻译 |
 | **本地模型（计划中）** | 原生本地优先操作已在路线图上。目前 Harmony 需要 API 密钥；本地模型支持正在开发中。 |
@@ -91,7 +92,7 @@ Harmony 侧边栏在每个服务商旁边显示 `[C]` `[A]` `[E]` `[V]` 槽位�
 ### ✨ 新增与改进
 
 - **Gemini 3.6 Flash** —— 最新 Gemini 模型，现可在侧边栏和 QuickPick 中直接选用
-- **K3 推理内容捕获** —— Moonshot/KimiCode K3 模型的推理内容现已正确收入可折叠的思考块中（不再泄漏到正文里）
+- **K3 推理内容捕获** —— Moonshot/KimiCode K3 模型的推理内容现已正确收入可折叠的思考块中（不再泄露到正文中）
 - **模型名称回退显示** —— 侧边栏现在显示易读的模型名称，而非原始模型 ID
 - **fetch_url 请求头** —— 新增可选 `headers` 参数，支持需要身份认证的 API 调用（如 Cloudflare、GitHub）
 - **流程状态防护** —— 最大重试次数从 2 次提高到 3 次，对包含多个问题的清单式回复处理更稳健
@@ -100,6 +101,22 @@ Harmony 侧边栏在每个服务商旁边显示 `[C]` `[A]` `[E]` `[V]` 槽位�
 
 - **Ask-question 输入验证** —— 提交空输入时现在会显示警告提示，而非静默取消
 - **移除约 200 行硬编码模型列表** —— 原先分散在 5 个文件中，现已统一改为从注册表导入
+
+## v0.4.2 更新内容
+
+### 🌏 中国 AI 服务商支持
+
+- **字节跳动豆包（ByteDance / Doubao）** —— 火山引擎方舟 API，提供四款模型：Seed-Evolving（持续更新）、Seed-2.1-pro（旗舰稳定版）、Seed-2.1-turbo（快速高性价比）、Seed-Code（编程专精，支持约 256K 上下文）
+- **阶跃星辰（StepFun）** —— 198B MoE 架构，step-3.7-flash 模型，支持 256K 上下文、原生多模态、工具调用及推理强度控制
+- **豆包协作激励计划（Doubao Rewards）** —— 火山引擎协作激励计划专用服务商，使用授权接入点 ID（ep-xxx）
+
+### 🌐 端点区域切换
+
+中国服务商通常提供独立的国内和国际 API 端点。侧边栏现已包含区域切换器，支持阶跃星辰（国际/大陆）和字节跳动（默认北京，可自定义覆盖）。
+
+### 🧠 推理捕获
+
+所有支持推理的新服务商现已正确捕获推理内容（思考过程），显示在可折叠区块中，不再泄露到正文中。
 
 ## ⚠️ 使用 Harmony 前须知
 
