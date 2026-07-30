@@ -59,6 +59,9 @@
   "provider.setKey": "Set / replace selected provider key…",
   "provider.setKey.short": "set key",
   "provider.replaceKey": "replace",
+  "provider.save": "Save",
+  "provider.rewardsHint": "Paste your Volcano Engine Rewards endpoint ID (ep-xxx) from the Ark console.",
+  "provider.endpointSwitch": "Switch endpoint region…",
   "provider.secretStorage": "VS Code Secret Storage:",
 
   "steering.title": "Steering modes",

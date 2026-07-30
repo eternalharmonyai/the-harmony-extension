@@ -608,7 +608,7 @@ function deepSeekTierForModel(model: string): 'mid' | 'heavy' {
     return model.toLowerCase().includes('pro') ? 'heavy' : 'mid';
 }
 
-type DirectPrimaryProvider = Extract<ProviderId, 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude' | 'bytedance' | 'bytedance-rewards' | 'stepfun'>;
+type DirectPrimaryProvider = Extract<ProviderId, 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude' | 'bytedance' | 'bytedance-coding' | 'bytedance-rewards' | 'stepfun'>;
 
 interface DirectPrimaryRoute {
     provider: DirectPrimaryProvider;
@@ -625,7 +625,7 @@ interface DirectPrimaryRoute {
 }
 
 function isDirectPrimaryProvider(value: string | undefined): value is DirectPrimaryProvider {
-    return value === 'deepseek' || value === 'alibaba' || value === 'tencent' || value === 'moonshot' || value === 'kimiCode' || value === 'zhipu' || value === 'zhipu-coding' || value === 'openai' || value === 'openrouter' || value === 'gemini' || value === 'claude' || value === 'bytedance' || value === 'bytedance-rewards' || value === 'stepfun';
+    return value === 'deepseek' || value === 'alibaba' || value === 'tencent' || value === 'moonshot' || value === 'kimiCode' || value === 'zhipu' || value === 'zhipu-coding' || value === 'openai' || value === 'openrouter' || value === 'gemini' || value === 'claude' || value === 'bytedance' || value === 'bytedance-coding' || value === 'bytedance-rewards' || value === 'stepfun';
 }
 
 function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute {
@@ -708,6 +708,22 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
             tier: 'coding',
             supportsReasoningContent: false,
             thinkingEnabled: false,
+            showThinking: false
+        };
+    }
+    // ByteDance Coding Plan — same API, same key, same base URL as standard Doubao.
+    // Default model is doubao-seed-code (coding-specialized). Subscription-billed.
+    if (provider === 'bytedance-coding') {
+        const arkModel = modelFor('bytedance-coding', 'coding');
+        return {
+            provider,
+            label: 'ByteDance Coding Plan',
+            model: arkModel,
+            baseUrl: providerBaseUrlForCall('bytedance'),
+            secretKey: secretKeyFor('bytedance-coding'),
+            tier: 'coding',
+            supportsReasoningContent: true,
+            thinkingEnabled: true,
             showThinking: false
         };
     }
