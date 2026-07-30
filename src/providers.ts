@@ -90,7 +90,7 @@ const OPENROUTER_FREE_FALLBACKS: string[] = [
  * primary model (Copilot / DeepSeek) is configured separately.
  */
 
-export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'bytedance' | 'bytedance-rewards' | 'stepfun';
+export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'bytedance' | 'bytedance-coding' | 'bytedance-rewards' | 'stepfun';
 export type Tier = 'light' | 'mid' | 'heavy' | 'coding';
 export type CollabModelPreset = 'auto' | 'economy' | 'balanced' | 'power' | 'custom';
 export type CollabDirectProvider = ProviderId | 'auto';
@@ -200,6 +200,12 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         heavy: 'doubao-seed-2-1-pro',
         coding: 'doubao-seed-2-1-pro'
     },
+    'bytedance-coding': {
+        light: 'doubao-seed-code',
+        mid: 'doubao-seed-code',
+        heavy: 'doubao-seed-code',
+        coding: 'doubao-seed-code'
+    },
     stepfun: {
         light: 'step-3.7-flash',
         mid: 'step-3.7-flash',
@@ -231,11 +237,12 @@ const SECRET_KEY: Record<ProviderId, string> = {
     zhipu: 'harmony.zhipu.apiKey',
     'zhipu-coding': 'harmony.zhipu.apiKey',
     bytedance: 'harmony.bytedance.apiKey',
+    'bytedance-coding': 'harmony.bytedance.apiKey',
     'bytedance-rewards': 'harmony.bytedance.apiKey',
     stepfun: 'harmony.stepfun.apiKey'
 };
 
-export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'zhipu', 'zhipu-coding', 'bytedance', 'bytedance-rewards', 'stepfun'];
+export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'zhipu', 'zhipu-coding', 'bytedance', 'bytedance-coding', 'bytedance-rewards', 'stepfun'];
 const FREE_QUOTA_PROVIDER_IDS: ProviderId[] = ['gemini', 'deepseek', 'alibaba', 'moonshot', 'kimiCode', 'openrouter', 'openai', 'claude'];
 
 export function isProviderId(value: string | undefined): value is ProviderId {
@@ -257,6 +264,7 @@ export function providerDisplayName(provider: CollabDirectProvider): string {
         case 'zhipu': return 'Zhipu / GLM (Z.AI)';
         case 'zhipu-coding': return 'Zhipu Coding (Z.AI Coding Plan)';
         case 'bytedance': return 'ByteDance / Doubao';
+        case 'bytedance-coding': return 'ByteDance Coding Plan (编码计划)';
         case 'bytedance-rewards': return 'Doubao Rewards (协作激励计划)';
         case 'stepfun': return 'StepFun / 阶跃星辰';
     }
@@ -278,6 +286,7 @@ export function providerDisplayNameZh(provider: CollabDirectProvider): string {
         case 'zhipu': return '智谱 GLM (Z.AI) — 通用大模型';
         case 'zhipu-coding': return '智谱编程计划 (Z.AI Coding Plan)';
         case 'bytedance': return '字节跳动豆包 — 性价比极高，国内生态';
+        case 'bytedance-coding': return '豆包编码计划 — 编程专精，订阅制';
         case 'bytedance-rewards': return '豆包协作激励计划 — 免费额度，需使用接入点';
         case 'stepfun': return '阶跃星辰 StepFun — MoE多模态，Agent/编程优化';
     }
@@ -1298,6 +1307,7 @@ export async function discoverModels(
                 break;
             }
             case 'bytedance':
+            case 'bytedance-coding':
             case 'bytedance-rewards': {
                 const cfg = vscode.workspace.getConfiguration('harmony');
                 const baseUrl = (cfg.get<string>('bytedance.baseUrl') ?? 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
