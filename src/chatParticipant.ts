@@ -13,7 +13,7 @@ import { formatHarmonyToolLedger } from './opsTools';
 import { showHarmonyAsk } from './askView';
 import { appendContinuityEntry, compactContinuity, createContinuityHandoff, forkContinuity, formatContinuityEntry, formatContinuityForPrompt, getContinuityStatus, importContinuityFromText, listContinuityEntries } from './continuity';
 import { formatRulesDetails, formatRulesStatus, loadRulesContext } from './rules';
-import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, listAvailableProviders, modelFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier, tencentSignV3, TENCENT_NATIVE_HOST, TENCENT_NATIVE_SERVICE, TENCENT_NATIVE_REGION, TENCENT_NATIVE_VERSION, sha256Hex, hmacSha256, CollabDirectProvider } from './providers';
+import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, listAvailableProviders, modelFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier, tencentSignV3, TENCENT_NATIVE_HOST, TENCENT_NATIVE_SERVICE, TENCENT_NATIVE_REGION, TENCENT_NATIVE_VERSION, sha256Hex, hmacSha256, CollabDirectProvider, STEPFUN_INTERNATIONAL_BASE_URL, STEPFUN_MAINLAND_BASE_URL } from './providers';
 import { formatMcpStatus, mcpStatusSummary } from './mcp';
 import { readUnread, markAllRead, formatWhispersForPrompt, onWhisperChange, getUnreadCount, startMidSessionTracking, getPendingMidSessionWhispers, markMidSessionWhispersDelivered } from './whisperInbox';
 import { searchPatterns as searchGlobalMemory, autoCapturePattern } from './globalMemory';
@@ -608,7 +608,7 @@ function deepSeekTierForModel(model: string): 'mid' | 'heavy' {
     return model.toLowerCase().includes('pro') ? 'heavy' : 'mid';
 }
 
-type DirectPrimaryProvider = Extract<ProviderId, 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude'>;
+type DirectPrimaryProvider = Extract<ProviderId, 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude' | 'bytedance' | 'bytedance-rewards' | 'stepfun'>;
 
 interface DirectPrimaryRoute {
     provider: DirectPrimaryProvider;
@@ -625,7 +625,7 @@ interface DirectPrimaryRoute {
 }
 
 function isDirectPrimaryProvider(value: string | undefined): value is DirectPrimaryProvider {
-    return value === 'deepseek' || value === 'alibaba' || value === 'tencent' || value === 'moonshot' || value === 'kimiCode' || value === 'zhipu' || value === 'zhipu-coding' || value === 'openai' || value === 'openrouter' || value === 'gemini' || value === 'claude';
+    return value === 'deepseek' || value === 'alibaba' || value === 'tencent' || value === 'moonshot' || value === 'kimiCode' || value === 'zhipu' || value === 'zhipu-coding' || value === 'openai' || value === 'openrouter' || value === 'gemini' || value === 'claude' || value === 'bytedance' || value === 'bytedance-rewards' || value === 'stepfun';
 }
 
 function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute {
@@ -705,6 +705,62 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
             model: modelFor('claude', 'coding'),
             baseUrl: 'https://api.anthropic.com/v1',
             secretKey: secretKeyFor('claude'),
+            tier: 'coding',
+            supportsReasoningContent: false,
+            thinkingEnabled: false,
+            showThinking: false
+        };
+    }
+    // ByteDance / Doubao — Volcano Engine Ark API (OpenAI-compatible).
+    // Thinking models (seed-2.1-pro, seed-evolving) return reasoning_content
+    // in SSE deltas (DeepSeek-style). Base URL is configurable for ep-xxx endpoints.
+    if (provider === 'bytedance') {
+        const arkModel = modelFor('bytedance', 'coding');
+        const arkBase = (vscode.workspace.getConfiguration('harmony').get<string>('bytedance.baseUrl') ?? 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
+        return {
+            provider,
+            label: 'ByteDance / Doubao',
+            model: arkModel,
+            baseUrl: arkBase,
+            secretKey: secretKeyFor('bytedance'),
+            tier: 'coding',
+            supportsReasoningContent: true,
+            thinkingEnabled: true,
+            showThinking: false
+        };
+    }
+    // Doubao Rewards — same API, same key, same base URL as standard Doubao.
+    // The model field is the user's authorized access point ID (ep-xxx).
+    // Users paste their ep-xxx via harmony.providers.bytedance-rewards.coding override.
+    if (provider === 'bytedance-rewards') {
+        const rewardsModel = modelFor('bytedance-rewards', 'coding');
+        const arkBase = (vscode.workspace.getConfiguration('harmony').get<string>('bytedance.baseUrl') ?? 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
+        return {
+            provider,
+            label: 'Doubao Rewards',
+            model: rewardsModel,
+            baseUrl: arkBase,
+            secretKey: secretKeyFor('bytedance-rewards'),
+            tier: 'coding',
+            supportsReasoningContent: true,
+            thinkingEnabled: true,
+            showThinking: false
+        };
+    }
+    // StepFun — OpenAI-compatible. Dual-region: international (.ai) vs mainland (.com).
+    // step-3.7-flash may return reasoning_content.
+    if (provider === 'stepfun') {
+        const stepModel = modelFor('stepfun', 'coding');
+        const stepProfile = cfg.get<string>('stepfun.endpointProfile') ?? 'international';
+        const stepBase = stepProfile === 'mainland'
+            ? (cfg.get<string>('stepfun.baseUrl') ?? STEPFUN_MAINLAND_BASE_URL).replace(/\/$/, '')
+            : (cfg.get<string>('stepfun.baseUrl') ?? STEPFUN_INTERNATIONAL_BASE_URL).replace(/\/$/, '');
+        return {
+            provider,
+            label: 'StepFun',
+            model: stepModel,
+            baseUrl: stepBase,
+            secretKey: secretKeyFor('stepfun'),
             tier: 'coding',
             supportsReasoningContent: false,
             thinkingEnabled: false,
