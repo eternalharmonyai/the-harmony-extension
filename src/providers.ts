@@ -90,7 +90,7 @@ const OPENROUTER_FREE_FALLBACKS: string[] = [
  * primary model (Copilot / DeepSeek) is configured separately.
  */
 
-export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu' | 'zhipu-coding';
+export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'bytedance' | 'bytedance-rewards' | 'stepfun';
 export type Tier = 'light' | 'mid' | 'heavy' | 'coding';
 export type CollabModelPreset = 'auto' | 'economy' | 'balanced' | 'power' | 'custom';
 export type CollabDirectProvider = ProviderId | 'auto';
@@ -193,8 +193,30 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         mid: 'glm-5.2',
         heavy: 'glm-5.2',
         coding: 'glm-5.2'
+    },
+    bytedance: {
+        light: 'doubao-seed-2-1-turbo',
+        mid: 'doubao-seed-2-1-turbo',
+        heavy: 'doubao-seed-2-1-pro',
+        coding: 'doubao-seed-2-1-pro'
+    },
+    stepfun: {
+        light: 'step-3.7-flash',
+        mid: 'step-3.7-flash',
+        heavy: 'step-3.7-flash',
+        coding: 'step-3.7-flash'
+    },
+    'bytedance-rewards': {
+        light: 'ep-rewards-placeholder',
+        mid: 'ep-rewards-placeholder',
+        heavy: 'ep-rewards-placeholder',
+        coding: 'ep-rewards-placeholder'
     }
 };
+
+// StepFun dual-region endpoints
+export const STEPFUN_INTERNATIONAL_BASE_URL = 'https://api.stepfun.ai/v1';
+export const STEPFUN_MAINLAND_BASE_URL = 'https://api.stepfun.com/v1';
 
 const SECRET_KEY: Record<ProviderId, string> = {
     deepseek: 'harmony.deepseekApiKey',
@@ -207,10 +229,13 @@ const SECRET_KEY: Record<ProviderId, string> = {
     claude: 'harmony.claudeApiKey',
     tencent: 'harmony.tencent.apiKey',
     zhipu: 'harmony.zhipu.apiKey',
-    'zhipu-coding': 'harmony.zhipu.apiKey'
+    'zhipu-coding': 'harmony.zhipu.apiKey',
+    bytedance: 'harmony.bytedance.apiKey',
+    'bytedance-rewards': 'harmony.bytedance.apiKey',
+    stepfun: 'harmony.stepfun.apiKey'
 };
 
-export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'zhipu', 'zhipu-coding'];
+export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'zhipu', 'zhipu-coding', 'bytedance', 'bytedance-rewards', 'stepfun'];
 const FREE_QUOTA_PROVIDER_IDS: ProviderId[] = ['gemini', 'deepseek', 'alibaba', 'moonshot', 'kimiCode', 'openrouter', 'openai', 'claude'];
 
 export function isProviderId(value: string | undefined): value is ProviderId {
@@ -231,6 +256,9 @@ export function providerDisplayName(provider: CollabDirectProvider): string {
         case 'tencent': return 'Tencent / Hunyuan';
         case 'zhipu': return 'Zhipu / GLM (Z.AI)';
         case 'zhipu-coding': return 'Zhipu Coding (Z.AI Coding Plan)';
+        case 'bytedance': return 'ByteDance / Doubao';
+        case 'bytedance-rewards': return 'Doubao Rewards (协作激励计划)';
+        case 'stepfun': return 'StepFun / 阶跃星辰';
     }
 }
 
@@ -249,6 +277,9 @@ export function providerDisplayNameZh(provider: CollabDirectProvider): string {
         case 'tencent': return '腾讯混元 — 腾讯云生态集成';
         case 'zhipu': return '智谱 GLM (Z.AI) — 通用大模型';
         case 'zhipu-coding': return '智谱编程计划 (Z.AI Coding Plan)';
+        case 'bytedance': return '字节跳动豆包 — 性价比极高，国内生态';
+        case 'bytedance-rewards': return '豆包协作激励计划 — 免费额度，需使用接入点';
+        case 'stepfun': return '阶跃星辰 StepFun — MoE多模态，Agent/编程优化';
     }
 }
 
@@ -1198,6 +1229,24 @@ export async function discoverModels(
             }
             case 'zhipu-coding': {
                 url = `${ZHIPU_CODING_BASE_URL}/models`;
+                headers['Authorization'] = `Bearer ${apiKey}`;
+                break;
+            }
+            case 'bytedance':
+            case 'bytedance-rewards': {
+                const cfg = vscode.workspace.getConfiguration('harmony');
+                const baseUrl = (cfg.get<string>('bytedance.baseUrl') ?? 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
+                url = `${baseUrl}/models`;
+                headers['Authorization'] = `Bearer ${apiKey}`;
+                break;
+            }
+            case 'stepfun': {
+                const cfg = vscode.workspace.getConfiguration('harmony');
+                const stepProfile = cfg.get<string>('stepfun.endpointProfile') ?? 'international';
+                const baseUrl = stepProfile === 'mainland'
+                    ? (cfg.get<string>('stepfun.baseUrl') ?? STEPFUN_MAINLAND_BASE_URL).replace(/\/$/, '')
+                    : (cfg.get<string>('stepfun.baseUrl') ?? STEPFUN_INTERNATIONAL_BASE_URL).replace(/\/$/, '');
+                url = `${baseUrl}/models`;
                 headers['Authorization'] = `Bearer ${apiKey}`;
                 break;
             }

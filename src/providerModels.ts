@@ -114,6 +114,20 @@ const OPENROUTER_MODELS: ModelMeta[] = [
     { id: 'Qwen/Qwen3-235B-A22B-fp8-tput', label: 'Qwen3-235B (routed)', labelZh: 'Qwen3-235B（路由）', aliases: ['openrouter'] },
 ];
 
+const BYTEDANCE_MODELS: ModelMeta[] = [
+    { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'ByteDance flagship model — auto-updates to the latest version weekly. Activate in Ark console first. 6¥/M input, 30¥/M output.' },
+    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship snapshot. Best quality for hard reasoning tasks. Activate in Ark console first. 6¥/M input, 30¥/M output.' },
+    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（快速，高性价比）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version. Activate in Ark console first. 3¥/M input, 15¥/M output — excellent cost/quality for routine tasks.' },
+];
+
+const BYTEDANCE_REWARDS_MODELS: ModelMeta[] = [
+    { id: 'ep-rewards-placeholder', label: 'Your Rewards endpoint ID (ep-xxx)', labelZh: '协作激励接入点 ID（ep-xxx）', aliases: ['doubao-rewards', 'rewards'], detail: 'Paste your Volcano Engine authorized access point ID (ep-xxxxxxxx). Get it from the Ark console after enabling the Collaboration Rewards Program. Uses the same ByteDance API key.' },
+];
+
+const STEPFUN_MODELS: ModelMeta[] = [
+    { id: 'step-3.7-flash', label: 'step-3.7-flash (MoE, multimodal, agent/coding)', labelZh: 'step-3.7-flash（MoE，多模态，智能体/编程）', aliases: ['stepfun', 'step-flash'], detail: 'StepFun (阶跃星辰) flagship. 198B MoE architecture, 256K context, native image/video, tool calling, reasoning effort control. $0.20/M input, $1.15/M output. Verify exact model ID via Discover Models.' },
+];
+
 // ── Provider Registry ────────────────────────────────────────────────
 
 export const PROVIDER_REGISTRY: ProviderDisplayMeta[] = [
@@ -193,6 +207,27 @@ export const PROVIDER_REGISTRY: ProviderDisplayMeta[] = [
         displayNameZh: 'OpenRouter — 多模型聚合路由',
         secretKey: 'harmony.openrouter.apiKey',
         models: OPENROUTER_MODELS,
+    },
+    {
+        id: 'bytedance',
+        displayName: 'ByteDance / Doubao',
+        displayNameZh: '字节跳动豆包 — 性价比极高，国内生态',
+        secretKey: 'harmony.bytedance.apiKey',
+        models: BYTEDANCE_MODELS,
+    },
+    {
+        id: 'bytedance-rewards',
+        displayName: 'Doubao Rewards (协作激励计划)',
+        displayNameZh: '豆包协作激励计划 — 免费额度，需使用接入点 ID',
+        secretKey: 'harmony.bytedance.apiKey',
+        models: BYTEDANCE_REWARDS_MODELS,
+    },
+    {
+        id: 'stepfun',
+        displayName: 'StepFun / 阶跃星辰',
+        displayNameZh: '阶跃星辰 — MoE多模态，Agent/编程优化',
+        secretKey: 'harmony.stepfun.apiKey',
+        models: STEPFUN_MODELS,
     },
 ];
 
