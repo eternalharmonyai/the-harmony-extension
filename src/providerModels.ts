@@ -126,7 +126,8 @@ const DOUBAO_REWARDS_MODELS: ModelMeta[] = [
 ];
 
 const DOUBAO_CODING_MODELS: ModelMeta[] = [
-    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized, Coding Plan)', labelZh: 'Seed-Code（编程专精，编码计划）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model. ~256K context, optimized for agentic programming. Uses the Volcano Engine Coding Plan (编码计划) — same base URL and key as standard Doubao.' },
+    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, newest)', labelZh: 'Seed-2.1-pro（旗舰稳定版，最新）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Newest flagship model. Best quality for hard reasoning tasks. Uses the Volcano Engine Coding Plan (编码计划) — same base URL and key as standard Doubao.' },
+    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized)', labelZh: 'Seed-Code（编程专精）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model (~2.0 generation). ~256K context, optimized for agentic programming. Uses the Volcano Engine Coding Plan (编码计划) — same base URL and key as standard Doubao.' },
 ];
 
 const STEPFUN_MODELS: ModelMeta[] = [
@@ -140,7 +141,8 @@ const BYTEPLUS_MODELS: ModelMeta[] = [
 ];
 
 const BYTEPLUS_CODING_MODELS: ModelMeta[] = [
-    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized, Coding Plan)', labelZh: 'Seed-Code（编程专精，编码计划）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model. Uses the ByteDance Coding Plan (International) via BytePlus — subscription-based, USD billing.' },
+    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, newest)', labelZh: 'Seed-2.1-pro（旗舰稳定版，最新）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Newest flagship model. Uses the ByteDance Coding Plan (International) via BytePlus — subscription-based, USD billing.' },
+    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized)', labelZh: 'Seed-Code（编程专精）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model (~2.0 generation). ~256K context, optimized for agentic programming. Uses the ByteDance Coding Plan (International) via BytePlus — subscription-based, USD billing.' },
 ];
 
 // ── Provider Registry ────────────────────────────────────────────────
@@ -225,22 +227,22 @@ export const PROVIDER_REGISTRY: ProviderDisplayMeta[] = [
     },
     {
         id: 'doubao',
-        displayName: 'Doubao / Volcengine (国内)',
-        displayNameZh: '字节跳动豆包 — 性价比极高，国内生态',
+        displayName: 'Doubao / Volcengine (Mainland China)',
+        displayNameZh: '字节跳动豆包 (Doubao) — 性价比极高，国内生态',
         secretKey: 'harmony.bytedance.apiKey',
         models: DOUBAO_MODELS,
     },
     {
         id: 'doubao-coding',
-        displayName: 'Doubao Coding Plan (编码计划)',
-        displayNameZh: '豆包编码计划 — 编程专精，订阅制',
+        displayName: 'Doubao Coding Plan',
+        displayNameZh: '豆包编码计划 (Coding Plan) — 编程专精，订阅制',
         secretKey: 'harmony.bytedance.apiKey',
         models: DOUBAO_CODING_MODELS,
     },
     {
         id: 'doubao-rewards',
-        displayName: 'Doubao Rewards (协作激励)',
-        displayNameZh: '豆包协作激励计划 — 免费额度，需使用接入点 ID',
+        displayName: 'Doubao Rewards',
+        displayNameZh: '豆包协作激励 (Rewards) — 免费额度，需使用接入点 ID',
         secretKey: 'harmony.bytedance.apiKey',
         models: DOUBAO_REWARDS_MODELS,
     },
@@ -260,8 +262,8 @@ export const PROVIDER_REGISTRY: ProviderDisplayMeta[] = [
     },
     {
         id: 'stepfun',
-        displayName: 'StepFun / 阶跃星辰',
-        displayNameZh: '阶跃星辰 — MoE多模态，Agent/编程优化',
+        displayName: 'StepFun',
+        displayNameZh: '阶跃星辰 (StepFun) — MoE多模态，Agent/编程优化',
         secretKey: 'harmony.stepfun.apiKey',
         models: STEPFUN_MODELS,
     },
