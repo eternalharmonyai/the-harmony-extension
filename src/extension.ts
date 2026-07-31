@@ -2797,9 +2797,8 @@ export function activate(context: vscode.ExtensionContext) {
                 ]
                 : provider === 'byteplus'
                 ? [
-                    { label: 'BytePlus International (default)', description: current.profile === 'international' ? 'current' : 'ark.byteplus.com', detail: 'Standard BytePlus ModelArk international endpoint. USD billing, global access.', profile: 'international' },
-                    { label: 'BytePlus Asia Pacific', description: current.profile === 'asia' ? 'current' : 'ark.ap-southeast.bytepluses.com', detail: 'BytePlus ModelArk Asia Pacific (Singapore) endpoint. USD billing.', profile: 'asia' },
-                    { label: 'BytePlus Europe', description: current.profile === 'europe' ? 'current' : 'ark.eu.bytepluses.com', detail: 'BytePlus ModelArk European endpoint. USD billing. Verify exact URL with BytePlus docs.', profile: 'europe' },
+                    { label: 'BytePlus Asia Pacific (default)', description: current.profile === 'asia' ? 'current' : 'ark.ap-southeast.bytepluses.com', detail: 'BytePlus ModelArk Asia Pacific (ap-southeast-1) endpoint. USD billing.', profile: 'asia' },
+                    { label: 'BytePlus Europe', description: current.profile === 'europe' ? 'current' : 'ark.eu.bytepluses.com', detail: 'BytePlus ModelArk Europe (eu-west-1) endpoint. USD billing.', profile: 'europe' },
                     { label: 'BytePlus custom base URL', description: current.profile === 'custom' ? 'current' : 'advanced', detail: 'Use an exact regional BytePlus base URL.', profile: 'custom', needsUrl: true },
                 ]
                 : [

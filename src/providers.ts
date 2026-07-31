@@ -550,10 +550,10 @@ export function providerEndpointInfo(provider: EndpointProviderId): ProviderEndp
     }
     // --- BytePlus (International) ---
     if (provider === 'byteplus') {
-        const profile = configuredEndpointProfile('byteplus.endpointProfile', 'international', ['international', 'asia', 'europe', 'custom'] as ProviderEndpointProfile[]);
+        const profile = configuredEndpointProfile('byteplus.endpointProfile', 'asia', ['asia', 'europe', 'custom'] as ProviderEndpointProfile[]);
         const custom = explicitConfigString('byteplus.baseUrl');
         if (profile === 'custom') {
-            const baseUrl = custom.value || 'https://ark.byteplus.com/api/v3';
+            const baseUrl = custom.value || 'https://ark.ap-southeast.bytepluses.com/api/v3';
             return {
                 provider,
                 profile,
@@ -564,17 +564,6 @@ export function providerEndpointInfo(provider: EndpointProviderId): ProviderEndp
                 detail: 'Uses harmony.byteplus.baseUrl exactly.'
             };
         }
-        if (profile === 'asia') {
-            return {
-                provider,
-                profile,
-                label: 'BytePlus Asia Pacific endpoint',
-                baseUrl: 'https://ark.ap-southeast.bytepluses.com/api/v3',
-                baseUrlSetting: 'harmony.byteplus.baseUrl',
-                needsCustomBaseUrl: false,
-                detail: 'Uses the BytePlus ModelArk Asia Pacific (Singapore) endpoint. USD billing.'
-            };
-        }
         if (profile === 'europe') {
             return {
                 provider,
@@ -583,17 +572,18 @@ export function providerEndpointInfo(provider: EndpointProviderId): ProviderEndp
                 baseUrl: 'https://ark.eu.bytepluses.com/api/v3',
                 baseUrlSetting: 'harmony.byteplus.baseUrl',
                 needsCustomBaseUrl: false,
-                detail: 'Uses the BytePlus ModelArk European endpoint. USD billing. Verify exact URL with BytePlus docs.'
+                detail: 'Uses the BytePlus ModelArk Europe (eu-west-1) endpoint. USD billing.'
             };
         }
+        // default: asia
         return {
             provider,
             profile,
-            label: 'BytePlus International endpoint',
-            baseUrl: 'https://ark.byteplus.com/api/v3',
+            label: 'BytePlus Asia Pacific endpoint',
+            baseUrl: 'https://ark.ap-southeast.bytepluses.com/api/v3',
             baseUrlSetting: 'harmony.byteplus.baseUrl',
             needsCustomBaseUrl: false,
-            detail: 'Uses the BytePlus ModelArk international (default) endpoint. USD billing, global access.'
+            detail: 'Uses the BytePlus ModelArk Asia Pacific (ap-southeast-1) endpoint. USD billing.'
         };
     }
     throw new Error(`Unsupported endpoint provider: ${provider}`);
