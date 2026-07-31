@@ -608,7 +608,7 @@ function deepSeekTierForModel(model: string): 'mid' | 'heavy' {
     return model.toLowerCase().includes('pro') ? 'heavy' : 'mid';
 }
 
-type DirectPrimaryProvider = Extract<ProviderId, 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude' | 'bytedance' | 'bytedance-coding' | 'bytedance-rewards' | 'stepfun'>;
+type DirectPrimaryProvider = Extract<ProviderId, 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude' | 'doubao' | 'doubao-coding' | 'doubao-rewards' | 'byteplus' | 'byteplus-coding' | 'stepfun'>;
 
 interface DirectPrimaryRoute {
     provider: DirectPrimaryProvider;
@@ -625,7 +625,7 @@ interface DirectPrimaryRoute {
 }
 
 function isDirectPrimaryProvider(value: string | undefined): value is DirectPrimaryProvider {
-    return value === 'deepseek' || value === 'alibaba' || value === 'tencent' || value === 'moonshot' || value === 'kimiCode' || value === 'zhipu' || value === 'zhipu-coding' || value === 'openai' || value === 'openrouter' || value === 'gemini' || value === 'claude' || value === 'bytedance' || value === 'bytedance-coding' || value === 'bytedance-rewards' || value === 'stepfun';
+    return value === 'deepseek' || value === 'alibaba' || value === 'tencent' || value === 'moonshot' || value === 'kimiCode' || value === 'zhipu' || value === 'zhipu-coding' || value === 'openai' || value === 'openrouter' || value === 'gemini' || value === 'claude' || value === 'doubao' || value === 'doubao-coding' || value === 'doubao-rewards' || value === 'byteplus' || value === 'byteplus-coding' || value === 'stepfun';
 }
 
 function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute {
@@ -711,33 +711,33 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
             showThinking: false
         };
     }
-    // ByteDance Coding Plan — same API, same key, same base URL as standard Doubao.
+    // Doubao Coding Plan — same API, same key, same base URL as standard Doubao.
     // Default model is doubao-seed-code (coding-specialized). Subscription-billed.
-    if (provider === 'bytedance-coding') {
-        const arkModel = modelFor('bytedance-coding', 'coding');
+    if (provider === 'doubao-coding') {
+        const arkModel = modelFor('doubao-coding', 'coding');
         return {
             provider,
-            label: 'ByteDance Coding Plan',
+            label: 'Doubao Coding Plan',
             model: arkModel,
-            baseUrl: providerBaseUrlForCall('bytedance'),
-            secretKey: secretKeyFor('bytedance-coding'),
+            baseUrl: providerBaseUrlForCall('doubao'),
+            secretKey: secretKeyFor('doubao-coding'),
             tier: 'coding',
             supportsReasoningContent: true,
             thinkingEnabled: true,
             showThinking: false
         };
     }
-    // ByteDance / Doubao — Volcano Engine Ark API (OpenAI-compatible).
+    // Doubao / Volcengine — Volcano Engine Ark API (OpenAI-compatible).
     // Thinking models (seed-2.1-pro, seed-evolving) return reasoning_content
     // in SSE deltas (DeepSeek-style). Base URL is configurable for ep-xxx endpoints.
-    if (provider === 'bytedance') {
-        const arkModel = modelFor('bytedance', 'coding');
+    if (provider === 'doubao') {
+        const arkModel = modelFor('doubao', 'coding');
         return {
             provider,
-            label: 'ByteDance / Doubao',
+            label: 'Doubao / Volcengine',
             model: arkModel,
-            baseUrl: providerBaseUrlForCall('bytedance'),
-            secretKey: secretKeyFor('bytedance'),
+            baseUrl: providerBaseUrlForCall('doubao'),
+            secretKey: secretKeyFor('doubao'),
             tier: 'coding',
             supportsReasoningContent: true,
             thinkingEnabled: true,
@@ -746,15 +746,45 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
     }
     // Doubao Rewards — same API, same key, same base URL as standard Doubao.
     // The model field is the user's authorized access point ID (ep-xxx).
-    // Users paste their ep-xxx via harmony.providers.bytedance-rewards.coding override.
-    if (provider === 'bytedance-rewards') {
-        const rewardsModel = modelFor('bytedance-rewards', 'coding');
+    if (provider === 'doubao-rewards') {
+        const rewardsModel = modelFor('doubao-rewards', 'coding');
         return {
             provider,
             label: 'Doubao Rewards',
             model: rewardsModel,
-            baseUrl: providerBaseUrlForCall('bytedance'),
-            secretKey: secretKeyFor('bytedance-rewards'),
+            baseUrl: providerBaseUrlForCall('doubao'),
+            secretKey: secretKeyFor('doubao-rewards'),
+            tier: 'coding',
+            supportsReasoningContent: true,
+            thinkingEnabled: true,
+            showThinking: false
+        };
+    }
+    // BytePlus — International Doubao API (BytePlus ModelArk).
+    // Separate account, USD billing, ark.byteplus.com endpoints.
+    if (provider === 'byteplus') {
+        const arkModel = modelFor('byteplus', 'coding');
+        return {
+            provider,
+            label: 'BytePlus / Doubao',
+            model: arkModel,
+            baseUrl: providerBaseUrlForCall('byteplus'),
+            secretKey: secretKeyFor('byteplus'),
+            tier: 'coding',
+            supportsReasoningContent: true,
+            thinkingEnabled: true,
+            showThinking: false
+        };
+    }
+    // ByteDance Coding Plan (International) — BytePlus subscription, USD billing.
+    if (provider === 'byteplus-coding') {
+        const arkModel = modelFor('byteplus-coding', 'coding');
+        return {
+            provider,
+            label: 'ByteDance Coding Plan',
+            model: arkModel,
+            baseUrl: providerBaseUrlForCall('byteplus'),
+            secretKey: secretKeyFor('byteplus-coding'),
             tier: 'coding',
             supportsReasoningContent: true,
             thinkingEnabled: true,
