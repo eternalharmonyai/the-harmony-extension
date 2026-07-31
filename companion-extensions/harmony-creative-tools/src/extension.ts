@@ -6,6 +6,10 @@ import * as os from 'os';
 import * as path from 'path';
 import * as cp from 'child_process';
 
+// Locale-aware label helper — mirrors main extension's LanguageManager pattern.
+const isZh = (): boolean => vscode.env.language?.toLowerCase().startsWith('zh') ?? false;
+const zh = (en: string, zhStr: string): string => isZh() ? zhStr : en;
+
 type JsonRecord = Record<string, unknown>;
 type CreativeSettingKey = 'imageQuality' | 'layerBackend' | 'videoModel';
 
@@ -172,61 +176,61 @@ class CreativeTreeProvider implements vscode.TreeDataProvider<CreativeTreeNode> 
         const nodes: CreativeTreeNode[] = [
             {
                 id: 'mcp',
-                label: 'MCP Server',
+                label: zh('MCP Server', 'MCP 服务器'),
                 description: MCP_LABEL,
                 contextValue: 'harmonyCreative.mcp',
                 icon: 'server-process',
-                command: { title: 'Start MCP Server', command: 'harmonyCreative.startMcpServer' },
+                command: { title: zh('Start MCP Server', '启动 MCP 服务器'), command: 'harmonyCreative.startMcpServer' },
             },
             {
                 id: 'service',
-                label: 'Creative Service',
+                label: zh('Creative Service', '创意服务'),
                 description: lastHealth.checkedAt === 0
-                    ? 'Checking…'
-                    : (lastHealth.ok ? `Running ✓  (${serviceUrl()})` : `Stopped ✗  (${lastHealth.error ?? 'no response'})`),
+                    ? zh('Checking…', '检查中…')
+                    : (lastHealth.ok ? `${zh('Running ✓', '运行中 ✓')}  (${serviceUrl()})` : `${zh('Stopped ✗', '已停止 ✗')}  (${lastHealth.error ?? 'no response'})`),
                 contextValue: 'harmonyCreative.service',
                 icon: lastHealth.ok ? 'pass-filled' : 'circle-slash',
-                command: { title: lastHealth.ok ? 'Show Health' : 'Start Creative Service', command: lastHealth.ok ? 'harmonyCreative.health' : 'harmonyCreative.start' },
+                command: { title: lastHealth.ok ? zh('Show Health', '显示运行状态') : zh('Start Creative Service', '启动创意服务'), command: lastHealth.ok ? 'harmonyCreative.health' : 'harmonyCreative.start' },
             },
             {
                 id: 'default-image',
-                label: 'Image Quality',
+                label: zh('Image Quality', '图像质量'),
                 description: defaults.imageQuality,
                 contextValue: 'harmonyCreative.default.image',
                 icon: 'symbol-color',
-                command: { title: 'Change Image Quality', command: 'harmonyCreative.selectImageQuality' },
+                command: { title: zh('Change Image Quality', '更改图像质量'), command: 'harmonyCreative.selectImageQuality' },
             },
             {
                 id: 'default-layer',
-                label: 'Layer Backend',
+                label: zh('Layer Backend', '图层后端'),
                 description: defaults.layerBackend,
                 contextValue: 'harmonyCreative.default.layer',
                 icon: 'layers',
-                command: { title: 'Change Layer Backend', command: 'harmonyCreative.selectLayerBackend' },
+                command: { title: zh('Change Layer Backend', '更改图层后端'), command: 'harmonyCreative.selectLayerBackend' },
             },
             {
                 id: 'default-video',
-                label: 'Video Model',
+                label: zh('Video Model', '视频模型'),
                 description: defaults.videoModel,
                 contextValue: 'harmonyCreative.default.video',
                 icon: 'device-camera-video',
-                command: { title: 'Change Video Model', command: 'harmonyCreative.selectVideoModel' },
+                command: { title: zh('Change Video Model', '更改视频模型'), command: 'harmonyCreative.selectVideoModel' },
             },
             {
                 id: 'rest',
-                label: 'REST Endpoint',
+                label: zh('REST Endpoint', 'REST 端点'),
                 description: serviceUrl(),
                 contextValue: 'harmonyCreative.rest',
                 icon: 'pulse',
-                command: { title: 'Show Health', command: 'harmonyCreative.health' },
+                command: { title: zh('Show Health', '显示运行状态'), command: 'harmonyCreative.health' },
             },
             {
                 id: 'media',
-                label: 'Generated Media',
-                description: 'Open folder',
+                label: zh('Generated Media', '媒体生成'),
+                description: zh('Open folder', '打开文件夹'),
                 contextValue: 'harmonyCreative.media',
                 icon: 'folder-library',
-                command: { title: 'Open Generated Media', command: 'harmonyCreative.openGeneratedMedia' },
+                command: { title: zh('Open Generated Media', '打开生成媒体'), command: 'harmonyCreative.openGeneratedMedia' },
             },
         ];
 
@@ -236,30 +240,30 @@ class CreativeTreeProvider implements vscode.TreeDataProvider<CreativeTreeNode> 
             const sourceTag = lastProviderKeys.source === 'health' ? '(live)' : '(.env)';
             nodes.push({
                 id: 'keys-summary',
-                label: 'Provider Keys',
-                description: `${wired.length}/${lastProviderKeys.providers.length} wired ${sourceTag}`,
+                label: zh('Provider Keys', 'API 密钥'),
+                description: `${wired.length}/${lastProviderKeys.providers.length} ${zh('wired', '已配置')} ${sourceTag}`,
                 contextValue: 'harmonyCreative.keys',
                 icon: 'key',
-                command: { title: 'Show Provider Keys', command: 'harmonyCreative.showProviderKeys' },
+                command: { title: zh('Show Provider Keys', '显示服务商密钥'), command: 'harmonyCreative.showProviderKeys' },
             });
             for (const p of lastProviderKeys.providers) {
                 nodes.push({
                     id: `key-${p.id}`,
                     label: `  ${p.id}`,
-                    description: p.wired ? 'wired ✓' : 'not set ✗',
+                    description: p.wired ? zh('wired ✓', '已配置 ✓') : zh('not set ✗', '未设置 ✗'),
                     contextValue: 'harmonyCreative.key',
                     icon: p.wired ? 'check' : 'circle-slash',
-                    command: { title: 'Show Provider Keys', command: 'harmonyCreative.showProviderKeys' },
+                    command: { title: zh('Show Provider Keys', '显示服务商密钥'), command: 'harmonyCreative.showProviderKeys' },
                 });
             }
         } else if (lastHealth.checkedAt > 0) {
             nodes.push({
                 id: 'keys-summary',
-                label: 'Provider Keys',
-                description: 'Unknown (no .env / no /health data)',
+                label: zh('Provider Keys', 'API 密钥'),
+                description: zh('Unknown (no .env / no /health data)', '未知（无 .env / 无健康检查数据）'),
                 contextValue: 'harmonyCreative.keys',
                 icon: 'key',
-                command: { title: 'Show Provider Keys', command: 'harmonyCreative.showProviderKeys' },
+                command: { title: zh('Show Provider Keys', '显示服务商密钥'), command: 'harmonyCreative.showProviderKeys' },
             });
         }
 

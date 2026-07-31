@@ -1,0 +1,21 @@
+{
+  "displayName": "Harmony Creative Tools",
+  "description": "Optional VS Code companion for managing the shared local Harmony Creative service.",
+  "views.creativeTools": "Creative Tools",
+  "mcp.label": "Harmony Creative",
+  "config.title": "Harmony Creative Tools",
+  "command.startMcpServer": "Harmony Creative: Start MCP Server",
+  "command.health": "Harmony Creative: Show Health",
+  "command.start": "Harmony Creative: Start Shared REST Service",
+  "command.selectDefaults": "Harmony Creative: Select Model Defaults",
+  "command.statusBarClick": "Harmony Creative: Open Panel and Choose Defaults",
+  "command.revealPanel": "Harmony Creative: Reveal Side Panel",
+  "command.selectImageQuality": "Harmony Creative: Select Image Quality",
+  "command.selectLayerBackend": "Harmony Creative: Select Layer Backend",
+  "command.selectVideoModel": "Harmony Creative: Select Video Model",
+  "command.openServiceFolder": "Harmony Creative: Open Service Folder",
+  "command.openGeneratedMedia": "Harmony Creative: Open Generated Media",
+  "command.openHealthEndpoint": "Harmony Creative: Open Health Endpoint",
+  "command.showStatus": "Harmony Creative: Show Companion Status",
+  "command.showProviderKeys": "Harmony Creative: Show Provider Keys"
+}
