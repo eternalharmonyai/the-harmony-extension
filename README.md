@@ -106,13 +106,23 @@ New command: **`Harmony: Check Provider Sync`** — verifies that all surfaces (
 
 ### 🌏 Chinese AI Provider Support
 
-- **ByteDance / Doubao (字节跳动豆包)** — Volcano Engine Ark API with four models: Seed-Evolving (always latest), Seed-2.1-pro (flagship), Seed-2.1-turbo (cost-efficient), and Seed-Code (coding-specialized, ~256K context)
-- **StepFun / 阶跃星辰** — 198B MoE architecture with step-3.7-flash, supporting 256K context, native multimodal, tool calling, and reasoning effort control
-- **Doubao Rewards (豆包协作激励计划)** — Dedicated provider for Volcano Engine's Collaboration Rewards Program, using authorized access point IDs (ep-xxx)
+Harmony now supports the full Volcengine / ByteDance / Doubao ecosystem with clear domestic/international separation:
+
+- **Doubao / Volcengine (Mainland China)** — Volcano Engine Ark API (北京) with four models: Seed-Evolving (always latest), Seed-2.1-pro (flagship), Seed-2.1-turbo (cost-efficient), and Seed-Code (coding-specialized, ~256K context)
+- **Doubao Coding Plan** — Same Doubao models billed via the Volcano Engine Coding Plan (编码计划). Defaults to Seed-2.1-pro; Seed-Code also available
+- **Doubao Rewards** — Volcano Engine's Collaboration Rewards Program (协作激励计划), using authorized access point IDs (ep-xxx)
+- **BytePlus / Doubao (International)** — BytePlus ModelArk with USD billing. Regions: Asia Pacific (ap-southeast-1) and Europe (eu-west-1)
+- **ByteDance Coding Plan (International)** — BytePlus coding plan with USD billing
+- **StepFun** — 198B MoE architecture with step-3.7-flash, supporting 256K context, native multimodal, tool calling, and reasoning effort control
 
 ### 🌐 Endpoint Region Switcher
 
-Chinese providers often offer separate domestic and international API endpoints. The sidebar now includes a region switcher for StepFun (international vs mainland) and ByteDance (Beijing default with custom override).
+Chinese providers often offer separate domestic and international API endpoints. The sidebar now includes a clickable region switcher for:
+- **StepFun** — International (api.stepfun.ai) vs Mainland China (api.stepfun.com)
+- **Doubao** — Beijing (default) with custom override
+- **BytePlus** — Asia Pacific (ap-southeast-1) vs Europe (eu-west-1)
+- **Alibaba** — International vs Mainland China vs US
+- **Tencent** — International vs Mainland China
 
 ### 🧠 Reasoning Capture
 
