@@ -13,6 +13,7 @@ import { registerCognitionTools } from './cognitionTools';
 import { registerRepairRestore } from './repairRestore';
 import { registerEvidenceTools } from './evidenceTools';
 import { registerResearchUpgradeTools } from './researchTools';
+import { LanguageManager } from './languageManager';
 import { initializeErrorLearning } from './careBloom';
 import { registerProviderRegistryTools } from './providerRegistryTools';
 import { buildQuickPickEntries } from './providerModels';
@@ -1005,54 +1006,56 @@ class TranslationToolsProvider implements vscode.TreeDataProvider<TranslationToo
     }
 
     getChildren(): TranslationTool[] {
+        const lm = LanguageManager.getInstance();
+        const isZh = lm.getCurrentLang() === 'zh';
         return [
             new TranslationTool(
-                '🚀 Translate Document',
+                isZh ? '🚀 翻译文档' : '🚀 Translate Document',
                 'harmony.translate',
                 'globe',
-                'EN↔ZH — Auto-detect & translate current file ⚠️ Costs vary (cents–dollars)',
+                isZh ? '中英互译 — 自动检测并翻译当前文件 ⚠️ 费用不等（几分至几美元）' : 'EN↔ZH — Auto-detect & translate current file ⚠️ Costs vary (cents–dollars)',
             ),
             new TranslationTool(
-                '📂 Batch Translate',
+                isZh ? '📂 批量翻译' : '📂 Batch Translate',
                 'harmony.batchTranslate',
                 'folder-library',
-                'EN↔ZH — Batch translate a folder ⚠️ Costs vary by size/model',
+                isZh ? '中英互译 — 批量翻译整个文件夹 ⚠️ 费用取决于大小和模型' : 'EN↔ZH — Batch translate a folder ⚠️ Costs vary by size/model',
             ),
             new TranslationTool(
-                '📊 View Diff',
+                isZh ? '📊 查看差异' : '📊 View Diff',
                 'harmony.openTranslationDiff',
                 'diff',
-                'Open latest EN→ZH diff viewer',
+                isZh ? '打开最新的中英差异对比视图' : 'Open latest EN→ZH diff viewer',
             ),
             new TranslationTool(
-                '🔎 Check Authenticity',
+                isZh ? '🔎 验证真实性' : '🔎 Check Authenticity',
                 'harmony.checkAuthenticity',
                 'shield',
-                'Verify source document is plausible',
+                isZh ? '验证原文是否合理可信' : 'Verify source document is plausible',
             ),
             new TranslationTool(
-                '📋 Dispute Ledger',
+                isZh ? '📋 争议记录' : '📋 Dispute Ledger',
                 'harmony.openDisputeLedger',
                 'checklist',
-                'Review term dispute audit trail',
+                isZh ? '查看术语争议审计记录' : 'Review term dispute audit trail',
             ),
             new TranslationTool(
-                '🎯 Orchestrate Translation',
+                isZh ? '🎯 编排翻译' : '🎯 Orchestrate Translation',
                 'harmony.translationOrchestrate',
                 'debug-step-over',
-                'Step-by-step with review between each stage',
+                isZh ? '分步骤执行，每阶段之间可审阅' : 'Step-by-step with review between each stage',
             ),
             new TranslationTool(
-                '📋 Faithful EN→ZH',
+                isZh ? '📋 忠实翻译（中→英）' : '📋 Faithful EN→ZH',
                 'harmony.faithfulTranslate',
                 'lock',
-                'Strict translation — no content changes (literal mode)',
+                isZh ? '严格翻译 — 不修改内容（字面模式）' : 'Strict translation — no content changes (literal mode)',
             ),
             new TranslationTool(
-                '⚙️ Run Pipeline...',
+                isZh ? '⚙️ 运行流水线...' : '⚙️ Run Pipeline...',
                 'harmony.runDeepSwarm',
                 'play',
-                'EN↔ZH — Choose pipeline manually ⚠️ Costs vary by size/model',
+                isZh ? '中英互译 — 手动选择流水线 ⚠️ 费用取决于大小和模型' : 'EN↔ZH — Choose pipeline manually ⚠️ Costs vary by size/model',
             ),
         ];
     }
@@ -1209,6 +1212,9 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration('harmony')) {
                 view.refresh();
+                if (e.affectsConfiguration('harmony.language')) {
+                    translationToolsProvider.refresh();
+                }
                 if (e.affectsConfiguration('harmony.hub.allowedRoots')) {
                     syncAllowedRoots();
                 }
