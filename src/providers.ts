@@ -201,10 +201,10 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'doubao-seed-2-1-pro'
     },
     'doubao-coding': {
-        light: 'doubao-seed-code',
-        mid: 'doubao-seed-code',
-        heavy: 'doubao-seed-code',
-        coding: 'doubao-seed-code'
+        light: 'doubao-seed-2-1-pro',
+        mid: 'doubao-seed-2-1-pro',
+        heavy: 'doubao-seed-2-1-pro',
+        coding: 'doubao-seed-2-1-pro'
     },
     'doubao-rewards': {
         light: 'ep-rewards-placeholder',
@@ -219,10 +219,10 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'doubao-seed-2-1-pro'
     },
     'byteplus-coding': {
-        light: 'doubao-seed-code',
-        mid: 'doubao-seed-code',
-        heavy: 'doubao-seed-code',
-        coding: 'doubao-seed-code'
+        light: 'doubao-seed-2-1-pro',
+        mid: 'doubao-seed-2-1-pro',
+        heavy: 'doubao-seed-2-1-pro',
+        coding: 'doubao-seed-2-1-pro'
     },
     stepfun: {
         light: 'step-3.7-flash',
