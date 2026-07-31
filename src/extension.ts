@@ -1122,7 +1122,7 @@ export function activate(context: vscode.ExtensionContext) {
             const cfg = vscode.workspace.getConfiguration('harmony');
             const currentProvider = cfg.get<string>('modelProvider') ?? 'vscode-lm';
             const currentDeepSeek = cfg.get<string>('deepseekModel') ?? 'deepseek-v4-flash';
-            type ModelPick = vscode.QuickPickItem & { action?: 'set' | 'discover'; provider?: 'vscode-lm' | 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude' | 'bytedance' | 'bytedance-coding' | 'bytedance-rewards' | 'stepfun'; model?: string };
+            type ModelPick = vscode.QuickPickItem & { action?: 'set' | 'discover'; provider?: 'vscode-lm' | 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude' | 'doubao' | 'doubao-coding' | 'doubao-rewards' | 'byteplus' | 'byteplus-coding' | 'stepfun'; model?: string };
             // Build model entries from the central registry (providerModels.ts).
             // This replaces ~100 lines of hardcoded per-model entries.
             const registryEntries = buildQuickPickEntries(currentProvider, (p) => {
@@ -2761,7 +2761,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.selectProviderEndpointProfile', async (providerArg?: ProviderId) => {
             const cfg = vscode.workspace.getConfiguration('harmony');
-            const directProviders: Array<EndpointProviderId> = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'stepfun', 'bytedance'];
+            const directProviders: Array<EndpointProviderId> = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'stepfun', 'doubao', 'byteplus'];
             const provider = directProviders.includes(providerArg as any)
                 ? providerArg as EndpointProviderId
                 : (await vscode.window.showQuickPick(directProviders.map(value => ({ label: providerLabel(value), value })), {
@@ -2770,7 +2770,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }))?.value;
             if (!provider) return;
             const current = providerEndpointInfo(provider);
-            type EndpointPick = vscode.QuickPickItem & { profile: 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'custom'; needsUrl?: boolean };
+            type EndpointPick = vscode.QuickPickItem & { profile: 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'asia' | 'europe' | 'custom'; needsUrl?: boolean };
             const picks: EndpointPick[] = provider === 'alibaba'
                 ? [
                     { label: 'Alibaba international', description: current.profile === 'international' ? 'current' : 'Singapore/global', detail: 'Use this for international DashScope/Model Studio keys. This is the endpoint that passed the recent live smoke.', profile: 'international' },
@@ -2790,10 +2790,17 @@ export function activate(context: vscode.ExtensionContext) {
                     { label: 'StepFun mainland China', description: current.profile === 'mainland' ? 'current' : 'api.stepfun.com', detail: 'Use this for mainland China StepFun keys.', profile: 'mainland' },
                     { label: 'StepFun custom base URL', description: current.profile === 'custom' ? 'current' : 'advanced', detail: 'Use an exact regional base URL from StepFun only when issued for the account.', profile: 'custom', needsUrl: true },
                 ]
-                : provider === 'bytedance'
+                : provider === 'doubao'
                 ? [
-                    { label: 'ByteDance/Doubao Beijing (default)', description: current.profile === 'beijing' ? 'current' : 'ark.cn-beijing.volces.com', detail: 'Standard Volcano Engine Ark endpoint. Activate models in the Ark console first.', profile: 'beijing' },
-                    { label: 'ByteDance/Doubao custom base URL', description: current.profile === 'custom' ? 'current' : 'advanced', detail: 'Use an exact regional Volcano Engine Ark base URL.', profile: 'custom', needsUrl: true },
+                    { label: 'Doubao / Volcengine Beijing (default)', description: current.profile === 'beijing' ? 'current' : 'ark.cn-beijing.volces.com', detail: 'Standard Volcano Engine Ark endpoint. Activate models in the Ark console first.', profile: 'beijing' },
+                    { label: 'Doubao / Volcengine custom base URL', description: current.profile === 'custom' ? 'current' : 'advanced', detail: 'Use an exact regional Volcano Engine Ark base URL.', profile: 'custom', needsUrl: true },
+                ]
+                : provider === 'byteplus'
+                ? [
+                    { label: 'BytePlus International (default)', description: current.profile === 'international' ? 'current' : 'ark.byteplus.com', detail: 'Standard BytePlus ModelArk international endpoint. USD billing, global access.', profile: 'international' },
+                    { label: 'BytePlus Asia Pacific', description: current.profile === 'asia' ? 'current' : 'ark.ap-southeast.bytepluses.com', detail: 'BytePlus ModelArk Asia Pacific (Singapore) endpoint. USD billing.', profile: 'asia' },
+                    { label: 'BytePlus Europe', description: current.profile === 'europe' ? 'current' : 'ark.eu.bytepluses.com', detail: 'BytePlus ModelArk European endpoint. USD billing. Verify exact URL with BytePlus docs.', profile: 'europe' },
+                    { label: 'BytePlus custom base URL', description: current.profile === 'custom' ? 'current' : 'advanced', detail: 'Use an exact regional BytePlus base URL.', profile: 'custom', needsUrl: true },
                 ]
                 : [
                     { label: `${providerLabel(provider)} default`, description: current.profile === 'default' ? 'current' : 'standard endpoint', detail: current.detail, profile: 'default' },

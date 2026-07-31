@@ -114,23 +114,33 @@ const OPENROUTER_MODELS: ModelMeta[] = [
     { id: 'Qwen/Qwen3-235B-A22B-fp8-tput', label: 'Qwen3-235B (routed)', labelZh: 'Qwen3-235B（路由）', aliases: ['openrouter'] },
 ];
 
-const BYTEDANCE_MODELS: ModelMeta[] = [
+const DOUBAO_MODELS: ModelMeta[] = [
     { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'ByteDance flagship model — auto-updates to the latest version weekly. Activate in Ark console first. 6¥/M input, 30¥/M output.' },
     { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship snapshot. Best quality for hard reasoning tasks. Activate in Ark console first. 6¥/M input, 30¥/M output.' },
     { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（快速，高性价比）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version. Activate in Ark console first. 3¥/M input, 15¥/M output — excellent cost/quality for routine tasks.' },
     { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized, Coding Plan)', labelZh: 'Seed-Code（编程专精，编码计划）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model. ~256K context, optimized for agentic programming. Available via the Volcano Engine Coding Plan (编码计划) — same base URL and key as standard Doubao. Verify exact model ID via Discover Models.' },
 ];
 
-const BYTEDANCE_REWARDS_MODELS: ModelMeta[] = [
+const DOUBAO_REWARDS_MODELS: ModelMeta[] = [
     { id: 'ep-rewards-placeholder', label: 'Your Rewards endpoint ID (ep-xxx)', labelZh: '协作激励接入点 ID（ep-xxx）', aliases: ['doubao-rewards', 'rewards'], detail: 'Paste your Volcano Engine authorized access point ID (ep-xxxxxxxx). Get it from the Ark console after enabling the Collaboration Rewards Program. Uses the same ByteDance API key.' },
 ];
 
-const BYTEDANCE_CODING_MODELS: ModelMeta[] = [
+const DOUBAO_CODING_MODELS: ModelMeta[] = [
     { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized, Coding Plan)', labelZh: 'Seed-Code（编程专精，编码计划）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model. ~256K context, optimized for agentic programming. Uses the Volcano Engine Coding Plan (编码计划) — same base URL and key as standard Doubao.' },
 ];
 
 const STEPFUN_MODELS: ModelMeta[] = [
     { id: 'step-3.7-flash', label: 'step-3.7-flash (MoE, multimodal, agent/coding)', labelZh: 'step-3.7-flash（MoE，多模态，智能体/编程）', aliases: ['stepfun', 'step-flash'], detail: 'StepFun (阶跃星辰) flagship. 198B MoE architecture, 256K context, native image/video, tool calling, reasoning effort control. $0.20/M input, $1.15/M output. Verify exact model ID via Discover Models.' },
+];
+
+const BYTEPLUS_MODELS: ModelMeta[] = [
+    { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'BytePlus flagship model — auto-updates to the latest version weekly. Available via BytePlus ModelArk (International). USD billing.' },
+    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship via BytePlus International. USD billing, global access.' },
+    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（快速，高性价比）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version via BytePlus International. USD billing.' },
+];
+
+const BYTEPLUS_CODING_MODELS: ModelMeta[] = [
+    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized, Coding Plan)', labelZh: 'Seed-Code（编程专精，编码计划）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model. Uses the ByteDance Coding Plan (International) via BytePlus — subscription-based, USD billing.' },
 ];
 
 // ── Provider Registry ────────────────────────────────────────────────
@@ -214,25 +224,39 @@ export const PROVIDER_REGISTRY: ProviderDisplayMeta[] = [
         models: OPENROUTER_MODELS,
     },
     {
-        id: 'bytedance',
-        displayName: 'ByteDance / Doubao',
+        id: 'doubao',
+        displayName: 'Doubao / Volcengine (国内)',
         displayNameZh: '字节跳动豆包 — 性价比极高，国内生态',
         secretKey: 'harmony.bytedance.apiKey',
-        models: BYTEDANCE_MODELS,
+        models: DOUBAO_MODELS,
     },
     {
-        id: 'bytedance-coding',
-        displayName: 'ByteDance Coding Plan (编码计划)',
+        id: 'doubao-coding',
+        displayName: 'Doubao Coding Plan (编码计划)',
         displayNameZh: '豆包编码计划 — 编程专精，订阅制',
         secretKey: 'harmony.bytedance.apiKey',
-        models: BYTEDANCE_CODING_MODELS,
+        models: DOUBAO_CODING_MODELS,
     },
     {
-        id: 'bytedance-rewards',
-        displayName: 'Doubao Rewards (协作激励计划)',
+        id: 'doubao-rewards',
+        displayName: 'Doubao Rewards (协作激励)',
         displayNameZh: '豆包协作激励计划 — 免费额度，需使用接入点 ID',
         secretKey: 'harmony.bytedance.apiKey',
-        models: BYTEDANCE_REWARDS_MODELS,
+        models: DOUBAO_REWARDS_MODELS,
+    },
+    {
+        id: 'byteplus',
+        displayName: 'BytePlus / Doubao (International)',
+        displayNameZh: 'BytePlus 豆包 — 国际版，USD计费',
+        secretKey: 'harmony.byteplus.apiKey',
+        models: BYTEPLUS_MODELS,
+    },
+    {
+        id: 'byteplus-coding',
+        displayName: 'ByteDance Coding Plan (Intl)',
+        displayNameZh: 'ByteDance 编码计划 — 国际版',
+        secretKey: 'harmony.byteplus.apiKey',
+        models: BYTEPLUS_CODING_MODELS,
     },
     {
         id: 'stepfun',
@@ -417,7 +441,8 @@ export function checkProviderSync(): SyncCheckResult {
     const providerFamily: Record<string, string> = {
         'moonshot': 'moonshot', 'kimiCode': 'moonshot',
         'zhipu': 'zhipu', 'zhipu-coding': 'zhipu',
-        'bytedance': 'bytedance', 'bytedance-coding': 'bytedance', 'bytedance-rewards': 'bytedance',
+        'doubao': 'doubao', 'doubao-coding': 'doubao', 'doubao-rewards': 'doubao',
+        'byteplus': 'byteplus', 'byteplus-coding': 'byteplus',
     };
     for (const provider of PROVIDER_REGISTRY) {
         for (const model of provider.models) {

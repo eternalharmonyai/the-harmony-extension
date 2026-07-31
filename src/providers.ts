@@ -90,11 +90,11 @@ const OPENROUTER_FREE_FALLBACKS: string[] = [
  * primary model (Copilot / DeepSeek) is configured separately.
  */
 
-export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'bytedance' | 'bytedance-coding' | 'bytedance-rewards' | 'stepfun';
+export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'doubao' | 'doubao-coding' | 'doubao-rewards' | 'byteplus' | 'byteplus-coding' | 'stepfun';
 export type Tier = 'light' | 'mid' | 'heavy' | 'coding';
 export type CollabModelPreset = 'auto' | 'economy' | 'balanced' | 'power' | 'custom';
 export type CollabDirectProvider = ProviderId | 'auto';
-export type ProviderEndpointProfile = 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'custom';
+export type ProviderEndpointProfile = 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'asia' | 'europe' | 'custom';
 
 const DEEPSEEK_DEFAULT_BASE_URL = 'https://api.deepseek.com/v1';
 const MOONSHOT_DEFAULT_BASE_URL = 'https://api.moonshot.ai/v1';
@@ -194,13 +194,31 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         heavy: 'glm-5.2',
         coding: 'glm-5.2'
     },
-    bytedance: {
+    doubao: {
         light: 'doubao-seed-2-1-turbo',
         mid: 'doubao-seed-2-1-turbo',
         heavy: 'doubao-seed-2-1-pro',
         coding: 'doubao-seed-2-1-pro'
     },
-    'bytedance-coding': {
+    'doubao-coding': {
+        light: 'doubao-seed-code',
+        mid: 'doubao-seed-code',
+        heavy: 'doubao-seed-code',
+        coding: 'doubao-seed-code'
+    },
+    'doubao-rewards': {
+        light: 'ep-rewards-placeholder',
+        mid: 'ep-rewards-placeholder',
+        heavy: 'ep-rewards-placeholder',
+        coding: 'ep-rewards-placeholder'
+    },
+    byteplus: {
+        light: 'doubao-seed-2-1-turbo',
+        mid: 'doubao-seed-2-1-turbo',
+        heavy: 'doubao-seed-2-1-pro',
+        coding: 'doubao-seed-2-1-pro'
+    },
+    'byteplus-coding': {
         light: 'doubao-seed-code',
         mid: 'doubao-seed-code',
         heavy: 'doubao-seed-code',
@@ -211,12 +229,6 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         mid: 'step-3.7-flash',
         heavy: 'step-3.7-flash',
         coding: 'step-3.7-flash'
-    },
-    'bytedance-rewards': {
-        light: 'ep-rewards-placeholder',
-        mid: 'ep-rewards-placeholder',
-        heavy: 'ep-rewards-placeholder',
-        coding: 'ep-rewards-placeholder'
     },
 };
 
@@ -236,13 +248,15 @@ const SECRET_KEY: Record<ProviderId, string> = {
     tencent: 'harmony.tencent.apiKey',
     zhipu: 'harmony.zhipu.apiKey',
     'zhipu-coding': 'harmony.zhipu.apiKey',
-    bytedance: 'harmony.bytedance.apiKey',
-    'bytedance-coding': 'harmony.bytedance.apiKey',
-    'bytedance-rewards': 'harmony.bytedance.apiKey',
+    doubao: 'harmony.bytedance.apiKey',
+    'doubao-coding': 'harmony.bytedance.apiKey',
+    'doubao-rewards': 'harmony.bytedance.apiKey',
+    byteplus: 'harmony.byteplus.apiKey',
+    'byteplus-coding': 'harmony.byteplus.apiKey',
     stepfun: 'harmony.stepfun.apiKey'
 };
 
-export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'zhipu', 'zhipu-coding', 'bytedance', 'bytedance-coding', 'bytedance-rewards', 'stepfun'];
+export const PROVIDER_IDS: ProviderId[] = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'zhipu', 'zhipu-coding', 'doubao', 'doubao-coding', 'doubao-rewards', 'byteplus', 'byteplus-coding', 'stepfun'];
 const FREE_QUOTA_PROVIDER_IDS: ProviderId[] = ['gemini', 'deepseek', 'alibaba', 'moonshot', 'kimiCode', 'openrouter', 'openai', 'claude'];
 
 export function isProviderId(value: string | undefined): value is ProviderId {
@@ -263,9 +277,11 @@ export function providerDisplayName(provider: CollabDirectProvider): string {
         case 'tencent': return 'Tencent / Hunyuan';
         case 'zhipu': return 'Zhipu / GLM (Z.AI)';
         case 'zhipu-coding': return 'Zhipu Coding (Z.AI Coding Plan)';
-        case 'bytedance': return 'ByteDance / Doubao';
-        case 'bytedance-coding': return 'ByteDance Coding Plan (编码计划)';
-        case 'bytedance-rewards': return 'Doubao Rewards (协作激励计划)';
+        case 'doubao': return 'Doubao / Volcengine (国内)';
+        case 'doubao-coding': return 'Doubao Coding Plan (编码计划)';
+        case 'doubao-rewards': return 'Doubao Rewards (协作激励)';
+        case 'byteplus': return 'BytePlus / Doubao (International)';
+        case 'byteplus-coding': return 'ByteDance Coding Plan (Intl)';
         case 'stepfun': return 'StepFun / 阶跃星辰';
     }
 }
@@ -285,9 +301,11 @@ export function providerDisplayNameZh(provider: CollabDirectProvider): string {
         case 'tencent': return '腾讯混元 — 腾讯云生态集成';
         case 'zhipu': return '智谱 GLM (Z.AI) — 通用大模型';
         case 'zhipu-coding': return '智谱编程计划 (Z.AI Coding Plan)';
-        case 'bytedance': return '字节跳动豆包 — 性价比极高，国内生态';
-        case 'bytedance-coding': return '豆包编码计划 — 编程专精，订阅制';
-        case 'bytedance-rewards': return '豆包协作激励计划 — 免费额度，需使用接入点';
+        case 'doubao': return '字节跳动豆包 — 性价比极高，国内生态';
+        case 'doubao-coding': return '豆包编码计划 — 编程专精，订阅制';
+        case 'doubao-rewards': return '豆包协作激励计划 — 免费额度，需使用接入点';
+        case 'byteplus': return 'BytePlus 豆包 — 国际版，USD计费';
+        case 'byteplus-coding': return 'ByteDance 编码计划 — 国际版';
         case 'stepfun': return '阶跃星辰 StepFun — MoE多模态，Agent/编程优化';
     }
 }
@@ -307,7 +325,7 @@ function configuredEndpointProfile(key: string, fallback: ProviderEndpointProfil
     return raw && allowed.includes(raw as ProviderEndpointProfile) ? raw as ProviderEndpointProfile : fallback;
 }
 
-export type EndpointProviderId = Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'stepfun' | 'bytedance'>;
+export type EndpointProviderId = Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'stepfun' | 'doubao' | 'byteplus'>;
 
 export function providerEndpointInfo(provider: EndpointProviderId): ProviderEndpointInfo {
     if (provider === 'deepseek') {
@@ -504,8 +522,8 @@ export function providerEndpointInfo(provider: EndpointProviderId): ProviderEndp
             detail: 'Uses the international StepFun endpoint (api.stepfun.ai). Accessible globally; recommended for non-China users.'
         };
     }
-    // --- ByteDance / Doubao (Volcano Engine Ark) ---
-    if (provider === 'bytedance') {
+    // --- Doubao / Volcengine (Volcano Engine Ark, China) ---
+    if (provider === 'doubao') {
         const profile = configuredEndpointProfile('bytedance.endpointProfile', 'beijing', ['beijing', 'custom'] as ProviderEndpointProfile[]);
         const custom = explicitConfigString('bytedance.baseUrl');
         if (profile === 'custom') {
@@ -513,7 +531,7 @@ export function providerEndpointInfo(provider: EndpointProviderId): ProviderEndp
             return {
                 provider,
                 profile,
-                label: 'ByteDance / Doubao custom endpoint',
+                label: 'Doubao / Volcengine custom endpoint',
                 baseUrl: baseUrl.replace(/\/$/, ''),
                 baseUrlSetting: 'harmony.bytedance.baseUrl',
                 needsCustomBaseUrl: false,
@@ -523,11 +541,59 @@ export function providerEndpointInfo(provider: EndpointProviderId): ProviderEndp
         return {
             provider,
             profile,
-            label: 'ByteDance / Doubao Beijing endpoint',
+            label: 'Doubao / Volcengine Beijing endpoint',
             baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
             baseUrlSetting: 'harmony.bytedance.baseUrl',
             needsCustomBaseUrl: false,
             detail: 'Uses the standard Volcano Engine Ark endpoint (Beijing region). Activate models in the Ark console first.'
+        };
+    }
+    // --- BytePlus (International) ---
+    if (provider === 'byteplus') {
+        const profile = configuredEndpointProfile('byteplus.endpointProfile', 'international', ['international', 'asia', 'europe', 'custom'] as ProviderEndpointProfile[]);
+        const custom = explicitConfigString('byteplus.baseUrl');
+        if (profile === 'custom') {
+            const baseUrl = custom.value || 'https://ark.byteplus.com/api/v3';
+            return {
+                provider,
+                profile,
+                label: 'BytePlus custom endpoint',
+                baseUrl: baseUrl.replace(/\/$/, ''),
+                baseUrlSetting: 'harmony.byteplus.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: 'Uses harmony.byteplus.baseUrl exactly.'
+            };
+        }
+        if (profile === 'asia') {
+            return {
+                provider,
+                profile,
+                label: 'BytePlus Asia Pacific endpoint',
+                baseUrl: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+                baseUrlSetting: 'harmony.byteplus.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: 'Uses the BytePlus ModelArk Asia Pacific (Singapore) endpoint. USD billing.'
+            };
+        }
+        if (profile === 'europe') {
+            return {
+                provider,
+                profile,
+                label: 'BytePlus Europe endpoint',
+                baseUrl: 'https://ark.eu.bytepluses.com/api/v3',
+                baseUrlSetting: 'harmony.byteplus.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: 'Uses the BytePlus ModelArk European endpoint. USD billing. Verify exact URL with BytePlus docs.'
+            };
+        }
+        return {
+            provider,
+            profile,
+            label: 'BytePlus International endpoint',
+            baseUrl: 'https://ark.byteplus.com/api/v3',
+            baseUrlSetting: 'harmony.byteplus.baseUrl',
+            needsCustomBaseUrl: false,
+            detail: 'Uses the BytePlus ModelArk international (default) endpoint. USD billing, global access.'
         };
     }
     throw new Error(`Unsupported endpoint provider: ${provider}`);
@@ -1306,11 +1372,19 @@ export async function discoverModels(
                 headers['Authorization'] = `Bearer ${apiKey}`;
                 break;
             }
-            case 'bytedance':
-            case 'bytedance-coding':
-            case 'bytedance-rewards': {
+            case 'doubao':
+            case 'doubao-coding':
+            case 'doubao-rewards': {
                 const cfg = vscode.workspace.getConfiguration('harmony');
                 const baseUrl = (cfg.get<string>('bytedance.baseUrl') ?? 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
+                url = `${baseUrl}/models`;
+                headers['Authorization'] = `Bearer ${apiKey}`;
+                break;
+            }
+            case 'byteplus':
+            case 'byteplus-coding': {
+                const cfg = vscode.workspace.getConfiguration('harmony');
+                const baseUrl = (cfg.get<string>('byteplus.baseUrl') ?? 'https://ark.byteplus.com/api/v3').replace(/\/$/, '');
                 url = `${baseUrl}/models`;
                 headers['Authorization'] = `Bearer ${apiKey}`;
                 break;
