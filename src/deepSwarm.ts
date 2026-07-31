@@ -4834,7 +4834,7 @@ ONLY return the JSON, no other text.`;
                 // Comprehensive pattern: catch ALL provider/model/registry/region/naming
                 // hallucinations when the deterministic check passed. The LLM sees
                 // truncated file slices and invents mismatches using varied vocabulary.
-                const mismatchPattern = /model\s*id|model\s*IDs|providers?\.ts|providerModels\.ts|do\s*not\s*match|don'?t\s*match|mismatch|sync|inconsistent|inconsistenc|registry|default\s*model|provider\s*default|defaults?\s+are|defaults?\s+not|defaults?\s+inconsistent|region.*naming|naming.*ambiguity|region.*ambiguity|region.*mismatch|endpoint.*naming/i;
+                const mismatchPattern = /model\s*id|model\s*IDs|providers?\.ts|providerModels\.ts|providerModels(?!\.ts)|do\s*not\s*match|don'?t\s*match|mismatch|misalign|need.*align|sync|inconsistent|inconsistenc|registry|default\s*model|provider\s*default|defaults?\s+are|defaults?\s+not|defaults?\s+inconsistent|region.*naming|naming.*ambiguity|region.*ambiguity|region.*mismatch|endpoint.*naming/i;
                 // "No secrets found" is a GOOD thing — finding no secrets is not an issue.
                 // Strip it regardless of providerSyncOk.
                 const noSecretsPattern = /no secrets|secrets?\s+found|secrets?\s+detected|no\s+secrets\s+found/i;
