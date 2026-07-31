@@ -8685,7 +8685,13 @@
             "moonshot",
             "tencent",
             "zhipu",
-            "zhipu-coding"
+            "zhipu-coding",
+            "doubao",
+            "doubao-coding",
+            "doubao-rewards",
+            "byteplus",
+            "byteplus-coding",
+            "stepfun"
           ],
           "default": "vscode-lm",
           "description": "Model source for the native @harmony participant. 'vscode-lm' uses the model selected in VS Code Chat. 'deepseek', 'alibaba', 'tencent', 'zhipu', 'zhipu-coding', and 'moonshot' call their OpenAI-compatible direct APIs using stored provider keys. Provider primary models use their coding-tier setting."
@@ -8735,7 +8741,13 @@
             "openrouter",
             "openai",
             "claude",
-            "tencent"
+            "tencent",
+            "doubao",
+            "doubao-coding",
+            "doubao-rewards",
+            "byteplus",
+            "byteplus-coding",
+            "stepfun"
           ],
           "default": "auto",
           "description": "Direct provider used by collaborative agents when harmony.collabModelPreset is custom, or as an explicit provider preference for direct Agents routing. Gemini uses the AI Studio / Google Generative Language API key stored as harmony.geminiApiKey; Vertex AI is not wired here."
