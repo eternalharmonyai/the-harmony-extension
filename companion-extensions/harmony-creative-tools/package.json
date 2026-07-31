@@ -1,7 +1,7 @@
 {
   "name": "harmony-creative-tools",
-  "displayName": "Harmony Creative Tools",
-  "description": "Optional VS Code companion for managing the shared local Harmony Creative service.",
+  "displayName": "%displayName%",
+  "description": "%description%",
   "version": "0.1.6",
   "publisher": "eternal-harmony",
   "license": "SEE LICENSE IN LICENSE.txt",
@@ -19,76 +19,76 @@
     "mcpServerDefinitionProviders": [
       {
         "id": "harmonyCreative",
-        "label": "Harmony Creative"
+        "label": "%mcp.label%"
       }
     ],
     "commands": [
       {
         "command": "harmonyCreative.startMcpServer",
-        "title": "Harmony Creative: Start MCP Server",
+        "title": "%command.startMcpServer%",
         "icon": "$(debug-start)"
       },
       {
         "command": "harmonyCreative.health",
-        "title": "Harmony Creative: Show Health",
+        "title": "%command.health%",
         "icon": "$(heart)"
       },
       {
         "command": "harmonyCreative.start",
-        "title": "Harmony Creative: Start Shared REST Service",
+        "title": "%command.start%",
         "icon": "$(play)"
       },
       {
         "command": "harmonyCreative.selectDefaults",
-        "title": "Harmony Creative: Select Model Defaults",
+        "title": "%command.selectDefaults%",
         "icon": "$(settings-gear)"
       },
       {
         "command": "harmonyCreative.statusBarClick",
-        "title": "Harmony Creative: Open Panel and Choose Defaults"
+        "title": "%command.statusBarClick%"
       },
       {
         "command": "harmonyCreative.revealPanel",
-        "title": "Harmony Creative: Reveal Side Panel"
+        "title": "%command.revealPanel%"
       },
       {
         "command": "harmonyCreative.selectImageQuality",
-        "title": "Harmony Creative: Select Image Quality"
+        "title": "%command.selectImageQuality%"
       },
       {
         "command": "harmonyCreative.selectLayerBackend",
-        "title": "Harmony Creative: Select Layer Backend"
+        "title": "%command.selectLayerBackend%"
       },
       {
         "command": "harmonyCreative.selectVideoModel",
-        "title": "Harmony Creative: Select Video Model"
+        "title": "%command.selectVideoModel%"
       },
       {
         "command": "harmonyCreative.openServiceFolder",
-        "title": "Harmony Creative: Open Service Folder"
+        "title": "%command.openServiceFolder%"
       },
       {
         "command": "harmonyCreative.openGeneratedMedia",
-        "title": "Harmony Creative: Open Generated Media"
+        "title": "%command.openGeneratedMedia%"
       },
       {
         "command": "harmonyCreative.openHealthEndpoint",
-        "title": "Harmony Creative: Open Health Endpoint"
+        "title": "%command.openHealthEndpoint%"
       },
       {
         "command": "harmonyCreative.showStatus",
-        "title": "Harmony Creative: Show Companion Status"
+        "title": "%command.showStatus%"
       },
       {
         "command": "harmonyCreative.showProviderKeys",
-        "title": "Harmony Creative: Show Provider Keys"
+        "title": "%command.showProviderKeys%"
       }
     ],
     "views": {
       "harmony-sidebar": [
         {
           "id": "harmonyCreative.panel",
-          "name": "Creative Tools"
+          "name": "%views.creativeTools%"
         }
       ]
     },
@@ -177,7 +177,7 @@
       ]
     },
     "configuration": {
-      "title": "Harmony Creative Tools",
+      "title": "%config.title%",
       "properties": {
         "harmonyCreative.serviceUrl": {
           "type": "string",

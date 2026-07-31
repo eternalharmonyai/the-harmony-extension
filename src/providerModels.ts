@@ -117,7 +117,7 @@ const OPENROUTER_MODELS: ModelMeta[] = [
 const DOUBAO_MODELS: ModelMeta[] = [
     { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'ByteDance flagship model — auto-updates to the latest version weekly. Activate in Ark console first. 6¥/M input, 30¥/M output.' },
     { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship snapshot. Best quality for hard reasoning tasks. Activate in Ark console first. 6¥/M input, 30¥/M output.' },
-    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（快速，高性价比）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version. Activate in Ark console first. 3¥/M input, 15¥/M output — excellent cost/quality for routine tasks.' },
+    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（速度快，性价比高）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version. Activate in Ark console first. 3¥/M input, 15¥/M output — excellent cost/quality for routine tasks.' },
     { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized, Coding Plan)', labelZh: 'Seed-Code（编程专精，编码计划）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model. ~256K context, optimized for agentic programming. Available via the Volcano Engine Coding Plan (编码计划) — same base URL and key as standard Doubao. Verify exact model ID via Discover Models.' },
 ];
 
@@ -137,7 +137,7 @@ const STEPFUN_MODELS: ModelMeta[] = [
 const BYTEPLUS_MODELS: ModelMeta[] = [
     { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'BytePlus flagship model — auto-updates to the latest version weekly. Available via BytePlus ModelArk (International). USD billing.' },
     { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship via BytePlus International. USD billing, global access.' },
-    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（快速，高性价比）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version via BytePlus International. USD billing.' },
+    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（速度快，性价比高）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version via BytePlus International. USD billing.' },
 ];
 
 const BYTEPLUS_CODING_MODELS: ModelMeta[] = [
@@ -172,7 +172,7 @@ export const PROVIDER_REGISTRY: ProviderDisplayMeta[] = [
     {
         id: 'kimiCode',
         displayName: 'KimiCode',
-        displayNameZh: 'Kimi 代码版 — 专注编程任务',
+        displayNameZh: 'Kimi 编程版 — 专注编程任务',
         secretKey: 'harmony.kimiCode.apiKey',
         models: KIMICODE_MODELS,
     },
@@ -186,7 +186,7 @@ export const PROVIDER_REGISTRY: ProviderDisplayMeta[] = [
     {
         id: 'gemini',
         displayName: 'Gemini',
-        displayNameZh: 'Google Gemini — 多模态，国际化',
+        displayNameZh: 'Google Gemini — 多模态，海外服务',
         secretKey: 'harmony.geminiApiKey',
         models: GEMINI_MODELS,
     },
@@ -200,7 +200,7 @@ export const PROVIDER_REGISTRY: ProviderDisplayMeta[] = [
     {
         id: 'zhipu-coding',
         displayName: 'Zhipu Coding (Z.AI Coding Plan)',
-        displayNameZh: '智谱编程计划 (Z.AI Coding Plan)',
+        displayNameZh: '智谱编程计划 (Z.AI Coding Plan) — 编程专精，订阅制',
         secretKey: 'harmony.zhipu.apiKey',
         models: ZHIPU_CODING_MODELS,
     },
@@ -228,42 +228,42 @@ export const PROVIDER_REGISTRY: ProviderDisplayMeta[] = [
     {
         id: 'doubao',
         displayName: 'Doubao / Volcengine (Mainland China)',
-        displayNameZh: '字节跳动豆包 (Doubao) — 性价比极高，国内生态',
+        displayNameZh: '豆包（字节跳动）— 性价比极高，国内生态',
         secretKey: 'harmony.bytedance.apiKey',
         models: DOUBAO_MODELS,
     },
     {
         id: 'doubao-coding',
         displayName: 'Doubao Coding Plan',
-        displayNameZh: '豆包编码计划 (Coding Plan) — 编程专精，订阅制',
+        displayNameZh: '豆包编程计划 (Coding Plan) — 编程专精，订阅制',
         secretKey: 'harmony.bytedance.apiKey',
         models: DOUBAO_CODING_MODELS,
     },
     {
         id: 'doubao-rewards',
         displayName: 'Doubao Rewards',
-        displayNameZh: '豆包协作激励 (Rewards) — 免费额度，需使用接入点 ID',
+        displayNameZh: '豆包奖励计划 (Rewards) — 免费额度，需接入点 ID',
         secretKey: 'harmony.bytedance.apiKey',
         models: DOUBAO_REWARDS_MODELS,
     },
     {
         id: 'byteplus',
         displayName: 'BytePlus / Doubao (International)',
-        displayNameZh: 'BytePlus 豆包 — 国际版，USD计费',
+        displayNameZh: 'BytePlus 豆包 — 国际版，美元计费',
         secretKey: 'harmony.byteplus.apiKey',
         models: BYTEPLUS_MODELS,
     },
     {
         id: 'byteplus-coding',
         displayName: 'ByteDance Coding Plan (Intl)',
-        displayNameZh: 'ByteDance 编码计划 — 国际版',
+        displayNameZh: 'BytePlus 编程计划 — 国际版，编程专精',
         secretKey: 'harmony.byteplus.apiKey',
         models: BYTEPLUS_CODING_MODELS,
     },
     {
         id: 'stepfun',
         displayName: 'StepFun',
-        displayNameZh: '阶跃星辰 (StepFun) — MoE多模态，Agent/编程优化',
+        displayNameZh: '阶跃星辰 (StepFun) — MoE 多模态，智能体/编程优化',
         secretKey: 'harmony.stepfun.apiKey',
         models: STEPFUN_MODELS,
     },

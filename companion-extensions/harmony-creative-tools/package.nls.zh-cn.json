@@ -1,0 +1,21 @@
+{
+  "displayName": "Harmony 创意工具",
+  "description": "可选的 VS Code 配套扩展，用于管理共享本地 Harmony Creative 服务。",
+  "views.creativeTools": "创意工具",
+  "mcp.label": "Harmony Creative",
+  "config.title": "Harmony 创意工具",
+  "command.startMcpServer": "Harmony Creative: 启动 MCP 服务器",
+  "command.health": "Harmony Creative: 显示运行状态",
+  "command.start": "Harmony Creative: 启动共享 REST 服务",
+  "command.selectDefaults": "Harmony Creative: 选择模型默认值",
+  "command.statusBarClick": "Harmony Creative: 打开面板并选择默认值",
+  "command.revealPanel": "Harmony Creative: 显示侧面板",
+  "command.selectImageQuality": "Harmony Creative: 选择图像质量",
+  "command.selectLayerBackend": "Harmony Creative: 选择图层后端",
+  "command.selectVideoModel": "Harmony Creative: 选择视频模型",
+  "command.openServiceFolder": "Harmony Creative: 打开服务文件夹",
+  "command.openGeneratedMedia": "Harmony Creative: 打开媒体生成",
+  "command.openHealthEndpoint": "Harmony Creative: 打开运行状态端点",
+  "command.showStatus": "Harmony Creative: 显示配套扩展状态",
+  "command.showProviderKeys": "Harmony Creative: 显示 API 密钥"
+}
