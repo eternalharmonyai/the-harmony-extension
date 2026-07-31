@@ -443,8 +443,8 @@ export function checkProviderSync(): SyncCheckResult {
     const providerFamily: Record<string, string> = {
         'moonshot': 'moonshot', 'kimiCode': 'moonshot',
         'zhipu': 'zhipu', 'zhipu-coding': 'zhipu',
-        'doubao': 'doubao', 'doubao-coding': 'doubao', 'doubao-rewards': 'doubao',
-        'byteplus': 'byteplus', 'byteplus-coding': 'byteplus',
+        'doubao': 'bytedance', 'doubao-coding': 'bytedance', 'doubao-rewards': 'bytedance',
+        'byteplus': 'bytedance', 'byteplus-coding': 'bytedance',
     };
     for (const provider of PROVIDER_REGISTRY) {
         for (const model of provider.models) {
