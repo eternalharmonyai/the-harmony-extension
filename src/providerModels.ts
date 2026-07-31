@@ -115,19 +115,19 @@ const OPENROUTER_MODELS: ModelMeta[] = [
 ];
 
 const DOUBAO_MODELS: ModelMeta[] = [
-    { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'ByteDance flagship model — auto-updates to the latest version weekly. Activate in Ark console first. 6¥/M input, 30¥/M output.' },
-    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship snapshot. Best quality for hard reasoning tasks. Activate in Ark console first. 6¥/M input, 30¥/M output.' },
-    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（速度快，性价比高）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version. Activate in Ark console first. 3¥/M input, 15¥/M output — excellent cost/quality for routine tasks.' },
-    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized, Coding Plan)', labelZh: 'Seed-Code（编程专精，编码计划）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model. ~256K context, optimized for agentic programming. Available via the Volcano Engine Coding Plan (编码计划) — same base URL and key as standard Doubao. Verify exact model ID via Discover Models.' },
+    { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'ByteDance flagship — auto-updates to the latest version weekly (not version-pinned; outputs may drift). Activate in Ark console (火山方舟) first. ¥6/M input, ¥30/M output.' },
+    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship snapshot. Best quality for hard reasoning tasks. Activate in Ark console first. ¥6/M input, ¥30/M output.' },
+    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（速度快，性价比高）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version. Activate in Ark console first. ¥3/M input, ¥15/M output — excellent value (高性价比) for routine tasks.' },
+    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized, Coding Plan)', labelZh: 'Seed-Code（编程专精，编码计划）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model. ~256K context, optimized for agentic programming. Available via the Volcano Engine Coding Plan (编程计划) — same base URL and key as standard Doubao. Verify exact model ID via Discover Models.' },
 ];
 
 const DOUBAO_REWARDS_MODELS: ModelMeta[] = [
-    { id: 'ep-rewards-placeholder', label: 'Your Rewards endpoint ID (ep-xxx)', labelZh: '协作激励接入点 ID（ep-xxx）', aliases: ['doubao-rewards', 'rewards'], detail: 'Paste your Volcano Engine authorized access point ID (ep-xxxxxxxx). Get it from the Ark console after enabling the Collaboration Rewards Program. Uses the same ByteDance API key.' },
+    { id: 'ep-rewards-placeholder', label: 'Your Rewards endpoint ID (ep-xxx)', labelZh: '协作激励接入点 ID（ep-xxx）', aliases: ['doubao-rewards', 'rewards'], detail: 'Paste your Volcano Engine inference endpoint ID (ep-xxxxxxxx). Create it in the Ark console (火山方舟) after joining the Rewards Program (奖励计划). Uses the same ByteDance API key.' },
 ];
 
 const DOUBAO_CODING_MODELS: ModelMeta[] = [
-    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, newest)', labelZh: 'Seed-2.1-pro（旗舰稳定版，最新）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Newest flagship model. Best quality for hard reasoning tasks. Uses the Volcano Engine Coding Plan (编码计划) — same base URL and key as standard Doubao.' },
-    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized)', labelZh: 'Seed-Code（编程专精）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model (~2.0 generation). ~256K context, optimized for agentic programming. Uses the Volcano Engine Coding Plan (编码计划) — same base URL and key as standard Doubao.' },
+    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, newest)', labelZh: 'Seed-2.1-pro（旗舰稳定版，最新）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship snapshot. Best quality for hard reasoning tasks. Uses the Volcano Engine Coding Plan (编程计划) — subscription-based, same base URL and key as standard Doubao.' },
+    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized)', labelZh: 'Seed-Code（编程专精）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model (2.0 generation). ~256K context, optimized for agentic programming. Uses the Volcano Engine Coding Plan (编程计划) — subscription-based, same base URL and key as standard Doubao.' },
 ];
 
 const STEPFUN_MODELS: ModelMeta[] = [
@@ -141,8 +141,8 @@ const BYTEPLUS_MODELS: ModelMeta[] = [
 ];
 
 const BYTEPLUS_CODING_MODELS: ModelMeta[] = [
-    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, newest)', labelZh: 'Seed-2.1-pro（旗舰稳定版，最新）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Newest flagship model. Uses the ByteDance Coding Plan (International) via BytePlus — subscription-based, USD billing.' },
-    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized)', labelZh: 'Seed-Code（编程专精）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model (~2.0 generation). ~256K context, optimized for agentic programming. Uses the ByteDance Coding Plan (International) via BytePlus — subscription-based, USD billing.' },
+    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, newest)', labelZh: 'Seed-2.1-pro（旗舰稳定版，最新）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship model. Best quality for hard reasoning tasks. Uses the BytePlus Coding Plan (编程计划) — subscription-based, USD billing.' },
+    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized)', labelZh: 'Seed-Code（编程专精）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Seed model (2.0 generation). ~256K context, optimized for agentic programming. Uses the BytePlus Coding Plan (编程计划) — subscription-based, USD billing.' },
 ];
 
 // ── Provider Registry ────────────────────────────────────────────────
