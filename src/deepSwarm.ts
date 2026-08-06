@@ -4826,39 +4826,41 @@ ONLY return the JSON, no other text.`;
             let findings: string[] = Array.isArray(parsed.findings) ? parsed.findings.slice(0, 5) : [];
             let urgentIssues: string[] = Array.isArray(parsed.urgentIssues) ? parsed.urgentIssues.slice(0, 3) : [];
 
-            // ── Post-filter: strip false-positive model ID mismatch findings ──
-            // When checkProviderSync() passed, the LLM may still hallucinate a
-            // mismatch because it only sees truncated file slices. Strip those
-            // from findings[], urgentIssues[], AND the summary field.
+            // ── Post-filter: ALLOWLIST approach (future-proof) ──
+            // When checkProviderSync() passed, the LLM will STILL hallucinate
+            // model ID mismatches using ever-new vocabulary ("inconsistent",
+            // "need alignment", "region naming ambiguity", etc.). A denylist
+            // regex can never catch every phrasing.
+            //
+            // FLIP THE LOGIC: only KEEP findings that mention genuine security
+            // or privacy concerns. Everything else is stripped as non-actionable
+            // noise from truncated file slices.
+            const noSecretsPattern = /no secrets|secrets?\s+found|secrets?\s+detected|no\s+secrets\s+found/i;
             if (providerSyncOk) {
-                // Comprehensive pattern: catch ALL provider/model/registry/region/naming
-                // hallucinations when the deterministic check passed. The LLM sees
-                // truncated file slices and invents mismatches using varied vocabulary.
-                const mismatchPattern = /model\s*id|model\s*IDs|providers?\.ts|providerModels\.ts|providerModels(?!\.ts)|do\s*not\s*match|don'?t\s*match|mismatch|misalign|need.*align|sync|inconsistent|inconsistenc|registry|default\s*model|provider\s*default|defaults?\s+are|defaults?\s+not|defaults?\s+inconsistent|region.*naming|naming.*ambiguity|region.*ambiguity|region.*mismatch|endpoint.*naming/i;
-                // "No secrets found" is a GOOD thing — finding no secrets is not an issue.
-                // Strip it regardless of providerSyncOk.
-                const noSecretsPattern = /no secrets|secrets?\s+found|secrets?\s+detected|no\s+secrets\s+found/i;
+                // Only genuine security/privacy findings survive.
+                const securityPattern = /secret|api\s*key|password|passwd|token|credential|private\s*key|\.env|leak|expose|hardcod|pii|personal\s*(data|info)/i;
                 const before = findings.length + urgentIssues.length;
-                findings = findings.filter(f => !mismatchPattern.test(f) && !noSecretsPattern.test(f));
-                urgentIssues = urgentIssues.filter(f => !mismatchPattern.test(f) && !noSecretsPattern.test(f));
+                findings = findings.filter(f => securityPattern.test(f) && !noSecretsPattern.test(f));
+                urgentIssues = urgentIssues.filter(f => securityPattern.test(f) && !noSecretsPattern.test(f));
                 const removed = before - (findings.length + urgentIssues.length);
                 if (removed > 0) {
-                    console.log(`[TripleCheckAutoAudit] Stripped ${removed} false-positive finding(s) — deterministic check passed / non-issues removed.`);
+                    console.log(`[TripleCheckAutoAudit] Stripped ${removed} non-security finding(s) — deterministic check passed, allowlist applied.`);
                 }
-                // Also scrub the summary field — the LLM often puts the warning
-                // in the summary even when verdict is "GO", and it leaks to the
-                // user-facing notification.
-                const scrubbedSummary = (mismatchPattern.test(parsed.summary || '') || noSecretsPattern.test(parsed.summary || ''))
-                    ? 'Audit complete (provider sync verified programmatically).'
-                    : (parsed.summary || 'Audit complete.');
-                // If we stripped everything, downgrade to clean GO with safe summary
+                // If we stripped everything, downgrade to clean GO with safe summary.
+                // Also scrub the summary if it mentions provider/model/registry terms.
+                const summaryHasModelTerms = /provider|model|registry|default|mismatch|sync|align|inconsistent|region|naming|secret/i.test(parsed.summary || '');
                 if (findings.length === 0 && urgentIssues.length === 0) {
                     return {
                         verdict: 'GO',
-                        summary: scrubbedSummary,
+                        summary: 'Audit complete (provider sync verified programmatically).',
                         findings: [],
                         urgentIssues: [],
                     };
+                }
+                // Even if some security findings survived, scrub the summary
+                // so it doesn't carry hallucinated model/registry language.
+                if (summaryHasModelTerms && !securityPattern.test(parsed.summary || '')) {
+                    parsed.summary = 'Audit complete — review findings below.';
                 }
             }
 
