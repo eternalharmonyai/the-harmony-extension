@@ -450,7 +450,7 @@ HEAVY-CODING DISCIPLINE (please follow these for sustained, productive sessions)
 
 ORCHESTRATION & STEERING (use these when the work is non-trivial):
   - For multi-step work (3+ distinct steps), call harmony_todo with action:"add" and items:[...] to externalize your plan up front. Then check items off with action:"check" as you complete them. The user can see this list live in the Harmony sidebar.
-    - When you are uncertain, stuck on a hard problem, or want a cross-check, call harmony_consult_model with provider (deepseek|alibaba|tencent|moonshot|gemini|openrouter|openai|claude|zhipu|zhipu-coding) and tier (light|mid|heavy|coding). Prefer cost-transparent routine routes first and use "heavy" sparingly for genuinely hard reasoning where a second opinion changes the outcome. Optional slot_index: 0=Chat (default), 1=Agents, 2=External, 3=Vision — use agents slot when calling provider-specific agent tools.
+    - When you are uncertain, stuck on a hard problem, or want a cross-check, call harmony_consult_model with provider (deepseek|alibaba|tencent|moonshot|kimiCode|gemini|openrouter|openai|claude|zhipu|zhipu-coding|doubao|doubao-coding|doubao-rewards|byteplus|byteplus-coding|stepfun) and tier (light|mid|heavy|coding). Prefer cost-transparent routine routes first and use "heavy" sparingly for genuinely hard reasoning where a second opinion changes the outcome. Optional slot_index: 0=Chat (default), 1=Agents, 2=External, 3=Vision — use agents slot when calling provider-specific agent tools.
   - When you need information from a specific URL the user mentioned, use harmony_fetch_url. Do not guess at URLs you don't have.
     - For focused sub-tasks ("summarize this file", "find the bug in these 3 functions", "draft this section"), use harmony_spawn_worker. Prefer role-based workers when provider/tier are not obvious: scout for lookup, researcher for evidence, planner for sequencing, implementer for change design, verifier for regression checks, critic for risk review, cost_sentinel for spend/provider risk, hard_reasoner only for genuinely difficult reasoning. Explicit provider/tier still override the selected Agents profile. Optional slot_index: 0=Chat, 1=Agents, 2=External, 3=Vision — use when workers need a specific provider key slot.
   - Auto-routing guidance: prefer LIGHT tier for trivial questions, lookups, and simple file reads. Use MID for code generation and analysis. Reserve HEAVY for: stuck moments, deep architectural decisions, or when light/mid produced a result you don't trust.`;
@@ -686,10 +686,15 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
         };
     }
     if (provider === 'gemini') {
+        // Gemini via OpenAI-compatible endpoint.
+        // Respect user's configured Gemini model (they may have overridden
+        // the coding tier to use gemini-3.1-pro-preview for heavier work).
+        const geminiModel = cfg.get<string>('providers.gemini.coding')?.trim()
+            || modelFor('gemini', 'coding');
         return {
             provider,
             label: 'Gemini',
-            model: modelFor('gemini', 'coding'),
+            model: geminiModel,
             baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
             secretKey: secretKeyFor('gemini'),
             tier: 'coding',
@@ -809,10 +814,12 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
         };
     }
     const model = modelFor(provider, 'coding');
-    // Moonshot/KimiCode K3 models return reasoning_content (like DeepSeek),
-    // so enable reasoning capture for them. Other providers default to false.
-    const isKimiReasoning = (provider === 'moonshot' || provider === 'kimiCode') &&
-                            (model === 'kimi-k3' || model === 'k3');
+    // Moonshot (api.moonshot.ai) K3 returns reasoning_content in the SSE delta
+    // just like DeepSeek, so we can capture and display it separately.
+    // KimiCode (api.kimi.com/coding/v1) embeds reasoning in delta.content instead —
+    // there is no separate reasoning_content field. We cannot split it.
+    // So only enable reasoning_content capture for Moonshot, NOT KimiCode.
+    const isMoonshotK3 = provider === 'moonshot' && (model === 'kimi-k3');
     return {
         provider,
         label: providerDisplayName(provider),
@@ -820,9 +827,9 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
         baseUrl: providerBaseUrlForCall(provider),
         secretKey: secretKeyFor(provider),
         tier: 'coding',
-        supportsReasoningContent: isKimiReasoning,
-        thinkingEnabled: isKimiReasoning,
-        showThinking: isKimiReasoning
+        supportsReasoningContent: isMoonshotK3,
+        thinkingEnabled: isMoonshotK3,
+        showThinking: isMoonshotK3
     };
 }
 
@@ -2337,6 +2344,13 @@ async function runDeepSeekAgent(
             stream_options: { include_usage: true }
         };
         if (route.supportsReasoningContent && (!thinkingEnabled || suppressThinkingForTurn)) requestBody.thinking = { type: 'disabled' };
+        // Gemini thinking models (3.6-flash) include a thought_signature in
+        // tool_call responses that must be preserved. The OpenAI-compatible
+        // endpoint doesn't carry it, causing HTTP 400 on multi-turn tool calls.
+        // Fix: disable thinking via thinking_budget=0 for Gemini.
+        if (route.provider === 'gemini') {
+            requestBody.thinking_config = { thinking_budget: 0 };
+        }
 
         debugLog(`[${route.label} Agent] step=${step + 1}/${limit.maxSteps} model=${model} messages=${messages.length} tools=${advertisedToolNames.length} tool_choice=${requestBody.tool_choice} thinking=${route.supportsReasoningContent ? requestBody.thinking?.type ?? 'enabled' : 'unsupported'}`);
 

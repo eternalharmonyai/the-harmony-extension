@@ -2337,7 +2337,7 @@ class ConsultModelTool implements vscode.LanguageModelTool<ConsultModelInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<ConsultModelInput>, token: vscode.CancellationToken) {
         const { provider, question } = options.input;
         const tier: Tier = options.input.tier ?? 'mid';
-        if (!provider) return textResult('error: missing argument: provider (deepseek|alibaba|tencent|moonshot|kimiCode|gemini|openrouter|openai|claude|zhipu)');
+        if (!provider) return textResult('error: missing argument: provider (deepseek|alibaba|tencent|moonshot|kimiCode|gemini|openrouter|openai|claude|zhipu|zhipu-coding|doubao|doubao-coding|doubao-rewards|byteplus|byteplus-coding|stepfun)');
         if (!question || !question.trim()) return textResult('error: missing argument: question');
         const ok = await confirmHeavyTier(provider, tier);
         if (!ok) return textResult('user denied heavy-tier consultation');
