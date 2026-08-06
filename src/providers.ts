@@ -277,12 +277,12 @@ export function providerDisplayName(provider: CollabDirectProvider): string {
         case 'tencent': return 'Tencent / Hunyuan';
         case 'zhipu': return 'Zhipu / GLM (Z.AI)';
         case 'zhipu-coding': return 'Zhipu Coding (Z.AI Coding Plan)';
-        case 'doubao': return 'Doubao / Volcengine (国内)';
-        case 'doubao-coding': return 'Doubao Coding Plan (编码计划)';
-        case 'doubao-rewards': return 'Doubao Rewards (协作激励)';
+        case 'doubao': return 'Doubao / Volcengine (Mainland China)';
+        case 'doubao-coding': return 'Doubao Coding Plan';
+        case 'doubao-rewards': return 'Doubao Rewards';
         case 'byteplus': return 'BytePlus / Doubao (International)';
         case 'byteplus-coding': return 'ByteDance Coding Plan (Intl)';
-        case 'stepfun': return 'StepFun / 阶跃星辰';
+        case 'stepfun': return 'StepFun';
     }
 }
 
@@ -302,10 +302,10 @@ export function providerDisplayNameZh(provider: CollabDirectProvider): string {
         case 'zhipu': return '智谱 GLM (Z.AI) — 通用大模型';
         case 'zhipu-coding': return '智谱编程计划 (Z.AI Coding Plan)';
         case 'doubao': return '字节跳动豆包 — 性价比极高，国内生态';
-        case 'doubao-coding': return '豆包编码计划 — 编程专精，订阅制';
-        case 'doubao-rewards': return '豆包协作激励计划 — 免费额度，需使用接入点';
-        case 'byteplus': return 'BytePlus 豆包 — 国际版，USD计费';
-        case 'byteplus-coding': return 'ByteDance 编码计划 — 国际版';
+        case 'doubao-coding': return '豆包编程计划 — 编程专精，订阅制';
+        case 'doubao-rewards': return '豆包奖励计划 — 免费额度，需接入点 ID';
+        case 'byteplus': return 'BytePlus 豆包 — 国际版，美元计费';
+        case 'byteplus-coding': return 'BytePlus 编程计划 — 国际版，编程专精';
         case 'stepfun': return '阶跃星辰 StepFun — MoE多模态，Agent/编程优化';
     }
 }
