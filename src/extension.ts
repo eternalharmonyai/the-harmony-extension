@@ -18,6 +18,7 @@ import { initializeErrorLearning } from './careBloom';
 import { registerProviderRegistryTools } from './providerRegistryTools';
 import { buildQuickPickEntries } from './providerModels';
 import { registerSwarmTools } from './swarmTools';
+import { registerExoskeletonTools } from './exoskeleton/exoskeletonTools';
 import { registerDeepOrchestrate } from './deepOrchestrate';
 import { getTemplateById, listTemplateIds, runPipeline, formatPipelineResult, detectPipelineType, checkSourceAuthenticity, generateDiffViewer, autoResolveTermDisputes, generateDisputeLedger, processBatch, convertFileToMarkdown, type DeepSwarmPipeline, type ProviderStrategy, type BatchSummary, getStrategyPreset } from './deepSwarm';
 import { buildWebsiteContext, type WebsiteSourceType } from './websiteContextBuilder';
@@ -1192,6 +1193,7 @@ export function activate(context: vscode.ExtensionContext) {
     registerResearchUpgradeTools(context);
     registerProviderRegistryTools(context);
     registerSwarmTools(context);
+    registerExoskeletonTools(context);
     registerDeepOrchestrate(context);
     registerSymbolTools(context);
 
