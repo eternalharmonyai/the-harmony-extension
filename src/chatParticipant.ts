@@ -1114,6 +1114,11 @@ interface DeepSeekToolCall {
         name: string;
         arguments: string;
     };
+    /** Google Gemini OpenAI-compat only: encrypted thought signature attached to
+     *  functionCall parts by thinking models (Gemini 2.5/3). Must be echoed back
+     *  on the assistant tool_calls message in the next request, or the API
+     *  returns HTTP 400 ("Function call is missing a thought_signature"). */
+    thought_signature?: string;
 }
 
 
@@ -1650,6 +1655,11 @@ async function callDeepSeekStreaming(
                         }
                         if (tc.function?.name) existing.function.name += tc.function.name;
                         if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
+                        // Gemini thinking models attach thought_signature to
+                        // functionCall parts; preserve it so the assistant
+                        // tool_calls echo-back includes it (missing → HTTP 400).
+                        const thoughtSig = tc.thought_signature ?? tc.thoughtSignature;
+                        if (thoughtSig) existing.thought_signature = thoughtSig;
                     }
                 }
             }
@@ -2344,12 +2354,20 @@ async function runDeepSeekAgent(
             stream_options: { include_usage: true }
         };
         if (route.supportsReasoningContent && (!thinkingEnabled || suppressThinkingForTurn)) requestBody.thinking = { type: 'disabled' };
-        // Gemini thinking models (3.6-flash) include a thought_signature in
-        // tool_call responses that must be preserved. The OpenAI-compatible
-        // endpoint doesn't carry it, causing HTTP 400 on multi-turn tool calls.
-        // Fix: disable thinking via thinking_budget=0 for Gemini.
+        // Gemini 2.5/3 thinking models attach a thought_signature to every
+        // functionCall part; the OpenAI-compatible endpoint requires it on
+        // multi-turn tool use, so we capture + echo it (see callDeepSeekStreaming
+        // and the assistant tool_calls push below). Thinking cannot be disabled
+        // on Gemini 3 models, so we minimize it via extra_body.google — the
+        // documented nesting for the OpenAI-compat REST endpoint.
         if (route.provider === 'gemini') {
-            requestBody.thinking_config = { thinking_budget: 0 };
+            requestBody.extra_body = {
+                google: {
+                    thinking_config: {
+                        thinking_level: 'minimal'
+                    }
+                }
+            };
         }
 
         debugLog(`[${route.label} Agent] step=${step + 1}/${limit.maxSteps} model=${model} messages=${messages.length} tools=${advertisedToolNames.length} tool_choice=${requestBody.tool_choice} thinking=${route.supportsReasoningContent ? requestBody.thinking?.type ?? 'enabled' : 'unsupported'}`);
