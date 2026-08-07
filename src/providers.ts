@@ -1374,7 +1374,7 @@ export async function discoverModels(
             case 'byteplus':
             case 'byteplus-coding': {
                 const cfg = vscode.workspace.getConfiguration('harmony');
-                const baseUrl = (cfg.get<string>('byteplus.baseUrl') ?? 'https://ark.byteplus.com/api/v3').replace(/\/$/, '');
+                const baseUrl = (cfg.get<string>('byteplus.baseUrl') ?? 'https://ark.ap-southeast.bytepluses.com/api/v3').replace(/\/$/, '');
                 url = `${baseUrl}/models`;
                 headers['Authorization'] = `Bearer ${apiKey}`;
                 break;
