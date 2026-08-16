@@ -279,7 +279,9 @@ async function createRequiredPreActionSnapshot(root: string, relativePaths: stri
     const id = `snapshot-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}-vscode`;
     const snapshotDir = path.join(root, '.harmony', 'snapshots', id);
     const filesDir = path.join(snapshotDir, 'files');
-    const maxBytes = 256 * 1024;
+    // Configurable max file size for pre-action snapshots (default 2MB)
+    const snapshotMaxBytes = vscode.workspace.getConfiguration('harmony').get<number>('snapshotMaxBytes') ?? (2 * 1024 * 1024);
+    const maxBytes = Math.max(256 * 1024, snapshotMaxBytes);
     const records: PreActionSnapshotRecord[] = [];
     const failures: string[] = [];
 
