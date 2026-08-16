@@ -443,20 +443,20 @@ export async function callGeminiNativeStreaming(
     // Convert tools → Gemini functionDeclarations
     const functionDeclarations = convertToolsToGemini(tools);
 
-    // Gemini 3 accepts thinkingLevel in generationConfig with values
-    // low/medium/high; map our 'minimal' → 'low' and drop invalid values
-    // (an unrecognized level would 400 the whole request).
-    const validThinkingLevels = ['low', 'medium', 'high'];
-    const normalizedThinkingLevel = validThinkingLevels.includes(thinkingLevel)
-        ? thinkingLevel
-        : (thinkingLevel === 'minimal' ? 'low' : undefined);
+    // Gemini's valid field is generationConfig.thinkingConfig.thinkingBudget
+    // (an integer). The old `thinkingLevel` string field does not exist in the
+    // API and 400s every native call. Map our level to a budget:
+    // high → 8192, low/minimal → 1024, anything else (medium) → 2048.
+    const thinkingBudget = thinkingLevel === 'high' ? 8192
+        : (thinkingLevel === 'low' || thinkingLevel === 'minimal') ? 1024
+        : 2048;
 
     // Build the generateContent request body
     const requestBody: any = {
         contents,
         generationConfig: {
             temperature,
-            ...(normalizedThinkingLevel ? { thinkingLevel: normalizedThinkingLevel } : {}),
+            thinkingConfig: { thinkingBudget },
         },
         tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
         toolConfig: functionDeclarations.length > 0 ? { functionCallingConfig: { mode: 'AUTO' } } : undefined,

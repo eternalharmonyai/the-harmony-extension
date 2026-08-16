@@ -19,6 +19,7 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'gemini-2.5-pro': 65536,
     'gemini-2.5-flash': 65536,
     'gemini-2.0-flash': 8192,
+    'gemini-3.7-flash': 65536,
     'qwen-max': 8192,
     'qwen-plus': 8192,
     'qwen-turbo': 8192,
@@ -26,6 +27,7 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'hy3-preview': 8192,
     'glm-5.1': 131072,
     'glm-5.2': 131072,
+    'glm-5.3': 131072,
     'glm-4-flash': 131072,
     'glm-4-plus': 131072,
     'glm-4-0520': 131072,
@@ -159,10 +161,10 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'hy3-preview'
     },
     gemini: {
-        light: 'gemini-3.6-flash',
-        mid: 'gemini-3.6-flash',
+        light: 'gemini-3.7-flash',
+        mid: 'gemini-3.7-flash',
         heavy: 'gemini-3.1-pro-preview',
-        coding: 'gemini-3.6-flash'
+        coding: 'gemini-3.7-flash'
     },
     openrouter: {
         light: 'tencent/hy3-preview',
@@ -185,14 +187,14 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
     zhipu: {
         light: 'glm-5.1',
         mid: 'glm-5.2',
-        heavy: 'glm-5.2',
-        coding: 'glm-5.2'
+        heavy: 'glm-5.3',
+        coding: 'glm-5.3'
     },
     'zhipu-coding': {
         light: 'glm-5.2',
         mid: 'glm-5.2',
-        heavy: 'glm-5.2',
-        coding: 'glm-5.2'
+        heavy: 'glm-5.3',
+        coding: 'glm-5.3'
     },
     doubao: {
         light: 'doubao-seed-2-1-turbo',
