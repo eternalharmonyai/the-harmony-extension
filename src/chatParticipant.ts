@@ -21,6 +21,7 @@ import { defaultVerificationCommand, defaultVerificationTimeoutSec, runVerificat
 import { LanguageManager } from './languageManager';
 import { tendGarden, scanUnresolvedSprouts, scanResolvedSprouts } from './careBloom';
 import { buildAliasMap, PROVIDER_REGISTRY } from './providerModels';
+import { callGeminiNativeStreaming, shouldUseGeminiNative, type OpenAICompatMessage } from './geminiNativeStreaming';
 
 /**
  * Global output channel for raw Harmony Agent logs.
@@ -360,8 +361,8 @@ async function modeAddendum(): Promise<string> {
             `\\n  - harmony_consult_model: single model consultation (read-only Q&A)` +
             `\\n  - harmony_spawn_worker: focused sub-task worker (read-only analysis)` +
             `\\n  - NOTE: harmony_swarm_dispatch is NOT pre-approved (can write receipt files)` +
-            `\\n  - BLOCKED CAPABILITIES: fs:write, terminal:execute, file mutations, state mutations` +
-            `\\n  - Even transitively through spawned workers — NO writes of any kind.` +
+            `\\n  - NOTE: this mode does NOT block writes or terminal commands` +
+            `\\n  - Mutating tools still require normal confirmation, exactly as outside this mode.` +
             `\\n  - If a task requires writing files or running commands, call the appropriate tool directly WITH confirmation.` +
             `\\n  - Budget: ${budget}. Audit trail active. Session timeout enforced.`);
     }
@@ -602,6 +603,68 @@ function stripReasoningFromDeepSeekMessages(messages: DeepSeekMessage[]): DeepSe
         const { reasoning_content, ...rest } = message;
         return rest;
     });
+}
+
+/**
+ * Gemini 3 thinking models attach an encrypted thought_signature to every
+ * functionCall part and REQUIRE it back on subsequent requests. Missing
+ * signatures cause HTTP 400 ("Function call is missing a thought_signature").
+ *
+ * If our streaming parser fails to capture a signature (field renamed, moved
+ * to a new SSE chunk location, etc.), this function converts the problematic
+ * assistant tool_calls into a plain-text description and merges the matching
+ * tool result messages into a single user message. This eliminates all
+ * functionCall parts from the request, so Gemini has nothing to reject.
+ *
+ * Only activates for Gemini and only when assistant tool_calls lack
+ * thought_signature. All other providers and signed tool calls pass through
+ * untouched.
+ */
+function geminiSanitizeMessages(messages: DeepSeekMessage[]): DeepSeekMessage[] {
+    // Quick scan: are there any unsigned assistant tool_calls?
+    const hasUnsignedCalls = messages.some(
+        m => m.role === 'assistant'
+            && Array.isArray(m.tool_calls)
+            && m.tool_calls!.length > 0
+            && !m.tool_calls!.some((tc: any) => tc.thought_signature)
+    );
+    if (!hasUnsignedCalls) return messages; // All good — no sanitization needed
+
+    debugLog('[Gemini Sanitize] found unsigned assistant tool_calls — converting to text format to prevent HTTP 400');
+    const result: DeepSeekMessage[] = [];
+    // Track tool_call_ids we've absorbed so we can skip their tool result messages
+    const absorbedToolCallIds = new Set<string>();
+
+    for (const msg of messages) {
+        if (msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+            const hasSignature = msg.tool_calls.some((tc: any) => tc.thought_signature);
+            if (hasSignature) {
+                // Keep as-is — signatures present
+                result.push(msg);
+                continue;
+            }
+
+            // Convert unsigned tool_calls to a text description
+            const callDescriptions = msg.tool_calls.map((tc: any) => {
+                const name = tc.function?.name ?? '(unknown)';
+                let args = '';
+                try { args = tc.function?.arguments ? JSON.stringify(JSON.parse(tc.function.arguments)) : '{}'; } catch { args = tc.function?.arguments ?? '{}'; }
+                absorbedToolCallIds.add(tc.id);
+                return `[Tool call: ${name}(${args})]`;
+            });
+            const textContent = [msg.content, ...callDescriptions].filter(Boolean).join('\n');
+            result.push({ role: 'assistant', content: textContent || '[tool calls converted to text]' });
+        } else if (msg.role === 'tool' && msg.tool_call_id && absorbedToolCallIds.has(msg.tool_call_id)) {
+            // Merge this tool result into the previous message as a user message
+            const mergedResult = `[Tool result for ${msg.tool_call_id}]: ${msg.content ?? '(empty)'}`;
+            result.push({ role: 'user', content: mergedResult });
+        } else {
+            result.push(msg);
+        }
+    }
+
+    debugLog(`[Gemini Sanitize] converted ${absorbedToolCallIds.size} unsigned tool call(s) to text format`);
+    return result;
 }
 
 function deepSeekTierForModel(model: string): 'mid' | 'heavy' {
@@ -1628,7 +1691,38 @@ async function callDeepSeekStreaming(
                     };
                 }
 
-                const delta = parsed?.choices?.[0]?.delta;
+                const choice = parsed?.choices?.[0];
+                const delta = choice?.delta;
+
+                // ── Gemini thought_signature capture (multi-location) ──────────
+                // Gemini 3 thinking models attach an encrypted thought_signature
+                // to functionCall parts and REQUIRES it on the next request's
+                // assistant tool_calls. The OpenAI-compat endpoint may surface
+                // it at several locations depending on model/endpoint version:
+                //   1. Inside each tool_call delta:  delta.tool_calls[].thought_signature
+                //   2. On the delta itself:          delta.thought_signature
+                //   3. On the choice/finish level:    choice.thought_signature
+                //   4. On the full message:           choice.message.thought_signature
+                // We check ALL of these so we never miss the field.
+                if (route.provider === 'gemini') {
+                    const choiceSig = (choice as any)?.thought_signature
+                        ?? (choice as any)?.thoughtSignature
+                        ?? (choice?.message as any)?.thought_signature
+                        ?? (choice?.message as any)?.thoughtSignature;
+                    const deltaSig = delta?.thought_signature ?? delta?.thoughtSignature;
+
+                    // If a signature arrives at the choice/delta/message level
+                    // (not inside a specific tool_call), attach it to the most
+                    // recently created tool_call at index 0 (the common case).
+                    if ((choiceSig || deltaSig) && toolCallsByIndex.size > 0) {
+                        const first = toolCallsByIndex.get(0);
+                        if (first && !first.thought_signature) {
+                            first.thought_signature = choiceSig || deltaSig;
+                            debugLog(`[Gemini Stream] captured thought_signature at ${choiceSig ? 'choice' : 'delta'} level for tool_call[0]`);
+                        }
+                    }
+                }
+
                 if (!delta) continue;
 
                 if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
@@ -1658,8 +1752,14 @@ async function callDeepSeekStreaming(
                         // Gemini thinking models attach thought_signature to
                         // functionCall parts; preserve it so the assistant
                         // tool_calls echo-back includes it (missing → HTTP 400).
-                        const thoughtSig = tc.thought_signature ?? tc.thoughtSignature;
-                        if (thoughtSig) existing.thought_signature = thoughtSig;
+                        // Check all known field name variants.
+                        const thoughtSig = tc.thought_signature
+                            ?? tc.thoughtSignature
+                            ?? tc.signature;
+                        if (thoughtSig) {
+                            existing.thought_signature = thoughtSig;
+                            debugLog(`[Gemini Stream] captured thought_signature inside tool_call[${idx}]`);
+                        }
                     }
                 }
             }
@@ -2345,9 +2445,15 @@ async function runDeepSeekAgent(
         // Moonshot/Kimi k2.7+ requires temperature=1.0 or omitting it entirely;
         // other providers work fine with 0.2 for deterministic agent behavior.
         const needsStrictTemp = route.provider === 'moonshot' || route.provider === 'kimiCode';
+        // Gemini requires thought_signature on replayed tool_calls. Our
+        // streaming parser captures them, but as a safety net, sanitize any
+        // unsigned tool_calls to text BEFORE sending (prevents HTTP 400).
+        const sanitizedMessages = route.provider === 'gemini'
+            ? geminiSanitizeMessages(messages)
+            : messages;
         const requestBody: any = {
             model,
-            messages,
+            messages: sanitizedMessages,
             tools,
             tool_choice: 'auto',
             ...(needsStrictTemp ? {} : { temperature: 0.2 }),
@@ -2393,22 +2499,55 @@ async function runDeepSeekAgent(
         // Dispatch to provider-specific streaming function
         const isTencentNative = !!(route.tencentNativeCreds);
         const callStream = route.provider === 'claude' ? callAnthropicStreaming : callDeepSeekStreaming;
+        // Gemini native generateContent path (Phase 2): handles thought_signatures
+        // as first-class metadata, eliminating the HTTP 400 errors that plagued
+        // the OpenAI-compat endpoint. Falls back to compat on failure.
+        const geminiNativePref = vscode.workspace.getConfiguration('harmony').get<string>('gemini.api') ?? 'auto';
+        const useGeminiNative = route.provider === 'gemini'
+            && shouldUseGeminiNative(model, geminiNativePref);
         try {
-            if (isTencentNative) {
+            if (useGeminiNative) {
+                // ── Gemini native generateContent path ──
+                // Pass the UNSANITIZED messages — native handles thought_signatures natively.
+                // The sanitizer is only needed for the OpenAI-compat fallback.
+                result = await callGeminiNativeStreaming(
+                    model,
+                    apiKey,
+                    messages as OpenAICompatMessage[],
+                    tools,
+                    token,
+                    handleDelta
+                );
+            } else if (isTencentNative) {
                 result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, requestBody, token, handleDelta);
             } else {
                 result = await callStream(route, apiKey, requestBody, token, handleDelta);
             }
         } catch (e: any) {
             const message = e?.message ?? String(e);
-            if (route.supportsReasoningContent && thinkingEnabled && message.includes('reasoning_content')) {
+            // ── Gemini native → compat fallback ──
+            // If the native path fails (network, model not found, etc.), fall back
+            // to the OpenAI-compat endpoint with the sanitizer safety net.
+            if (useGeminiNative && !token.isCancellationRequested && !networkRetried) {
+                debugLog(`[Gemini Native → Compat Fallback] native path failed: ${message}. Falling back to OpenAI-compat with sanitizer.`);
+                stream.markdown('\n\n> _([Gemini native path unavailable — using compat fallback](debug:gemini-native-fallback))_\n\n');
+                networkRetried = true;
+                assistantTextSoFar = stepTextBefore;
+                reasoningTextSoFar = stepReasoningBefore;
+                bufferedReasoning = '';
+                emittedThinking = false;
+                result = await callStream(route, apiKey, requestBody, token, handleDelta);
+            } else if (route.supportsReasoningContent && thinkingEnabled && message.includes('reasoning_content')) {
                 suppressThinkingForTurn = true;
                 stream.markdown(`\n\n> ${route.label} asked for prior thinking metadata that was not available in this chat history. Retrying this turn with thinking disabled.\n\n`);
                 bufferedReasoning = '';
                 emittedThinking = false;
+                const retryMessages = route.provider === 'gemini'
+                    ? geminiSanitizeMessages(messages)
+                    : stripReasoningFromDeepSeekMessages(messages);
                 const retryBody = {
                     ...requestBody,
-                    messages: stripReasoningFromDeepSeekMessages(messages),
+                    messages: retryMessages,
                     thinking: { type: 'disabled' }
                 };
                 if (isTencentNative) {
@@ -3280,8 +3419,9 @@ function decoratePromptForCommand(request: vscode.ChatRequest): vscode.ChatReque
 }
 
 function shouldForceReadOnly(request: vscode.ChatRequest): boolean {
-    if (request.command === 'plan' || request.command === 'review' || request.command === 'analyze' || request.command === 'research') return true;
-    return /\b(no edits?|do not edit|don't edit|without editing|only analyze|analysis only|read[- ]only)\b/i.test(request.prompt);
+    // Read-only is triggered ONLY by explicit slash commands — never by message content.
+    // Free-text sniffing here caused unintended mid-session tool blocking.
+    return request.command === 'plan' || request.command === 'review' || request.command === 'analyze' || request.command === 'research';
 }
 
 interface AgentStepLimit {

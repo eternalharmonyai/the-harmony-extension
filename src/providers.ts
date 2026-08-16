@@ -172,8 +172,8 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
     },
     openai: {
         light: 'gpt-5-mini',
-        mid: 'gpt-5',
-        heavy: 'o4',
+        mid: 'gpt-5.5',
+        heavy: 'gpt-5.6',
         coding: 'gpt-5-mini'
     },
     claude: {
@@ -185,7 +185,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
     zhipu: {
         light: 'glm-5.1',
         mid: 'glm-5.2',
-        heavy: 'glm-4-plus',
+        heavy: 'glm-5.2',
         coding: 'glm-5.2'
     },
     'zhipu-coding': {

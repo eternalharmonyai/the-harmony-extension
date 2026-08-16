@@ -35,6 +35,13 @@ export interface ModelMeta {
     aliases?: string[];
     /** Longer description for QuickPick details panel */
     detail?: string;
+    /**
+     * Featured/current models appear in the SIDEBAR DROPDOWN (curated).
+     * Legacy models set featured:false stay available in the model selector
+     * (QuickPick shows ALL models, old + new) but are hidden from the dropdown.
+     * Defaults to true.
+     */
+    featured?: boolean;
 }
 
 export interface ProviderDisplayMeta {
@@ -93,6 +100,7 @@ const GEMINI_MODELS: ModelMeta[] = [
 const ZHIPU_MODELS: ModelMeta[] = [
     { id: 'glm-5.1', label: 'glm-5.1 (fast, light)', labelZh: 'glm-5.1（快速轻量）' },
     { id: 'glm-5.2', label: 'glm-5.2 (balanced, capable)', labelZh: 'glm-5.2（均衡强大）', aliases: ['glm', 'zhipu'] },
+    { id: 'glm-4-plus', label: 'glm-4-plus (legacy flagship, heavy)', labelZh: 'glm-4-plus（上一代旗舰）', aliases: ['glm-4', 'zhipu-4'], detail: 'Older GLM flagship. Available in the model selector; hidden from the dropdown.', featured: false },
 ];
 
 const ZHIPU_CODING_MODELS: ModelMeta[] = [
@@ -102,16 +110,22 @@ const ZHIPU_CODING_MODELS: ModelMeta[] = [
 
 const OPENAI_MODELS: ModelMeta[] = [
     { id: 'gpt-5-mini', label: 'gpt-5-mini (fast, efficient)', labelZh: 'gpt-5-mini（快速高效）', aliases: ['gpt', 'openai'] },
-    { id: 'gpt-5', label: 'gpt-5 (most capable)', labelZh: 'gpt-5（综合最强）', aliases: ['gpt-5'] },
+    { id: 'gpt-5.5', label: 'gpt-5.5 (balanced mid)', labelZh: 'gpt-5.5（均衡实用）', aliases: ['gpt-5.5'], detail: 'Current OpenAI mid-tier model. Uses your OpenAI API key.' },
+    { id: 'gpt-5.6', label: 'gpt-5.6 (flagship heavy)', labelZh: 'gpt-5.6（旗舰，综合最强）', aliases: ['gpt-5.6'], detail: 'Current OpenAI flagship for the heaviest turns. Uses your OpenAI API key.' },
+    { id: 'gpt-5', label: 'gpt-5 (previous flagship)', labelZh: 'gpt-5（上一代旗舰）', aliases: ['gpt-5'], detail: 'Previous-generation OpenAI flagship. Kept for compatibility; prefer gpt-5.5/5.6.' },
+    { id: 'o4', label: 'o4 (legacy reasoning, heavy)', labelZh: 'o4（上一代推理旗舰）', aliases: ['o4'], detail: 'Legacy GPT-5 reasoning model. Available in the model selector; hidden from the dropdown.', featured: false },
 ];
 
 const CLAUDE_MODELS: ModelMeta[] = [
+    { id: 'claude-opus-4', label: 'claude-opus-4 (most capable)', labelZh: 'claude-opus-4（综合最强）', aliases: ['claude-opus', 'opus'], detail: 'Most capable Anthropic model for hardest reasoning. Uses your Anthropic API key.' },
     { id: 'claude-sonnet-4', label: 'claude-sonnet-4 (balanced, coding)', labelZh: 'claude-sonnet-4（均衡，编程强）', aliases: ['claude', 'claude-sonnet-4'] },
     { id: 'claude-haiku-4', label: 'claude-haiku-4 (fast, light)', labelZh: 'claude-haiku-4（快速轻量）', aliases: ['claude-haiku-4'] },
 ];
 
 const OPENROUTER_MODELS: ModelMeta[] = [
     { id: 'Qwen/Qwen3-235B-A22B-fp8-tput', label: 'Qwen3-235B (routed)', labelZh: 'Qwen3-235B（路由）', aliases: ['openrouter'] },
+    { id: 'tencent/hy3-preview', label: 'Tencent HY3 (routed)', labelZh: '腾讯 HY3（路由）', detail: 'Tencent Hunyuan 3 via OpenRouter. Uses your OpenRouter API key.' },
+    { id: 'deepseek/deepseek-r1:free', label: 'DeepSeek R1 free (routed)', labelZh: 'DeepSeek R1 免费版（路由）', detail: 'Free DeepSeek R1 via OpenRouter. Rate-limited; uses your OpenRouter API key.' },
 ];
 
 const DOUBAO_MODELS: ModelMeta[] = [
@@ -339,11 +353,15 @@ export interface SidebarModelOption {
 export function buildSidebarModelOptions(): Record<string, SidebarModelOption[]> {
     const result: Record<string, SidebarModelOption[]> = {};
     for (const provider of PROVIDER_REGISTRY) {
-        result[provider.id] = provider.models.map(m => ({
-            value: m.id,
-            label: m.label,
-            labelZh: m.labelZh,
-        }));
+        // Sidebar dropdown shows current/featured models only (curated).
+        // The model selector (buildQuickPickEntries) shows ALL models, old + new.
+        result[provider.id] = provider.models
+            .filter(m => m.featured !== false)
+            .map(m => ({
+                value: m.id,
+                label: m.label,
+                labelZh: m.labelZh,
+            }));
     }
     return result;
 }
