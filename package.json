@@ -9032,6 +9032,11 @@
           "maximum": 300000,
           "description": "Maximum characters of prior chat history to replay into DeepSeek direct API calls after sanitizing assistant output. Set 0 to disable history replay."
         },
+        "harmony.parallelToolBatching": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run independent read-only tool calls (file reads, git reads) concurrently within a single turn to reduce latency. Disable if you observe any tool-ordering issues."
+        },
         "harmony.logRawStream": {
           "type": "boolean",
           "default": false,
