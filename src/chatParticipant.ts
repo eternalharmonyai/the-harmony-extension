@@ -1552,26 +1552,45 @@ function deepSeekMessageSize(message: DeepSeekMessage): number {
         + (message.tool_calls ? JSON.stringify(message.tool_calls).length : 0);
 }
 
+// Stable-prefix anchor: the first N history turns are always kept, so the
+// message prefix (system + head) is deterministic across turns and stays in
+// DeepSeek's context cache. The tail carries recent state; the middle is dropped.
+const DEEPSEEK_HEAD_MESSAGES = 2;
+
 function trimDeepSeekHistoryMessages(historyMessages: DeepSeekMessage[]): DeepSeekMessage[] {
     const limits = deepSeekHistoryLimits();
-    const byMessage = limits.maxMessages > 0
-        ? historyMessages.slice(-limits.maxMessages)
-        : [];
-    if (limits.maxChars <= 0) {
-        debugLog(`[DeepSeek History] replayed=${byMessage.length}/${historyMessages.length} maxMessages=${limits.maxMessages} maxChars=0`);
+    if (limits.maxMessages <= 0 || limits.maxChars <= 0) {
+        debugLog(`[DeepSeek History] replayed=0/${historyMessages.length} maxMessages=${limits.maxMessages} maxChars=${limits.maxChars} (disabled)`);
+        return [];
+    }
+    if (historyMessages.length === 0) {
         return [];
     }
 
-    const kept: DeepSeekMessage[] = [];
-    let totalChars = 0;
-    for (let index = byMessage.length - 1; index >= 0; index--) {
-        const message = byMessage[index];
+    // "Truncate from the middle": keep a fixed head (stable cache prefix) plus
+    // the most recent tail, dropping the middle turns.
+    const headCount = Math.min(DEEPSEEK_HEAD_MESSAGES, historyMessages.length, limits.maxMessages);
+    const head = historyMessages.slice(0, headCount);
+    let headChars = 0;
+    for (const message of head) headChars += deepSeekMessageSize(message);
+
+    const tailSource = historyMessages.slice(headCount);
+    const tailMessageBudget = Math.max(0, limits.maxMessages - headCount);
+    const tailCharBudget = Math.max(0, limits.maxChars - headChars);
+
+    const tail: DeepSeekMessage[] = [];
+    let tailChars = 0;
+    for (let index = tailSource.length - 1; index >= 0; index--) {
+        const message = tailSource[index];
         const size = deepSeekMessageSize(message);
-        if (kept.length > 0 && totalChars + size > limits.maxChars) break;
-        kept.unshift(message);
-        totalChars += size;
+        if (tail.length >= tailMessageBudget) break;
+        if (tail.length > 0 && tailChars + size > tailCharBudget) break;
+        tail.unshift(message);
+        tailChars += size;
     }
-    debugLog(`[DeepSeek History] replayed=${kept.length}/${historyMessages.length} chars=${totalChars} maxMessages=${limits.maxMessages} maxChars=${limits.maxChars}`);
+
+    const kept = [...head, ...tail];
+    debugLog(`[DeepSeek History] replayed=${kept.length}/${historyMessages.length} head=${head.length} tail=${tail.length} chars=${headChars + tailChars} maxMessages=${limits.maxMessages} maxChars=${limits.maxChars}`);
     return kept;
 }
 
