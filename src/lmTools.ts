@@ -607,6 +607,9 @@ interface WriteFileInput { path: string; content: string; }
 
 class WriteFileTool implements vscode.LanguageModelTool<WriteFileInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<WriteFileInput>) {
+        if (vscode.workspace.getConfiguration('harmony').get<boolean>('planOnlyMode') ?? false) {
+            return textResult('error: plan-only mode is enabled; write_file is not allowed.');
+        }
         const { path: p, content } = options.input;
         if (!p || content === undefined) return textResult('error: missing argument: path or content');
         const resolved = resolveWorkspacePath(p);
@@ -827,6 +830,9 @@ async function runBackgroundTerminal(command: string, cwd: string | undefined, m
 
 class RunTerminalTool implements vscode.LanguageModelTool<RunTerminalInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<RunTerminalInput>) {
+        if (vscode.workspace.getConfiguration('harmony').get<boolean>('planOnlyMode') ?? false) {
+            return textResult('error: plan-only mode is enabled; run_terminal is not allowed.');
+        }
         const mode = (options.input as any).mode ?? 'run';
         if (mode === 'send') return this.sendToSession(options);
         if (mode === 'output') return this.readSessionOutput(options);
@@ -1974,6 +1980,9 @@ export interface EditFileInput {
 
 class EditFileTool implements vscode.LanguageModelTool<EditFileInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<EditFileInput>) {
+        if (vscode.workspace.getConfiguration('harmony').get<boolean>('planOnlyMode') ?? false) {
+            return textResult('error: plan-only mode is enabled; edit_file is not allowed.');
+        }
         const { path: p, old_string, new_string, expected_occurrences } = options.input;
         if (!p || old_string === undefined || new_string === undefined) {
             return textResult('error: missing argument: path, old_string, or new_string');
@@ -2037,6 +2046,9 @@ export interface ApplyPatchInput { path: string; hunks: PatchHunk[]; }
 
 class ApplyPatchTool implements vscode.LanguageModelTool<ApplyPatchInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<ApplyPatchInput>) {
+        if (vscode.workspace.getConfiguration('harmony').get<boolean>('planOnlyMode') ?? false) {
+            return textResult('error: plan-only mode is enabled; apply_patch is not allowed.');
+        }
         const { path: p, hunks } = options.input;
         if (!p || !Array.isArray(hunks) || hunks.length === 0) {
             return textResult('error: missing argument: path or hunks (must be non-empty array)');

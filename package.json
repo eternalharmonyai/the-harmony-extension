@@ -9589,6 +9589,24 @@
           "default": "",
           "description": "Override Gemini coding-tier model (default gemini-3.5-flash)."
         },
+        "harmony.gemini.api": {
+          "type": "string",
+          "enum": ["auto", "generateContent", "openai-compat"],
+          "default": "auto",
+          "description": "Gemini API dialect. auto uses native generateContent for thinking models. generateContent forces native. openai-compat forces compat."
+        },
+        "harmony.gemini.thinking.level": {
+          "type": "string",
+          "enum": ["minimal", "low", "medium", "high"],
+          "default": "medium",
+          "description": "Gemini thinking level for native generateContent API."
+        },
+        "harmony.gemini.safety.preset": {
+          "type": "string",
+          "enum": ["default", "permissive"],
+          "default": "permissive",
+          "description": "Gemini safety settings. permissive sets BLOCK_NONE (recommended for agent loops)."
+        },
         "harmony.providers.claude.light": {
           "type": "string",
           "default": "",
