@@ -1116,7 +1116,8 @@ async function resolveReferences(refs: readonly vscode.ChatPromptReference[]): P
             }
         } catch { /* ignore */ }
     }
-    return out;
+    // Deterministic order → stable DeepSeek context prefix (cache-friendly).
+    return out.sort((a, b) => a.localeCompare(b));
 }
 
 /** Optional: store a turn in the local Harmony memory hub for semantic cross-session recall. */
