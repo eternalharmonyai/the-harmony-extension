@@ -821,6 +821,7 @@ async function runBackgroundTerminal(command: string, cwd: string | undefined, m
         const stderr = await fs.readFile(stderrPath, 'utf8').catch(() => '');
         const tail = [stdout.trim(), stderr.trim() ? `[stderr]\n${stderr.trim()}` : ''].filter(Boolean).join('\n');
         const managedPath = await writeManagedProcessRecord(root, { pid: proc.pid, command: redactedCommand, cwd, stdoutPath, stderrPath, metadata }).catch(() => undefined);
+        await recordEffect({ kind: 'spawn', target: redactedCommand, action: 'spawn', compensating: proc.pid ? `kill ${proc.pid}` : undefined, notes: `background process; managed record: ${managedPath ?? '(none)'}` }).catch(() => undefined);
         return [
             `started background command${proc.pid ? ` (pid ${proc.pid})` : ''}`,
             `cwd: ${cwd ?? root}`,
@@ -863,8 +864,9 @@ class RunTerminalTool implements vscode.LanguageModelTool<RunTerminalInput> {
             } catch (error) { return lockErrorResult(error) ?? textResult(`error: ${(error as Error)?.message ?? String(error)}`); }
         }
         return await new Promise<vscode.LanguageModelToolResult>((resolve) => {
-            const proc = cp.exec(command, { cwd, timeout: timeoutSec * 1000, windowsHide: true, maxBuffer: 30 * 1024 * 1024 }, (err, stdout, stderr) => {
+            const proc = cp.exec(command, { cwd, timeout: timeoutSec * 1000, windowsHide: true, maxBuffer: 30 * 1024 * 1024 }, async (err, stdout, stderr) => {
                 const out = redactTerminalText((stdout || '') + (stderr ? `\n[stderr]\n${stderr}` : ''));
+                await recordEffect({ kind: 'terminal', target: command, action: 'exec', compensating: undefined, notes: err ? ((err as any).killed ? `timed out after ${timeoutSec}s` : `error: ${String(err)}`) : 'completed' }).catch(() => undefined);
                 if (err && (err as any).killed) { resolve(textResult(`timed out after ${timeoutSec}s\n${out}\n\nIf this is a dev server or watcher, rerun with background:true so Harmony does not kill it at timeout.`)); return; }
                 resolve(textResult([notes, out || (err ? String(err) : '(no output)')].filter(Boolean).join('\n')));
             });
