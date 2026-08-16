@@ -5,6 +5,8 @@ import * as cp from 'child_process';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { withOperationLock } from './operationLocks';
+import { listEffects, formatEffects, recordEffect } from './effectLedger';
+import { createRequiredPreActionSnapshot, formatSnapshotNote, restoreSnapshotFiles } from './snapshotUtils';
 
 const MAX_RESULT_CHARS = 60000;
 const DEFAULT_SCAN_EXCLUDES = [
@@ -873,12 +875,13 @@ class ProcessRegistryTool implements vscode.LanguageModelTool<ProcessRegistryInp
 }
 
 interface OperationLedgerInput {
-    action?: 'list' | 'append' | 'snapshot';
+    action?: 'list' | 'append' | 'snapshot' | 'effects' | 'rollback';
     label?: string;
     kind?: string;
     status?: string;
     notes?: string;
     limit?: number;
+    effect_id?: string;
     format?: 'markdown' | 'json';
 }
 
@@ -930,6 +933,33 @@ async function currentOperationSignals(): Promise<{ activeLocks: string[]; termi
 class OperationLedgerTool implements vscode.LanguageModelTool<OperationLedgerInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<OperationLedgerInput>) {
         const action = options.input.action ?? 'list';
+        if (action === 'effects') {
+            const effects = await listEffects(Number(options.input.limit) || 50);
+            return textResult(`# Harmony Effect Ledger\n\nUpdated: ${new Date().toISOString()}\n\n${formatEffects(effects)}`);
+        }
+        if (action === 'rollback') {
+            const root = workspaceRoot();
+            if (!root) return textResult('error: no workspace folder is open');
+            if (planOnlyMode()) return textResult('error: plan-only mode is enabled; rollback is not allowed.');
+            const effects = await listEffects(500);
+            const targetId = options.input.effect_id?.trim();
+            if (targetId && effects[0] && targetId !== effects[0].id) {
+                return textResult(`error: only the most recent effect can be rolled back safely (roll back newer effects first). Requested ${targetId}, latest is ${effects[0].id}.`);
+            }
+            const effect = effects[0];
+            if (!effect) return textResult('error: no matching effect found to roll back');
+            if (effect.kind !== 'file' || !effect.inverse) {
+                return textResult(`effect ${effect.id} (${effect.kind}) has no automatic rollback.${effect.compensating ? ` Compensating action: ${effect.compensating}` : ''}`);
+            }
+            const beforeRestore = await createRequiredPreActionSnapshot(root, [effect.target], `rollback of ${effect.id} (${effect.action} ${effect.target})`, 'vscode');
+            if (!beforeRestore.ok) return textResult(beforeRestore.message);
+            const result = await restoreSnapshotFiles(root, effect.inverse);
+            await recordEffect({ kind: 'file', target: effect.target, action: 'rollback', inverse: beforeRestore.snapshot?.id, compensating: beforeRestore.snapshot?.restoreCommand, notes: `rolled back ${effect.id}` }).catch(() => undefined);
+            const restored = result.restored.length ? result.restored.join(', ') : '(none)';
+            const skipped = result.skipped.length ? result.skipped.join(', ') : '(none)';
+            const missing = result.missing.length ? result.missing.join(', ') : '(none)';
+            return textResult(`rolled back ${effect.action} on ${effect.target}:\n- restored: ${restored}\n- skipped: ${skipped}\n- missing: ${missing}${formatSnapshotNote(beforeRestore.snapshot)}`);
+        }
         let ledger = await readOperationLedger();
         let writtenPath: string | undefined;
         let skippedWrite: string | undefined;
@@ -971,7 +1001,16 @@ class OperationLedgerTool implements vscode.LanguageModelTool<OperationLedgerInp
 
     async prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<OperationLedgerInput>) {
         const action = options.input.action ?? 'list';
-        if (action === 'list') return { invocationMessage: 'Reading operation ledger' };
+        if (action === 'list' || action === 'effects') return { invocationMessage: action === 'effects' ? 'Reading effect ledger' : 'Reading operation ledger' };
+        if (action === 'rollback') {
+            return {
+                invocationMessage: 'Rolling back effect',
+                confirmationMessages: {
+                    title: 'Roll back this effect?',
+                    message: new vscode.MarkdownString('Harmony wants to restore the pre-mutation file state. This rollback is itself recorded and reversible.')
+                }
+            };
+        }
         return {
             invocationMessage: `${action} operation ledger`,
             confirmationMessages: {

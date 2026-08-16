@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as cp from 'child_process';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import { recordEffect } from './effectLedger';
 import { consult, confirmHeavyTier, ProviderId, resolveCollabModel, Tier, modelFor } from './providers';
 import { addTodos, checkTodo, removeTodo, clearTodos, loadTodos, formatTodos } from './todoStore';
 import { HarmonyAskOptions, showHarmonyAsk } from './askView';
@@ -626,6 +627,7 @@ class WriteFileTool implements vscode.LanguageModelTool<WriteFileInput> {
             await fs.writeFile(resolved, content, 'utf8');
             const verifyError = await verifyTextOnDisk(p, resolved, content);
             if (verifyError) return textResult(verifyError);
+            await recordEffect({ kind: 'file', target: p, action: 'write', inverse: snapshot.snapshot?.id, compensating: snapshot.snapshot?.restoreCommand }).catch(() => undefined);
             return textResult(`verified write of ${String(content).length} chars to ${p}${formatSnapshotNote(snapshot.snapshot)}`);
         } catch (e: any) {
             return textResult(`error: ${e?.message ?? String(e)}`);
@@ -2011,6 +2013,7 @@ class EditFileTool implements vscode.LanguageModelTool<EditFileInput> {
             if (!snapshot.ok) return textResult(snapshot.message);
             const patchResult = await patchSafeFullFile(p, resolved, originalBuffer, original, updated);
             if (patchResult.startsWith('error:')) return textResult(patchResult);
+            await recordEffect({ kind: 'file', target: p, action: 'edit', inverse: snapshot.snapshot?.id, compensating: snapshot.snapshot?.restoreCommand }).catch(() => undefined);
             const oldLines = old_string.split('\n');
             const newLines = new_string.split('\n');
             const previewOld = oldLines.slice(0, 8).map(l => '- ' + l).join('\n');
@@ -2085,6 +2088,7 @@ class ApplyPatchTool implements vscode.LanguageModelTool<ApplyPatchInput> {
             if (!snapshot.ok) return textResult(snapshot.message);
             const patchResult = await patchSafeFullFile(p, resolved, originalBuffer, original, updated);
             if (patchResult.startsWith('error:')) return textResult(patchResult);
+            await recordEffect({ kind: 'file', target: p, action: 'patch', inverse: snapshot.snapshot?.id, compensating: snapshot.snapshot?.restoreCommand }).catch(() => undefined);
             const totalDelta = updated.length - original.length;
             return textResult(
                 `${patchResult}${formatSnapshotNote(snapshot.snapshot)}\nvalidated ${hunks.length} hunk${hunks.length === 1 ? '' : 's'} atomically before write (Δ ${totalDelta >= 0 ? '+' : ''}${totalDelta} chars).\n` +
