@@ -92,7 +92,8 @@ const TENCENT_MODELS: ModelMeta[] = [
 
 const GEMINI_MODELS: ModelMeta[] = [
     { id: 'gemini-3.5-flash', label: 'gemini-3.5-flash (fast, multimodal)', labelZh: 'gemini-3.5-flash（快速，多模态）', aliases: ['gemini', 'gemini-3.5'], detail: 'Google Gemini 3.5 Flash via OpenAI-compatible endpoint. Uses your Gemini API key.' },
-    { id: 'gemini-3.6-flash', label: 'gemini-3.6-flash (newest, fast, multimodal)', labelZh: 'gemini-3.6-flash（最新，快速，多模态）', aliases: ['gemini-3.6', 'g36'], detail: 'Google Gemini 3.6 Flash — newest release. Uses your Gemini API key.' },
+    { id: 'gemini-3.6-flash', label: 'gemini-3.6-flash (fast, multimodal)', labelZh: 'gemini-3.6-flash（快速，多模态）', aliases: ['gemini-3.6', 'g36'], detail: 'Google Gemini 3.6 Flash. Uses your Gemini API key.' },
+    { id: 'gemini-3.7-flash', label: 'gemini-3.7-flash (newest, fast, multimodal)', labelZh: 'gemini-3.7-flash（最新，快速，多模态）', aliases: ['gemini-3.7', 'g37'], detail: 'Google Gemini 3.7 Flash — newest release. Uses your Gemini API key.' },
     { id: 'gemini-3.1-flash-lite', label: 'gemini-3.1-flash-lite (lightest, cheapest)', labelZh: 'gemini-3.1-flash-lite（最轻量）', aliases: ['gemini-lite', 'glite'], detail: 'Lightest Gemini model for routine tasks.' },
     { id: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview (most capable)', labelZh: 'gemini-3.1-pro-preview（综合最强）', aliases: ['gemini-pro', 'gpro'], detail: 'Most capable Gemini Pro model.' },
 ];
@@ -100,10 +101,12 @@ const GEMINI_MODELS: ModelMeta[] = [
 const ZHIPU_MODELS: ModelMeta[] = [
     { id: 'glm-5.1', label: 'glm-5.1 (fast, light)', labelZh: 'glm-5.1（快速轻量）' },
     { id: 'glm-5.2', label: 'glm-5.2 (balanced, capable)', labelZh: 'glm-5.2（均衡强大）', aliases: ['glm', 'zhipu'] },
+    { id: 'glm-5.3', label: 'glm-5.3 (flagship, heavy/coding)', labelZh: 'glm-5.3（旗舰，重推理/编程）', aliases: ['glm-5.3', 'glm5.3'], detail: 'GLM 5.3 flagship for heavy reasoning and coding. Uses your Zhipu API key.' },
     { id: 'glm-4-plus', label: 'glm-4-plus (legacy flagship, heavy)', labelZh: 'glm-4-plus（上一代旗舰）', aliases: ['glm-4', 'zhipu-4'], detail: 'Older GLM flagship. Available in the model selector; hidden from the dropdown.', featured: false },
 ];
 
 const ZHIPU_CODING_MODELS: ModelMeta[] = [
+    { id: 'glm-5.3', label: 'glm-5.3 (coding flagship)', labelZh: 'glm-5.3（编程旗舰）' },
     { id: 'glm-5.2', label: 'glm-5.2 (coding plan, cost-efficient)', labelZh: 'glm-5.2（代码优选，高性价比）' },
     { id: 'glm-5.1', label: 'glm-5.1 (fast, light)', labelZh: 'glm-5.1（快速轻量）' },
 ];
