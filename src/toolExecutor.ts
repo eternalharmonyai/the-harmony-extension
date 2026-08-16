@@ -6,6 +6,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as cp from 'child_process';
 import * as crypto from 'crypto';
+import { recordEffect } from './effectLedger';
 
 /**
  * Tool executor for Harmony agent loop.
@@ -596,6 +597,7 @@ async function writeFileTool(args: any): Promise<ToolResult> {
         await fs.writeFile(resolved, content, 'utf8');
         const verifyError = await verifyTextOnDisk(p, resolved, content);
         if (verifyError) return { tool_call_id: id, ok: false, result: verifyError };
+        await recordEffect({ kind: 'file', target: p, action: 'write', inverse: snapshot.snapshot?.id, compensating: snapshot.snapshot?.restoreCommand }).catch(() => undefined);
         return { tool_call_id: id, ok: true, result: `verified write of ${String(content).length} chars to ${p}${formatSnapshotNote(snapshot.snapshot)}` };
     } catch (e: any) {
         return { tool_call_id: id, ok: false, result: e?.message ?? String(e) };
