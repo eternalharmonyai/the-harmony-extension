@@ -284,6 +284,24 @@ const CRITICAL_WRITE_TOOL_NAMES = [
     'harmony_write_file',
 ];
 
+// Narrow "parallel-safe" allowlist: pure reads + pure git reads only. These
+// have no side effects and no interactive blocking, so they may run
+// concurrently within a single model turn. Deliberately conservative — tools
+// with any mutating action (e.g. harmony_git_branch create/switch), interactive
+// prompts, or outbound model calls are excluded and stay sequential.
+const PARALLEL_SAFE_TOOL_NAMES = new Set([
+    'harmony_read_file',
+    'harmony_list_dir',
+    'harmony_grep',
+    'harmony_git_status',
+    'harmony_git_diff',
+    'harmony_git_conflicts',
+    'harmony_git_log',
+    'harmony_git_show',
+    'harmony_git_blame',
+]);
+const PARALLEL_MAX_CONCURRENCY = 8;
+
 function debugEnabled(): boolean {
     return vscode.workspace.getConfiguration('harmony').get<boolean>('enableDebugLogging') !== false;
 }
@@ -2667,21 +2685,19 @@ async function runDeepSeekAgent(
             // (was: early return that made flow-state unreachable for text-only responses)
         }
 
-        for (const call of toolCalls) {
-            if (token.isCancellationRequested) break;
+        // ── Execute tool calls ──
+        // Parallel-safe (pure read/git-read) calls may run concurrently; all
+        // other tools run sequentially and flush any pending parallel batch
+        // first, preserving write→read ordering within this model turn.
+        const parallelBatching = vscode.workspace.getConfiguration('harmony').get<boolean>('parallelToolBatching') ?? true;
+        const resolveToolCall = async (call: any): Promise<{ call: any; input: any; resultText?: string; errorText?: string }> => {
             let input: any = {};
             try {
                 input = call.function.arguments ? JSON.parse(call.function.arguments) : {};
             } catch (e: any) {
                 debugLog(`[Tool Invocation] argument parse failed for ${call.function.name || '(missing name)'} (${call.id || 'missing id'}): ${e?.message ?? String(e)} | args=${(call.function.arguments ?? '').slice(0, 500)}`);
-                messages.push({
-                    role: 'tool',
-                    tool_call_id: call.id,
-                    content: `tool argument parse error: ${e?.message ?? String(e)}`
-                });
-                continue;
+                return { call, input, errorText: `tool argument parse error: ${e?.message ?? String(e)}` };
             }
-
             try {
                 debugLog(`[Tool Invocation] starting ${call.function.name} (${call.id || 'missing id'}) input=${safeJson(input).slice(0, 1200)}`);
                 const toolResult = await invokeHarmonyToolWithTurnKeepAlive(
@@ -2691,40 +2707,55 @@ async function runDeepSeekAgent(
                     stream,
                     token
                 );
-                
-                usageCalls.push({
-                    name: call.function.name,
-                    input: input,
-                    result: toolResultToText(toolResult)
-                });
-                debugLog(`[Tool Invocation] finished ${call.function.name} (${call.id || 'missing id'}) resultChars=${toolResultToText(toolResult).length}`);
-                
-                maybeStreamToolReference(stream, call.function.name, input);
-                messages.push({
-                    role: 'tool',
-                    tool_call_id: call.id,
-                    content: toolResultToText(toolResult)
-                });
+                const resultText = toolResultToText(toolResult);
+                debugLog(`[Tool Invocation] finished ${call.function.name} (${call.id || 'missing id'}) resultChars=${resultText.length}`);
+                return { call, input, resultText };
             } catch (e: any) {
                 const declinedAnswer = isUserDeclinedToolError(e, token)
                     ? await askAfterDeclinedTool(call.function.name, input, stream, token)
                     : undefined;
-                const errorContent = declinedAnswer !== undefined
+                const errorText = declinedAnswer !== undefined
                     ? declinedToolGuidance(call.function.name, e, declinedAnswer)
                     : `tool error: ${e?.message ?? String(e)}`;
-                usageCalls.push({
-                    name: call.function.name,
-                    input: input,
-                    error: errorContent
-                });
                 debugLog(`[Tool Invocation] failed ${call.function.name} (${call.id || 'missing id'}): ${e?.message ?? String(e)}`);
-                
-                messages.push({
-                    role: 'tool',
-                    tool_call_id: call.id,
-                    content: errorContent
-                });
+                return { call, input, errorText };
             }
+        };
+
+        const resolved: Awaited<ReturnType<typeof resolveToolCall>>[] = [];
+        let parallelBatch: Promise<Awaited<ReturnType<typeof resolveToolCall>>>[] = [];
+        const flushParallel = async () => {
+            if (parallelBatch.length === 0) return;
+            const batch = parallelBatch;
+            parallelBatch = [];
+            resolved.push(...(await Promise.all(batch)));
+        };
+
+        for (const call of toolCalls) {
+            if (token.isCancellationRequested) break;
+            if (parallelBatching && PARALLEL_SAFE_TOOL_NAMES.has(call.function.name)) {
+                parallelBatch.push(resolveToolCall(call));
+                if (parallelBatch.length >= PARALLEL_MAX_CONCURRENCY) await flushParallel();
+            } else {
+                await flushParallel();
+                resolved.push(await resolveToolCall(call));
+            }
+        }
+        await flushParallel();
+
+        // Push results in original tool-call order (deterministic routing).
+        for (const r of resolved) {
+            if (r.errorText !== undefined) {
+                usageCalls.push({ name: r.call.function.name, input: r.input, error: r.errorText });
+            } else {
+                usageCalls.push({ name: r.call.function.name, input: r.input, result: r.resultText });
+                maybeStreamToolReference(stream, r.call.function.name, r.input);
+            }
+            messages.push({
+                role: 'tool',
+                tool_call_id: r.call.id,
+                content: r.errorText !== undefined ? r.errorText : (r.resultText ?? null)
+            });
         }
         // ── Inject mid-session whispers after tool results ──
         try {
