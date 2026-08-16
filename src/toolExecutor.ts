@@ -635,8 +635,9 @@ async function runTerminalTool(args: any): Promise<ToolResult> {
 
     const cwd = workspaceRoot();
     return await new Promise((resolve) => {
-        const proc = cp.exec(command, { cwd, timeout: timeoutSec * 1000, windowsHide: true }, (err, stdout, stderr) => {
+        const proc = cp.exec(command, { cwd, timeout: timeoutSec * 1000, windowsHide: true }, async (err, stdout, stderr) => {
             const out = (stdout || '') + (stderr ? `\n[stderr]\n${stderr}` : '');
+            await recordEffect({ kind: 'terminal', target: command, action: 'exec', compensating: undefined, notes: err ? ((err as any).killed ? `timed out after ${timeoutSec}s` : `error: ${String(err)}`) : 'completed' }).catch(() => undefined);
             if (err && (err as any).killed) {
                 resolve({ tool_call_id: id, ok: false, result: clip(`timed out after ${timeoutSec}s\n${out}`) });
                 return;
