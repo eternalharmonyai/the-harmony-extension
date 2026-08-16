@@ -9977,8 +9977,8 @@
         },
         "harmony.snapshotMaxBytes": {
           "type": "number",
-          "default": 524288,
-          "description": "Maximum file size (in bytes) for pre-action snapshots. Files exceeding this are edited without a backup snapshot. Default 512KB."
+          "default": 2097152,
+          "description": "Maximum file size (in bytes) for pre-action snapshots. Files exceeding this are edited without a backup snapshot. Default 2MB."
         },
         "harmony.vision.skipOcr": {
           "type": "boolean",
