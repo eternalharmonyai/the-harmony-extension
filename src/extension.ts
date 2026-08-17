@@ -3815,6 +3815,33 @@ document.getElementById('cancel').addEventListener('click', () => {
                     vscode.window.showWarningMessage(`No models returned for ${provider}.`);
                     return;
                 }
+                // Persist the full list to a file so it can be reviewed/copied — the
+                // QuickPick is transient and hard to screenshot/scroll.
+                const listText = models.join('\n');
+                let listPath = '';
+                try {
+                    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+                    if (root) {
+                        const dir = vscode.Uri.joinPath(root, '.harmony', 'provider-models');
+                        await vscode.workspace.fs.createDirectory(dir);
+                        const file = vscode.Uri.joinPath(dir, `${provider}.txt`);
+                        await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(listText));
+                        listPath = file.fsPath;
+                    }
+                } catch { /* non-fatal — still show the picker below */ }
+                const copyAction = 'Copy all to clipboard';
+                const openAction = listPath ? 'Open saved list' : undefined;
+                const action = await vscode.window.showInformationMessage(
+                    `Discovered ${models.length} models for ${provider}.`,
+                    ...(openAction ? [openAction, copyAction] : [copyAction])
+                );
+                if (action === copyAction) {
+                    await vscode.env.clipboard.writeText(listText);
+                    vscode.window.showInformationMessage(`Copied ${models.length} ${provider} models to clipboard.`);
+                } else if (action === openAction) {
+                    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(listPath));
+                    await vscode.window.showTextDocument(doc, { preview: false });
+                }
                 const picked = await vscode.window.showQuickPick(models, {
                     placeHolder: `${models.length} models available on ${provider}. Pick one to assign to a tier.`
                 });
