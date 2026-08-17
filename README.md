@@ -83,7 +83,7 @@ The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each pro
 
 ## What's New in v0.4.11
 
-*This summarizes the notable changes since v0.4.2, the last fully documented release.*
+*This summarizes the notable changes since v0.4.1, the last release published to the public remotes.*
 
 ### 🛡️ Reversible Effect Ledger
 
@@ -135,7 +135,7 @@ Harmony is a **multi-provider AI orchestration tool**. Every feature that calls 
 
 > ⚠️ **Configuration carries risk.** Adding an API key to a provider setting enables Harmony to make paid calls to that provider across all features. Before adding a key, understand that provider's pricing model. Before changing provider or tier settings, understand which features use those settings. If you're unsure what a setting controls, leave it at its default or reach out for guidance.
 
-- `harmony.backendUrl` — backend URL (default `http://127.0.0.1:8889`).
+- `harmony.backendUrl` — legacy optional backend URL (default `http://127.0.0.1:8889`). Distinct from the native CLI backend (`8788`), the local memory hub (`harmony.hub.url`, default `7878`), and Harmony Creative (`8896`).
 - `harmony.defaultProfile` — profile id sent with each request.
 - `harmony.modelProvider` — primary route for `@harmony` turns.
 - `harmony.swarm.defaultProvider` / `harmony.swarm.defaultTier` — default swarm provider/tier. Provider calls still require explicit swarm provider-call authority.

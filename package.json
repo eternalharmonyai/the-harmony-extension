@@ -9201,7 +9201,7 @@
         "harmony.enableMemoryHub": {
           "type": "boolean",
           "default": false,
-          "description": "If true, the Harmony participant will POST each (prompt, response) pair to the optional local memory hub at backendUrl/ext/v1/memory/store. Failures are silent."
+          "description": "If true, the Harmony participant will POST each (prompt, response) pair to the optional local memory hub at hub.url/ext/v1/memory/store (default http://127.0.0.1:7878). Failures are silent."
         },
         "harmony.planOnlyMode": {
           "type": "boolean",
