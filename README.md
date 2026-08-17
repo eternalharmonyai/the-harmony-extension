@@ -81,52 +81,40 @@ The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each pro
 
 **Legacy key migration:** If you previously configured a single API key for a provider, Harmony automatically migrates it to slot 0 (Chat) on first launch. No manual reconfiguration is needed — your existing keys continue to work.
 
-## What's New in v0.4.1
+## What's New in v0.4.11
 
-### 🏗️ Centralized Provider Registry
+*This summarizes the notable changes since v0.4.2, the last fully documented release.*
 
-All provider and model metadata now lives in a single source of truth: `src/providerModels.ts`. Adding or updating a model requires editing **one file** instead of five. The sidebar dropdown, QuickPick model picker, CLI `/model` command, and provider sync checker all derive from this registry automatically.
+### 🛡️ Reversible Effect Ledger
 
-New command: **`Harmony: Check Provider Sync`** — verifies that all surfaces (sidebar, QuickPick, CLI, providers) are consistent.
+All mutating operations — file writes, terminal commands, background processes, and secret changes — now record a reversible effect in a local ledger. Harmony can roll back file mutations, stop spawned processes, and recover from interrupted operations. Pre-action snapshots are deduplicated and size-capped for performance.
 
-### ✨ New & Improved
+### 🌏 BytePlus / Doubao / StepFun — correct model IDs
 
-- **Gemini 3.6 Flash** — newest Gemini model now available through the sidebar and QuickPick
-- **K3 reasoning capture** — Moonshot/KimiCode K3 models now properly capture reasoning in collapsible thinking blocks (no more inline leaking)
-- **Fallback model labels** — sidebar now shows friendly display names instead of raw model IDs
-- **fetch_url headers** — optional `headers` parameter enables authenticated API calls (Cloudflare, GitHub, etc.)
-- **Flow-state guardian** — raised retry limit from 2→3 to handle multi-question checklist responses gracefully
+BytePlus (international) model IDs are corrected to the real ModelArk `seed-*` IDs (Seed 2.0 Pro / Lite / Mini / Code). Doubao, BytePlus Coding Plan, and StepFun each gained dedicated **Set API Key** commands. The sidebar **primary model** choice now routes correctly to chat — previously it saved to an unused slot.
+
+### 🔍 Model discovery persistence
+
+**Harmony: Discover Models (live)** now writes the provider's exact model list to a local file with copy/open actions, so you can lock in the exact model ID your account can actually reach.
+
+### 🧠 Gemini native streaming + reasoning capture
+
+Gemini requests now use the native `generateContent` streaming path with `thought_signature` preservation and `thinkingConfig` support. Added **Gemini 3.7 Flash** and **GLM 5.3** to the registry.
+
+### ⚡ DeepSeek context caching
+
+DeepSeek requests are ordered for stable prefix caching — system message first, deterministic tool ordering, and mid-history truncation to keep the stable head and recent tail.
+
+### 🛡️ Triple-Check registry sync
+
+The **Triple-Check** audit now verifies every provider's tier defaults exist in its model registry, catching out-of-sync defaults before they cause wrong-model calls.
 
 ### 🔧 Fixes
 
-- **Ask-question validation** — empty submit now shows a visible warning instead of silently canceling
-- **~200 lines of hardcoded model lists eliminated** across 5 files, replaced with registry imports
-
-## What's New in v0.4.2
-
-### 🌏 Chinese AI Provider Support
-
-Harmony now supports the full Volcengine / ByteDance / Doubao ecosystem with clear domestic/international separation:
-
-- **Doubao / Volcengine (Mainland China)** — Volcano Engine Ark API (北京) with four models: Seed-Evolving (always latest), Seed-2.1-pro (flagship), Seed-2.1-turbo (cost-efficient), and Seed-Code (coding-specialized, ~256K context)
-- **Doubao Coding Plan** — Same Doubao models billed via the Volcano Engine Coding Plan (编码计划). Defaults to Seed-2.1-pro; Seed-Code also available
-- **Doubao Rewards** — Volcano Engine's Collaboration Rewards Program (协作激励计划), using authorized access point IDs (ep-xxx)
-- **BytePlus / Doubao (International)** — BytePlus ModelArk with USD billing. Regions: Asia Pacific (ap-southeast-1) and Europe (eu-west-1)
-- **ByteDance Coding Plan (International)** — BytePlus coding plan with USD billing
-- **StepFun** — 198B MoE architecture with step-3.7-flash, supporting 256K context, native multimodal, tool calling, and reasoning effort control
-
-### 🌐 Endpoint Region Switcher
-
-Chinese providers often offer separate domestic and international API endpoints. The sidebar now includes a clickable region switcher for:
-- **StepFun** — International (api.stepfun.ai) vs Mainland China (api.stepfun.com)
-- **Doubao** — Beijing (default) with custom override
-- **BytePlus** — Asia Pacific (ap-southeast-1) vs Europe (eu-west-1)
-- **Alibaba** — International vs Mainland China vs US
-- **Tencent** — International vs Mainland China
-
-### 🧠 Reasoning Capture
-
-Reasoning content (thinking) is now properly captured for all new providers that support it, appearing in a collapsible block instead of leaking into the response text.
+- Sidebar primary-model selection now drives the chat route
+- Consult-model dispatch cases added for Doubao/BytePlus/StepFun/Zhipu Coding
+- Read-only gating no longer misfires on long messages that merely mention "read-only"
+- Orchestration mode prompt text corrected (it never blocked writes)
 
 ## ⚠️ Before You Use Harmony
 
