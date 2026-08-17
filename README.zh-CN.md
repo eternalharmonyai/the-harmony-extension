@@ -83,7 +83,7 @@ Harmony 侧边栏在每个服务商旁边显示 `[C]` `[A]` `[E]` `[V]` 槽位�
 
 ## v0.4.11 更新内容
 
-*本节汇总了自 v0.4.2（上一次完整文档化发布）以来的主要变更。*
+*本节汇总了自 v0.4.1（上一次发布到公开远程仓库的版本）以来的主要变更。*
 
 ### 🛡️ 可逆操作账本
 
@@ -135,7 +135,7 @@ Harmony 是**多服务商 AI 协奏工具**。每个调用 AI 模型的功能—
 
 > ⚠️ **配置本身即携带风险。** 为服务商设置添加 API 密钥将使 Harmony 能够跨所有功能对该服务商进行付费调用。添加密钥前，请了解该服务商的定价模式。更改服务商或层级设置前，请了解哪些功能使用这些设置。若不确定某项设置控制什么，请保持默认值或寻求指导。
 
-- `harmony.backendUrl` — 后端 URL（默认 `http://127.0.0.1:8889`）。
+- `harmony.backendUrl` — 旧版可选后端 URL（默认 `http://127.0.0.1:8889`）。与原生 CLI 后端（`8788`）、本地记忆中枢（`harmony.hub.url`，默认 `7878`）以及 Harmony Creative（`8896`）相互独立。
 - `harmony.defaultProfile` — 随每次请求发送的画像 ID。
 - `harmony.modelProvider` — `@harmony` 对话的主路由。
 - `harmony.swarm.defaultProvider` / `harmony.swarm.defaultTier` — 默认协奏群服务商/层级。服务商调用仍需显式的协奏群服务商调用权限。
