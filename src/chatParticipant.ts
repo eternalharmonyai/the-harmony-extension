@@ -1464,14 +1464,14 @@ function endsWithClosingQuestion(content: string): boolean {
     // Combined paragraph-count + short-remainder check (validated 10/10).
     // Fires flow-state when the last ? is within the last 3 paragraphs AND
     // the remaining text is short (< 50 chars) or only emojis/signoffs.
-    // Catches "Want me to apply the fix? 💜" while correctly skipping
+    // Catches "Want me to apply the fix? 👍" while correctly skipping
     // "Does this work? Let me elaborate: X, Y, Z..." (genuine flow).
     const paragraphs = prose.split('\n\n');
     const lastQParagraphIndex = prose.slice(0, lastMarkerPos).split('\n\n').length - 1;
     const paragraphsAfter = paragraphs.length - 1 - lastQParagraphIndex;
 
     if (paragraphsAfter < 3 && afterQuestion.length < 50) return true;
-    if (paragraphsAfter < 3 && /^[\s.,!?💜✨\-–—👍😊]+$/.test(afterQuestion)) return true;
+    if (paragraphsAfter < 3 && /^[\s.,!?✨\-–—👍😊]+$/.test(afterQuestion)) return true;
 
     // Check for wrap-up signals after the question
     const wrapUpPattern = /\b(here'?s? a summary|in summary|in conclusion|to summarize|hope this helps|let me know|let me summarize|the bottom line|all set|we'?re done|that'?s it|wraps it up|hope that|overall,|in short|long story short|to recap|to wrap up|as always|feel free to|any questions|thanks for|thank you|happy coding|enjoy|cheers|good luck)\b/i;
