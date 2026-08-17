@@ -152,14 +152,16 @@ const STEPFUN_MODELS: ModelMeta[] = [
 ];
 
 const BYTEPLUS_MODELS: ModelMeta[] = [
-    { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'BytePlus flagship model — auto-updates to the latest version weekly. Available via BytePlus ModelArk (International). USD billing.' },
-    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship via BytePlus International. USD billing, global access.' },
-    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（速度快，性价比高）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version via BytePlus International. USD billing.' },
+    { id: 'seed-2-0-pro-260328', label: 'Seed 2.0 Pro (flagship)', labelZh: 'Seed 2.0 Pro（旗舰）', aliases: ['seed-pro', 'byteplus-pro', 'doubao-pro'], detail: 'BytePlus ModelArk flagship (ap-southeast-1). Best quality for hard reasoning. USD billing.' },
+    { id: 'seed-2-0-lite-260428', label: 'Seed 2.0 Lite (fast, balanced)', labelZh: 'Seed 2.0 Lite（快速均衡）', aliases: ['seed-lite', 'byteplus', 'doubao-turbo'], detail: 'Faster, lower-cost Seed model. Great for routine tasks. USD billing.' },
+    { id: 'seed-2-0-mini-260428', label: 'Seed 2.0 Mini (lightest)', labelZh: 'Seed 2.0 Mini（最轻量）', aliases: ['seed-mini'], detail: 'Lightest/fastest Seed model for quick tasks. USD billing.' },
+    { id: 'seed-2-0-code-preview-260328', label: 'Seed 2.0 Code (coding, preview)', labelZh: 'Seed 2.0 Code（编程，预览版）', aliases: ['seed-code', 'byteplus-code'], detail: 'Coding-specialized Seed model (preview). USD billing.' },
+    { id: 'dola-seed-2-1-turbo-260628', label: 'Seed 2.1 Turbo (newest)', labelZh: 'Seed 2.1 Turbo（最新）', aliases: ['dola', 'seed-turbo'], detail: 'Newest Seed 2.1 Turbo model. USD billing.' },
 ];
 
 const BYTEPLUS_CODING_MODELS: ModelMeta[] = [
-    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, newest)', labelZh: 'Seed-2.1-pro（旗舰稳定版，最新）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship model. Best quality for hard reasoning tasks. Uses the BytePlus Coding Plan (编程计划) — subscription-based, USD billing.' },
-    { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized)', labelZh: 'Seed-Code（编程专精）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Seed model (2.0 generation). ~256K context, optimized for agentic programming. Uses the BytePlus Coding Plan (编程计划) — subscription-based, USD billing.' },
+    { id: 'seed-2-0-pro-260328', label: 'Seed 2.0 Pro (flagship)', labelZh: 'Seed 2.0 Pro（旗舰）', aliases: ['seed-pro', 'byteplus-pro'], detail: 'Stable flagship model. Best quality for hard reasoning. Uses the BytePlus Coding Plan (编程计划) — subscription-based, USD billing.' },
+    { id: 'seed-2-0-code-preview-260328', label: 'Seed 2.0 Code (coding-specialized, preview)', labelZh: 'Seed 2.0 Code（编程专精，预览版）', aliases: ['seed-code', 'byteplus-code'], detail: 'Coding-specialized Seed model (preview). Uses the BytePlus Coding Plan (编程计划) — subscription-based, USD billing.' },
 ];
 
 // ── Provider Registry ────────────────────────────────────────────────
