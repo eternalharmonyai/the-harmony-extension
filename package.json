@@ -2,7 +2,7 @@
   "name": "harmony-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "publisher": "harmony",
   "private": true,
   "license": "UNLICENSED",
