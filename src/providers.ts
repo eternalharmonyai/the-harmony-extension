@@ -945,6 +945,33 @@ export async function consult(
                 const baseUrl = providerBaseUrlForCall('zhipu');
                 return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'zhipu');
             }
+            case 'zhipu-coding': {
+                const baseUrl = providerBaseUrlForCall('zhipu-coding');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'zhipu-coding');
+            }
+            case 'doubao': {
+                const baseUrl = providerBaseUrlForCall('doubao');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'doubao');
+            }
+            case 'doubao-coding':
+            case 'doubao-rewards': {
+                // Doubao Coding/Rewards reuse the standard Doubao Ark endpoint + key
+                const baseUrl = providerBaseUrlForCall('doubao');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, provider);
+            }
+            case 'byteplus': {
+                const baseUrl = providerBaseUrlForCall('byteplus');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'byteplus');
+            }
+            case 'byteplus-coding': {
+                // ByteDance Coding Plan reuses the BytePlus ModelArk endpoint + key
+                const baseUrl = providerBaseUrlForCall('byteplus');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'byteplus-coding');
+            }
+            case 'stepfun': {
+                const baseUrl = providerBaseUrlForCall('stepfun');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'stepfun');
+            }
             default:
                 throw new Error(`Unsupported provider: ${provider}`);
         }
