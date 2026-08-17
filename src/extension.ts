@@ -2743,6 +2743,9 @@ export function activate(context: vscode.ExtensionContext) {
         rows.unshift({ label: 'Import Provider Keys From .env', description: 'VS Code Secret Storage', detail: 'Imports DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Tencent, and Zhipu/GLM keys into the extension-side store without printing values.', command: 'harmony.importProviderKeysFromEnv' });
         rows.unshift({ label: 'Set Tencent / Hunyuan API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.tencent.apiKey for primary and Agents routes.', command: 'harmony.setTencentApiKey' });
         rows.unshift({ label: 'Set Zhipu / GLM API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.zhipu.apiKey for primary and Agents routes.', command: 'harmony.setZhipuApiKey' });
+        rows.unshift({ label: 'Set Doubao / Volcengine (Mainland) API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.bytedance.apiKey for Doubao, Doubao Coding, and Doubao Rewards routes.', command: 'harmony.setDoubaoApiKey' });
+        rows.unshift({ label: 'Set BytePlus / Doubao (International) API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.byteplus.apiKey for BytePlus and BytePlus Coding (ModelArk, USD billing).', command: 'harmony.setByteplusApiKey' });
+        rows.unshift({ label: 'Set StepFun API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.stepfun.apiKey for StepFun primary and Agents routes.', command: 'harmony.setStepfunApiKey' });
         rows.unshift({ label: 'Set Moonshot / Kimi API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.moonshot.apiKey for primary and Agents routes.', command: 'harmony.setMoonshotApiKey' });
         rows.unshift({ label: 'Set KimiCode API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.kimiCode.apiKey for primary and Agents routes. Separate from Moonshot.', command: 'harmony.setKimiCodeApiKey' });
         rows.unshift({ label: 'Set Alibaba / Qwen API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.alibaba.apiKey for primary and Agents routes.', command: 'harmony.setAlibabaApiKey' });
@@ -3582,6 +3585,9 @@ export function activate(context: vscode.ExtensionContext) {
     registerProviderKeyCommand('Anthropic API (Claude models)', 'harmony.claudeApiKey', 'harmony.setClaudeApiKey');
     registerProviderKeyCommand('Tencent / Hunyuan', 'harmony.tencent.apiKey', 'harmony.setTencentApiKey');
     registerProviderKeyCommand('Zhipu / GLM', 'harmony.zhipu.apiKey', 'harmony.setZhipuApiKey');
+    registerProviderKeyCommand('Doubao / Volcengine (Mainland)', 'harmony.bytedance.apiKey', 'harmony.setDoubaoApiKey');
+    registerProviderKeyCommand('BytePlus / Doubao (International)', 'harmony.byteplus.apiKey', 'harmony.setByteplusApiKey');
+    registerProviderKeyCommand('StepFun', 'harmony.stepfun.apiKey', 'harmony.setStepfunApiKey');
 
     // Tencent native auth (SecretId + SecretKey)
     registerProviderKeyCommand('Tencent Native (SecretId)', 'harmony.tencent.secretId', 'harmony.setTencentSecretId');
