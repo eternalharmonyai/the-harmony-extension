@@ -215,16 +215,16 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'ep-rewards-placeholder'
     },
     byteplus: {
-        light: 'doubao-seed-2-1-turbo',
-        mid: 'doubao-seed-2-1-turbo',
-        heavy: 'doubao-seed-2-1-pro',
-        coding: 'doubao-seed-2-1-pro'
+        light: 'seed-2-0-lite-260428',
+        mid: 'seed-2-0-lite-260428',
+        heavy: 'seed-2-0-pro-260328',
+        coding: 'seed-2-0-pro-260328'
     },
     'byteplus-coding': {
-        light: 'doubao-seed-2-1-pro',
-        mid: 'doubao-seed-2-1-pro',
-        heavy: 'doubao-seed-2-1-pro',
-        coding: 'doubao-seed-2-1-pro'
+        light: 'seed-2-0-lite-260428',
+        mid: 'seed-2-0-lite-260428',
+        heavy: 'seed-2-0-pro-260328',
+        coding: 'seed-2-0-pro-260328'
     },
     stepfun: {
         light: 'step-3.7-flash',
