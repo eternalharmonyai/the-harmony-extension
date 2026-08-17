@@ -205,6 +205,11 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                         // Also update deepseekModel setting for backward compat with /model command
                         if (msg.provider === 'deepseek') {
                             await vscode.workspace.getConfiguration('harmony').update('deepseekModel', msg.value, true);
+                        } else {
+                            // Keep the chat route in sync: chatParticipant resolves the model via
+                            // modelFor(provider, 'coding'), which reads providers.<provider>.coding.
+                            // Without this, the sidebar dropdown choice is ignored by the chat request.
+                            await vscode.workspace.getConfiguration('harmony').update(`providers.${msg.provider}.coding`, msg.value, true);
                         }
                         vscode.commands.executeCommand('harmony.refreshStatusBar');
                         break;
