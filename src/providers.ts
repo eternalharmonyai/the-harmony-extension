@@ -221,8 +221,8 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'seed-2-0-pro-260328'
     },
     'byteplus-coding': {
-        light: 'seed-2-0-lite-260428',
-        mid: 'seed-2-0-lite-260428',
+        light: 'seed-2-0-code-preview-260328',
+        mid: 'seed-2-0-code-preview-260328',
         heavy: 'seed-2-0-pro-260328',
         coding: 'seed-2-0-pro-260328'
     },
