@@ -27,7 +27,7 @@ const MODELS: DeepSeekModelInfo[] = [
         version: 'v4-flash',
         maxInputTokens: 128000,
         maxOutputTokens: 32768,
-        capabilities: {},
+        capabilities: { toolCalling: true },
         apiModel: 'deepseek-v4-flash',
     },
     {
@@ -37,7 +37,7 @@ const MODELS: DeepSeekModelInfo[] = [
         version: 'v4-pro',
         maxInputTokens: 128000,
         maxOutputTokens: 32768,
-        capabilities: {},
+        capabilities: { toolCalling: true },
         apiModel: 'deepseek-v4-pro',
     },
 ];
@@ -201,4 +201,29 @@ export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
     );
 
     console.log('[DeepSeek Provider] ✅ Registered — vendor: deepseek, models: v4-flash, v4-pro');
+
+    // ── DIAGNOSTIC (on-demand): verify models actually landed in the LM registry ──
+    // Queries the same registry the model picker reads, then surfaces the
+    // result as a visible message (exthost.log does not capture console.log).
+    // Runs ONLY when invoked as "Harmony: LM Check" from the command palette —
+    // no popup on every activation.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('harmony.lmCheck', async () => {
+            try {
+                const apiOk = typeof (vscode.lm as any).registerLanguageModelChatProvider === 'function';
+                const mine = await vscode.lm.selectChatModels({ vendor: VENDOR });
+                const all = await vscode.lm.selectChatModels({});
+                const summary =
+                    `API ${apiOk ? '✅' : '❌'} | deepseek models: ${mine.length}` +
+                    `${mine.length ? ' (' + mine.map(m => m.id).join(', ') + ')' : ''}` +
+                    ` | total registry: ${all.length}`;
+                console.log('[DeepSeek Provider] DIAG:', summary);
+                vscode.window.showInformationMessage(`Harmony LM check → ${summary}`);
+            } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.error('[DeepSeek Provider] DIAG FAILED:', msg);
+                vscode.window.showErrorMessage(`Harmony LM check FAILED → ${msg}`);
+            }
+        })
+    );
 }
