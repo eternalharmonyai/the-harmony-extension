@@ -105,6 +105,22 @@ Gemini 请求现已使用原生 `generateContent` 流式路径，支持 `thought
 
 DeepSeek 请求已按稳定前缀缓存排序——系统消息置前、确定性工具排序，并采用中段截断以保留稳定头部和最近尾部。
 
+### 🤖 DeepSeek 原生模型选择器
+
+Harmony 现已将 **DeepSeek V4 Flash** 和 **DeepSeek V4 Pro** 注册为原生 VS Code 语言模型。安装本扩展的所有用户都会在 Copilot Chat 的模型选择器中看到它们——每位用户只需配置自己的 DeepSeek API 密钥。两个模型均声明了工具调用能力，因此可通过智能体模式的模型过滤。
+
+### 🩺 Harmony: LM Check
+
+运行命令面板中的 **Harmony: LM Check (DeepSeek Registry Diagnostic)**，即可查询与 Copilot Chat 选择器相同的模型注册表——显示 API 状态、Harmony 已注册的 DeepSeek 模型以及注册表中的模型总数。
+
+### 🩹 聊天可靠性修复
+
+- Hub 提示等待限时 30 秒——本地 Hub 变慢时不再拖住这一轮对话
+- 流式响应空闲 120 秒后干净中止并给出明确错误，而不是无声挂起
+- 续写请求每次重试都使用全新的 AbortController（中止控制器），修复工具调用后的 "fetch failed" 挂起
+
+***REMOVED***
+
 ### 🛡️ Triple-Check 注册表同步
 
 **Triple-Check** 审核现在会验证每个服务商的层级默认值是否存在于其模型注册表中，在错误模型调用发生前捕捉失同步的默认值。

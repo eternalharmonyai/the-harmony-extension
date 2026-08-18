@@ -105,6 +105,22 @@ Gemini requests now use the native `generateContent` streaming path with `though
 
 DeepSeek requests are ordered for stable prefix caching — system message first, deterministic tool ordering, and mid-history truncation to keep the stable head and recent tail.
 
+### 🤖 DeepSeek in the native model picker
+
+Harmony now registers **DeepSeek V4 Flash** and **DeepSeek V4 Pro** as native VS Code language models. They appear in Copilot Chat's model picker for everyone who installs the extension — each user only needs their own DeepSeek API key. Both models declare tool-calling capability, so they pass agent-mode model filtering.
+
+### 🩺 Harmony: LM Check
+
+Run **Harmony: LM Check (DeepSeek Registry Diagnostic)** from the Command Palette to query the same model registry Copilot Chat's picker reads — showing API status, Harmony's registered DeepSeek models, and the total model count in the registry.
+
+### 🩹 Chat reliability fixes
+
+- Hub prompt awaits are bounded (30s) — a slow local hub no longer stalls a turn
+- Streaming responses abort cleanly after 120s of idleness, with a clear error instead of a silent hang
+- Continuation fetches use a fresh AbortController per retry, fixing the post-tool "fetch failed" hang
+
+***REMOVED***
+
 ### 🛡️ Triple-Check registry sync
 
 The **Triple-Check** audit now verifies every provider's tier defaults exist in its model registry, catching out-of-sync defaults before they cause wrong-model calls.
