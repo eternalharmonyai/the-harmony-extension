@@ -337,6 +337,48 @@ function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// ── Network hardening helpers ─────────────────────────────────────────────
+// undici (Node fetch) wraps transport-level failures as a generic
+// "fetch failed" TypeError and hides the real cause (ECONNRESET, ETIMEDOUT,
+// cert errors, DNS failures...) in error.cause. Unwrap the chain so
+// diagnostics show the actual underlying failure instead of the wrapper.
+function describeNetworkError(error: any): string {
+    const parts: string[] = [];
+    let cur = error;
+    let depth = 0;
+    while (cur && depth < 4) {
+        const label = cur.code ?? cur.message ?? String(cur);
+        if (label && !parts.includes(label)) parts.push(String(label));
+        cur = cur.cause;
+        depth++;
+    }
+    return parts.join(' <- cause: ');
+}
+
+function streamIdleTimeoutMs(): number {
+    const sec = vscode.workspace.getConfiguration('harmony').get<number>('streamIdleTimeoutSec');
+    return Math.max(0, (sec ?? 120)) * 1000;
+}
+
+// Race a streaming read against an idle timeout so a stalled connection
+// aborts with a clear error instead of hanging the chat turn forever.
+// Typed as Promise<any> because stream readers arrive via `as any` casts.
+function withStreamIdleTimeout(read: Promise<any>, onTimeout: () => void): Promise<any> {
+    const timeoutMs = streamIdleTimeoutMs();
+    if (timeoutMs <= 0) return read;
+    // Absorb late rejections from the losing side so an aborted read after
+    // a settled race never surfaces as an unhandled rejection.
+    read.catch(() => { /* raced out or aborted — ignored */ });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            onTimeout();
+            reject(new Error(`stream idle timeout after ${Math.round(timeoutMs / 1000)}s without data — connection stalled; aborted`));
+        }, timeoutMs);
+    });
+    return Promise.race([read, timeout]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
 async function waitForActiveHarmonyTools(forceReadOnly = false, timeoutMs = 4000): Promise<readonly vscode.LanguageModelToolInformation[]> {
     const required = activeToolNames(forceReadOnly);
     const deadline = Date.now() + timeoutMs;
@@ -941,12 +983,24 @@ async function maybePrepareHubForMessage(stream: vscode.ChatResponseStream, toke
             `> HarmonyHub is offline. Hub recall is local cross-project memory; first startup or indexing can take a little time and may use noticeable RAM. ` +
             `This is not VS Code launch autostart.\n\n`
         );
-        const choice = await vscode.window.showInformationMessage(
-            'HarmonyHub is offline. Start it now for this Harmony message and index the open workspace?',
-            'Start Hub for this message',
-            'Continue without Hub',
-            'Keep off'
-        );
+        // Never let a missed/hidden notification hang the chat turn forever:
+        // if the user does not answer within 60s, continue without the Hub.
+        let promptTimer: ReturnType<typeof setTimeout> | undefined;
+        const choice = await Promise.race([
+            vscode.window.showInformationMessage(
+                'HarmonyHub is offline. Start it now for this Harmony message and index the open workspace?',
+                'Start Hub for this message',
+                'Continue without Hub',
+                'Keep off'
+            ),
+            new Promise<undefined>(resolve => {
+                promptTimer = setTimeout(() => resolve(undefined), 60000);
+            })
+        ]).finally(() => { if (promptTimer) clearTimeout(promptTimer); });
+        if (choice === undefined) {
+            stream.markdown('> HarmonyHub prompt was dismissed or not answered within 60s. Continuing without Hub recall so the chat is never blocked.\n\n');
+            return;
+        }
         if (choice === 'Keep off') {
             await vscode.workspace.getConfiguration('harmony').update('hub.startOnMessage', 'off', vscode.ConfigurationTarget.Global);
             stream.markdown('> HarmonyHub message-start prompt is now off. Use the sidebar or settings to re-enable it.\n\n');
@@ -1009,7 +1063,7 @@ function classifyParticipantError(error: any, token: vscode.CancellationToken): 
     if (isTransientProviderInterruption(error)) {
         return {
             message: 'Harmony provider connection was interrupted before it finished. Please retry; if this repeats, switch to a lighter model or wait for the provider to settle.',
-            diagnosticError: raw,
+            diagnosticError: describeNetworkError(error),
             showDiagnostics: true
         };
     }
@@ -1017,7 +1071,7 @@ function classifyParticipantError(error: any, token: vscode.CancellationToken): 
     if (/timeout|timed out/.test(text)) {
         return {
             message: 'Harmony provider request timed out before it finished.',
-            diagnosticError: raw,
+            diagnosticError: describeNetworkError(error),
             showDiagnostics: true
         };
     }
@@ -1699,7 +1753,7 @@ async function callDeepSeekStreaming(
 
         while (true) {
             if (token.isCancellationRequested) break;
-            const { value, done } = await reader.read();
+            const { value, done } = await withStreamIdleTimeout(reader.read(), () => controller.abort());
             if (done) break;
             const chunkText = decoder.decode(value, { stream: true });
             if (cfg.get<boolean>('logRawStream')) {
@@ -2029,7 +2083,7 @@ async function callTencentNativeStreaming(
 
         while (true) {
             if (token.isCancellationRequested) break;
-            const { value, done } = await reader.read();
+            const { value, done } = await withStreamIdleTimeout(reader.read(), () => controller.abort());
             if (done) break;
             const chunkText = decoder.decode(value, { stream: true });
             if (vscode.workspace.getConfiguration('harmony').get<boolean>('logRawStream')) {
@@ -2283,7 +2337,7 @@ async function callAnthropicStreaming(
 
         while (true) {
             if (token.isCancellationRequested) break;
-            const { value, done } = await reader.read();
+            const { value, done } = await withStreamIdleTimeout(reader.read(), () => controller.abort());
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
 
@@ -2608,7 +2662,7 @@ async function runDeepSeekAgent(
                 reasoningTextSoFar = stepReasoningBefore;
                 bufferedReasoning = '';
                 emittedThinking = false;
-                debugLog(`[${route.label} Agent] transient connection interruption at step=${step + 1}; retrying once: ${message}`);
+                debugLog(`[${route.label} Agent] transient connection interruption at step=${step + 1}; retrying once: ${describeNetworkError(e)}`);
                 stream.markdown('\n\n> _(connection interrupted - retrying once...)_\n\n');
                 await sleep(2000);
                 if (isTencentNative) {
@@ -2808,6 +2862,16 @@ async function runDeepSeekAgent(
         result: { metadata: { functionCalls: usageCalls } },
         finalText: assistantTextSoFar
     };
+}
+
+// Race a user prompt against a timeout so a dismissed/unseen prompt can never
+// hang the chat turn. Returns the prompt's answer, or undefined on timeout.
+function withBoundedPrompt<T>(prompt: Promise<T>, timeoutMs: number): Promise<T | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<undefined>(resolve => {
+        timer = setTimeout(() => resolve(undefined), timeoutMs);
+    });
+    return Promise.race([prompt, timeout]).finally(() => { if (timer) clearTimeout(timer); });
 }
 
 /** Run one agent loop with native tool calling. */
@@ -3964,7 +4028,77 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
                 }
                 turnOutcome = await runDeepSeekAgent(decorated, chatContext, stream, token, profile, context, forceReadOnly, apiKey, directRoute);
             } else {
-                turnOutcome = await runAgent(decorated, chatContext, stream, token, profile, context, forceReadOnly);
+                try {
+                    turnOutcome = await runAgent(decorated, chatContext, stream, token, profile, context, forceReadOnly);
+                } catch (lmError: any) {
+                    // ── Direct-API auto-fallback ──────────────────────────
+                    // The VS Code LM route died (dead picker model, vendor
+                    // registration rejected, Copilot auth broken, network to
+                    // the LM backend, ...). Our handler is still alive, so
+                    // rescue the turn: reroute to a direct provider API.
+                    if (token.isCancellationRequested) throw lmError;
+                    // Kill switch: users who deliberately want vscode-lm-only (zero API spend)
+                    // can disable the auto-rescue with harmony.lmDirectFallback.
+                    const fbEnabled = vscode.workspace.getConfiguration('harmony').get<boolean>('lmDirectFallback') ?? true;
+                    if (!fbEnabled) throw lmError;
+                    const classified = classifyParticipantError(lmError, token);
+                    debugLog(`[LM Fallback] vscode-lm route failed (${classified.diagnosticError}); attempting direct-API fallback`);
+
+                    // Prefer the user's preferred direct providers, else the first provider with a saved key.
+                    // Order = provider credit abundance (most available first): DeepSeek first,
+                    // then coding plans and affordable per-token providers.
+                    const fallbackOrder: DirectPrimaryProvider[] = [
+                        'deepseek', 'zhipu-coding', 'kimiCode',
+                        'doubao-coding', 'byteplus-coding', 'alibaba', 'moonshot', 'zhipu',
+                        'doubao', 'byteplus', 'stepfun', 'tencent', 'doubao-rewards'
+                    ];
+                    // Premium per-token providers never auto-spend: they rescue only after
+                    // an explicit confirmation (60s-bounded so the turn can never hang).
+                    const premiumFallbackOrder: DirectPrimaryProvider[] = ['gemini', 'openrouter', 'openai', 'claude'];
+                    const providerLabelFor = (p: DirectPrimaryProvider): string => directPrimaryRoute(p).label;
+                    let fbProvider: DirectPrimaryProvider | undefined;
+                    let fbKey: string | undefined;
+                    for (const candidate of fallbackOrder) {
+                        const key = await context.secrets.get(secretKeyFor(candidate));
+                        if (key) { fbProvider = candidate; fbKey = key; break; }
+                    }
+                    if (!fbProvider || !fbKey) {
+                        // No affordable provider available — offer premium rescue with confirmation.
+                        const premiumAvailable: DirectPrimaryProvider[] = [];
+                        for (const candidate of premiumFallbackOrder) {
+                            if (await context.secrets.get(secretKeyFor(candidate))) premiumAvailable.push(candidate);
+                        }
+                        if (premiumAvailable.length > 0) {
+                            const choice = await withBoundedPrompt(
+                                showHarmonyAsk({
+                                    question: [
+                                        'VS Code model route failed and no affordable provider key is saved.',
+                                        `Harmony can rescue this turn with a premium provider: ${premiumAvailable.map(providerLabelFor).join(', ')}. Premium API rates may apply — continue?`
+                                    ].join('\n\n'),
+                                    options: premiumAvailable.map(p => ({ label: providerLabelFor(p), description: 'Rescue this turn with this premium provider.' })),
+                                    allowFreeformInput: false
+                                }, token),
+                                60000
+                            );
+                            const picked = premiumAvailable.find(p => providerLabelFor(p) === choice);
+                            if (picked) {
+                                fbProvider = picked;
+                                fbKey = await context.secrets.get(secretKeyFor(picked));
+                            }
+                        }
+                    }
+                    if (!fbProvider || !fbKey) {
+                        stream.markdown(
+                            `\n\n> ⚠️ VS Code model route failed and no direct provider could be selected for an auto-rescue.\n\n` +
+                            `> Error: ${classified.message}\n\n` +
+                            `> Save a provider key (Command Palette → **Harmony: Set DeepSeek API Key** or any provider) to enable automatic direct-API fallback.`
+                        );
+                        throw lmError;
+                    }
+                    const fbRoute = directPrimaryRoute(fbProvider);
+                    stream.markdown(`\n\n> 🔁 VS Code model route failed — rerouting this turn to **${fbRoute.label} (${fbRoute.model})** direct API.\n\n`);
+                    turnOutcome = await runDeepSeekAgent(decorated, chatContext, stream, token, profile, context, forceReadOnly, fbKey, fbRoute);
+                }
             }
 
             await tryMemoryStore(profile.id, request.prompt, turnOutcome.finalText);
