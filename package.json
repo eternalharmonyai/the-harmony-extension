@@ -8581,6 +8581,11 @@
         "title": "Harmony: Open Native Chat (Preserve Draft)"
       },
       {
+        "command": "harmony.lmCheck",
+        "title": "Harmony: LM Check (DeepSeek Registry Diagnostic)",
+        "category": "Harmony"
+      },
+      {
         "command": "harmony.openSwarm",
         "title": "Harmony: Open Swarm Launcher",
         "category": "Harmony"
@@ -8868,6 +8873,12 @@
         }
       ]
     },
+    "languageModelChatProviders": [
+      {
+        "vendor": "deepseek",
+        "displayName": "DeepSeek"
+      }
+    ],
     "configuration": {
       "title": "%configuration.title%",
       "properties": {
@@ -9031,6 +9042,18 @@
           "minimum": 0,
           "maximum": 300000,
           "description": "Maximum characters of prior chat history to replay into DeepSeek direct API calls after sanitizing assistant output. Set 0 to disable history replay."
+        },
+        "harmony.streamIdleTimeoutSec": {
+          "type": "number",
+          "default": 120,
+          "minimum": 0,
+          "maximum": 900,
+          "description": "Seconds without receiving any stream data before a provider request is aborted with a clear timeout error instead of hanging. 0 disables the idle timeout."
+        },
+        "harmony.lmDirectFallback": {
+          "type": "boolean",
+          "default": true,
+          "description": "When the VS Code Chat model route fails mid-turn, automatically reroute the turn to the first Harmony direct provider with a saved API key (coding-plan providers first). Disable to let vscode-lm turns fail without an auto-rescue attempt."
         },
         "harmony.parallelToolBatching": {
           "type": "boolean",
@@ -10102,12 +10125,6 @@
     "@vscode/test-electron": "^2.5.2",
     "typescript": "^5.3.0"
   },
-  "languageModelChatProviders": [
-    {
-      "vendor": "deepseek",
-      "displayName": "DeepSeek"
-    }
-  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/eternalharmonyai/the-harmony-extension"
