@@ -167,7 +167,7 @@ Harmony is a **multi-provider AI orchestration tool**. Every feature that calls 
 | Principle | Why it matters |
 |:---|:---|
 | **You control the keys** | Harmony only calls providers you've explicitly configured with API keys. No keys = no external calls. Add keys one at a time and test each before adding more. |
-| **Multi-provider = multiplied costs** | Swarm, DeepSwarm, Orchestration, and Translation all call 2–4 models per operation. A single "translate this document" request can trigger dozens of API calls. |
+| **Multi-provider = multiplied costs** | Swarm, DeepSwarm, Orchestration, and Translation all call multiple models per operation. A single "translate this document" request can trigger dozens of API calls. |
 | **Guardrails are best-effort, not guarantees** | Harmony includes cost guardrails to help manage spend, but provider pricing changes without notice, prompt sizes vary, and cache behavior differs per provider. No automated cap is foolproof. |
 | **You are responsible for your API bills** | Review your provider billing dashboards regularly. Harmony cannot predict, cap, or refund provider charges. |
 | **If you're not sure, don't use it** | If you don't fully understand what a feature does, what providers it calls, or what it might cost — **do not use that feature.** Reach out to the Harmony community or the repository maintainers before configuring anything you're uncertain about. |
@@ -190,15 +190,15 @@ For step-by-step instructions, open **Harmony: Open Model Discovery Guide** or r
 
 ## 🎯 Orchestration Mode
 
-Harmony's orchestration capability enables **multi-model deliberative governance** — consulting multiple AI providers (DeepSeek, Qwen, Gemini, and more) in parallel, building cross-model consensus, and producing sovereign jurisdiction editions of documents with human oversight at every step.
+Harmony's orchestration capability enables **multi-model deliberative governance** — consulting multiple models in parallel (as many as you configure), building cross-model consensus, and producing sovereign jurisdiction editions of documents with human oversight at every step.
 
 ### What makes it unique
 
 | Capability | Standard AI Tools | Harmony Orchestration |
 |:---|:---:|:---:|
-| Multi-model consultation (3+ providers) | ❌ | ✅ Strategic model selection per task |
+| Multi-model consultation (as many models as you configure) | ❌ | ✅ Strategic model selection per task |
 | Step-by-step human-in-the-loop | ❌ | ✅ Author approves/rejects each change |
-| Cross-model consensus tracking | ❌ | ✅ 2/3 or 3/3 convergence, dissent resolution |
+| Cross-model consensus tracking | ❌ | ✅ Cross-model convergence, dissent resolution |
 | Jurisdiction-aware document adaptation | ❌ | ✅ Legal mechanism mapping with clause anchors |
 | Sovereign editions (not "translated copies") | ❌ | ✅ Clean standalone documents, neutral language |
 
@@ -218,11 +218,13 @@ Harmony will:
 
 ### How it works
 
-Harmony's orchestration uses multi-model consensus to produce documents that respect jurisdiction-specific requirements — with regulatory awareness, 3/3 model consensus, and zero unauthorized changes. You maintain authorship control at every step.
+Harmony's orchestration uses multi-model consensus to produce documents that respect jurisdiction-specific requirements — with regulatory awareness, cross-model consensus, and zero unauthorized changes. You maintain authorship control at every step.
+
+Several models independently review the same step. Harmony can then resolve differences the way you prefer — keep the models discussing until they reach agreement, select the strongest result, or bring the disagreement to you to adjudicate.
 
 ### ⚠️ Cost Awareness
 
-Orchestration Mode consults multiple AI providers in parallel for each step — typically 3–4 models per consultation, across several rounds of review. This means a single orchestrated document can generate **dozens of API calls**. Orchestration is designed for careful, step-by-step human-in-the-loop workflows — it is not a batch automation tool. Use it deliberately, review each step, and stop if costs exceed your comfort level.
+Orchestration Mode consults multiple models in parallel for each step — typically several models per consultation, across several rounds of review. This means a single orchestrated document can generate **dozens of API calls**. Orchestration is designed for careful, step-by-step human-in-the-loop workflows — it is not a batch automation tool. Use it deliberately, review each step, and stop if costs exceed your comfort level.
 
 ---
 
@@ -300,7 +302,7 @@ CareBloom is Harmony's built-in learning system that tracks tool usage patterns 
 
 ## 📥 Whisper Mode — Mid-Turn Human Messaging
 
-Ever been mid-project and realized you forgot to tell your AI something important — or gave it wrong info — after it was already deep in the work? Whisper Mode lets you send that message **right then**, as naturally as turning to your colleague and whispering. No need to open the chat panel or start a new conversation — type a message into the Whisper box and press Send, and Harmony catches it at the next natural pause, even **mid-turn** while it's still working on something else.
+Ever been mid-project and realized you forgot to tell your AI something important — or gave it wrong info — after it was already deep in the work? Normally you'd have to wait for that turn to finish, or interrupt it entirely, just to get a word in. Whisper Mode lets you send that message **right then**, as naturally as turning to your colleague and whispering — no waiting, no interruption. Type a message into the Whisper box and press Send, and Harmony catches it at the next natural pause, even **mid-turn** while it's still working on something else.
 
 ### How it works
 
@@ -352,7 +354,7 @@ Harmony includes a document translation pipeline for English ↔ Chinese (EN↔Z
 |:---|:---|
 | **Language pair** | English ↔ Chinese only (EN↔ZH) |
 | **AI providers** | DeepSeek, Qwen, Gemini, Moonshot/Kimi, Claude, Tencent — configurable |
-| **Costs** | Multi-model translation incurs API charges across 2–4 providers per document. Costs vary significantly by document size, provider, model tier, and current provider pricing. |
+| **Costs** | Multi-model translation incurs API charges across multiple providers per document. Costs vary significantly by document size, provider, model tier, and current provider pricing. |
 | **Guardrails** | Best-effort cost guardrails are in place per document and per batch, but provider pricing can change without notice — guardrails may not prevent all charges. |
 | **Accuracy** | AI-generated translations — always review by a qualified human translator for critical, legal, or technical content |
 | **Privacy** | Content is transmitted to AI providers for processing only; no data is retained by Harmony or the providers |
@@ -458,7 +460,7 @@ DeepSwarm lets you run structured analysis pipelines that call multiple AI provi
 
 | Pipeline | Mode | What it does |
 |:---|:---|:---|
-| 🔍 **Code Review** | Thorough | 3 providers analyze structure, security, and performance in parallel; coordinator synthesizes |
+| 🔍 **Code Review** | Thorough | Multiple models analyze structure, security, and performance in parallel; coordinator synthesizes |
 | 🏗️ **Architecture** | Thorough | Parallel analysis of patterns, trade-offs, alternatives, and scaling concerns |
 | 🐛 **Bug Hunt** | Thorough | Root cause, edge cases, fix strategies, and regression risk — analyzed in parallel |
 | 💡 **Brainstorm** | Thorough | Ideas, constraints, wild cards — synthesized from multiple perspectives |
@@ -466,7 +468,7 @@ DeepSwarm lets you run structured analysis pipelines that call multiple AI provi
 | 🛡️ **Triple-Check Audit** | Thorough+Scrutinize | 4-step safety audit: scan → inspect → grep → verdict. GO/NO-GO for every file. |
 | 🌐 **Website Analysis** | Thorough+Scrutinize | 5-step website review: design, a11y, perf/SEO, content, prioritized recommendations. |
 | 🐝 **Sequential Design Review** | Thorough | 5-step chain: Aesthetic Analyst → UX Analyst → Technical Analyst → Lead Synthesizer. Each step builds on previous analysis for cohesive web design critique. |
-| ⚖️ **Standard EN→ZH Translation** | Thorough+Scrutinize | Multi-model consensus EN→ZH: Flash intake → Jargon resolution → Multi-model convergence (Qwen+DeepSeek+Gemini) → Adjudication → Guardrail QA. Self-verifying. |
+| ⚖️ **Standard EN→ZH Translation** | Thorough+Scrutinize | Multi-model consensus EN→ZH: Flash intake → Jargon resolution → Multi-model convergence (across your configured providers) → Adjudication → Guardrail QA. Self-verifying. |
 | 📜 **Faithful EN→ZH Translation** | Thorough | Literal EN→ZH without enhancements — preserves original meaning exactly. No terminology adaptation, no cultural localization. For when fidelity matters above all. |
 | 📄 **Bilingual Document Compilation** | Thorough+Scrutinize | EN+ZH side-by-side + clean Chinese executive version + translator's notes appendix. Produces three deliverables from one source. |
 
@@ -474,7 +476,7 @@ DeepSwarm lets you run structured analysis pipelines that call multiple AI provi
 
 | Mode | Behavior |
 |:---|:---|
-| **Thorough** | Up to 3 providers analyze in parallel; coordinator synthesizes findings. Best for code review, architecture, and bug hunting. |
+| **Thorough** | Multiple models analyze in parallel; coordinator synthesizes findings. Best for code review, architecture, and bug hunting. |
 | **Scrutinize** | Sequential critique loop: draft → review → revise → re-review. Best when accuracy matters more than speed. |
 | **Pioneer** | Parallel exploratory analysis with boundary-pushing framing. Best for brainstorming and design exploration. |
 
@@ -486,7 +488,7 @@ DeepSwarm lets you run structured analysis pipelines that call multiple AI provi
 
 ### 🛡️ Triple-Check Audit Workflow
 
-The triple-check audit is a structured review method that uses multiple providers to inspect code changes before they ship. It is available as a **DeepSwarm pipeline template** — select `🛡️ Triple-Check Audit` from the sidebar dropdown or Command Palette.
+The triple-check audit is a structured review method that uses multiple models to inspect code changes before they ship. It is available as a **DeepSwarm pipeline template** — select `🛡️ Triple-Check Audit` from the sidebar dropdown or Command Palette.
 
 **How it works (4 steps):**
 
@@ -505,12 +507,12 @@ Enable the **🛡️ Triple-Check (auto-audit)** checkbox in the Steering → Co
 
 ### ⚠️ Cost Awareness
 
-**DeepSwarm multiplies API calls.** A 4-step pipeline with 3 providers per step makes 12+ API calls. The table below shows relative cost, not dollar amounts:
+**DeepSwarm multiplies API calls.** A multi-step pipeline with multiple models per step multiplies API calls. The table below shows relative cost, not dollar amounts:
 
 | Pipeline Size | Relative Cost |
 |:---|:---|
 | 1-step (single provider) | ●○○ Low |
-| 2-step Thorough (2–3 providers) | ●●○ Medium |
+| 2-step Thorough (multiple models) | ●●○ Medium |
 | 4-step full pipeline | ●●● Significant |
 
 Actual costs depend on your configured providers, model tiers, prompt sizes, and cache hit rates. DeepSeek calls benefit from automatic cache pricing detection (⚡cache indicator in sidebar). DeepSwarm is designed for experienced users who understand multi-provider API pricing — it is not a "set and forget" automation tool. If you are uncertain about what a pipeline does, what providers it calls, or what it might cost, **do not run it.** Reach out for guidance before using any pipeline you don't fully understand. See [Legal & Disclaimers](#legal--disclaimers) for the full terms.
@@ -572,7 +574,7 @@ All 15 primitives hardened through multiple rounds of security review:
 
 ### Beyond-100% Enhancements
 
-All 15 primitives passed multi-round quality upgrades to reach **10/10 production-ready** scores. Additionally, 7 "Beyond-100%" enhancements push key primitives beyond standard completeness:
+All 15 primitives went through multi-round quality review and hardening. Additionally, 7 "Beyond-100%" enhancements push key primitives beyond standard completeness:
 
 | Primitive | Enhancement |
 |:---|:---|

@@ -296,8 +296,11 @@ async function verifyTextOnDisk(label: string, resolved: string, expected: strin
     } catch (error: any) {
         return `write verification failed for ${label}: could not re-read file (${error?.message ?? String(error)})`;
     }
-    if (actual !== expected) {
-        return `write verification failed for ${label}: disk contents do not match requested contents (expected sha256 ${sha256Text(expected).slice(0, 12)}, found ${sha256Text(actual).slice(0, 12)}). Re-read the file before retrying.`;
+    // Compare line-ending-agnostically to avoid CRLF/LF false-alarms.
+    const normalizedActual = actual.replace(/\r\n|\r/g, '\n');
+    const normalizedExpected = expected.replace(/\r\n|\r/g, '\n');
+    if (normalizedActual !== normalizedExpected) {
+        return `write verification failed for ${label}: disk contents do not match requested contents (expected sha256 ${sha256Text(normalizedExpected).slice(0, 12)}, found ${sha256Text(normalizedActual).slice(0, 12)}). Re-read the file before retrying.`;
     }
     return undefined;
 }
