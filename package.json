@@ -9580,42 +9580,42 @@
         "harmony.providers.openai.light": {
           "type": "string",
           "default": "",
-          "description": "Override OpenAI light-tier model (default gpt-5-mini)."
+          "description": "Override OpenAI light-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.openai.mid": {
           "type": "string",
           "default": "",
-          "description": "Override OpenAI mid-tier model (default gpt-5.5)."
+          "description": "Override OpenAI mid-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.openai.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override OpenAI heavy-tier model (default gpt-5.6)."
+          "description": "Override OpenAI heavy-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.openai.coding": {
           "type": "string",
           "default": "",
-          "description": "Override OpenAI coding-tier model (default gpt-5-mini)."
+          "description": "Override OpenAI coding-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.gemini.light": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini light-tier model (default gemini-3.7-flash)."
+          "description": "Override Gemini light-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.gemini.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini mid-tier model (default gemini-3.7-flash)."
+          "description": "Override Gemini mid-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.gemini.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini heavy-tier model (default gemini-3.1-pro-preview)."
+          "description": "Override Gemini heavy-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.gemini.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini coding-tier model (default gemini-3.7-flash)."
+          "description": "Override Gemini coding-tier model (leave empty for the built-in default)."
         },
         "harmony.gemini.api": {
           "type": "string",
@@ -9638,62 +9638,62 @@
         "harmony.providers.claude.light": {
           "type": "string",
           "default": "",
-          "description": "Override Anthropic Claude light-tier model (default claude-haiku-4)."
+          "description": "Override Anthropic Claude light-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.claude.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Anthropic Claude mid-tier model (default claude-sonnet-4)."
+          "description": "Override Anthropic Claude mid-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.claude.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Anthropic Claude heavy-tier model (default claude-opus-4)."
+          "description": "Override Anthropic Claude heavy-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.claude.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Anthropic Claude coding-tier model (default claude-sonnet-4)."
+          "description": "Override Anthropic Claude coding-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.deepseek.light": {
           "type": "string",
           "default": "",
-          "description": "Override DeepSeek light-tier model (default deepseek-v4-flash)."
+          "description": "Override DeepSeek light-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.deepseek.mid": {
           "type": "string",
           "default": "",
-          "description": "Override DeepSeek mid-tier model (default deepseek-v4-flash)."
+          "description": "Override DeepSeek mid-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.deepseek.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override DeepSeek heavy-tier model (default deepseek-v4-pro)."
+          "description": "Override DeepSeek heavy-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.deepseek.coding": {
           "type": "string",
           "default": "",
-          "description": "Override DeepSeek coding-tier model (default deepseek-v4-flash)."
+          "description": "Override DeepSeek coding-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.openrouter.light": {
           "type": "string",
           "default": "",
-          "description": "Override OpenRouter light-tier model (default tencent/hy3-preview)."
+          "description": "Override OpenRouter light-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.openrouter.mid": {
           "type": "string",
           "default": "",
-          "description": "Override OpenRouter mid-tier model (default Qwen/Qwen3-235B-A22B-fp8-tput)."
+          "description": "Override OpenRouter mid-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.openrouter.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override OpenRouter heavy-tier model (default deepseek/deepseek-r1:free)."
+          "description": "Override OpenRouter heavy-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.openrouter.coding": {
           "type": "string",
           "default": "",
-          "description": "Override OpenRouter coding-tier model (default tencent/hy3-preview)."
+          "description": "Override OpenRouter coding-tier model (leave empty for the built-in default)."
         },
         "harmony.openrouter.baseUrl": {
           "type": "string",
@@ -9703,22 +9703,22 @@
         "harmony.providers.moonshot.light": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi light-tier model (default kimi-k2.6)."
+          "description": "Override Moonshot/Kimi light-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.moonshot.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi mid-tier model (default kimi-k2.7-code)."
+          "description": "Override Moonshot/Kimi mid-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.moonshot.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi heavy-tier model (default kimi-k3)."
+          "description": "Override Moonshot/Kimi heavy-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.moonshot.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi coding-tier model (default kimi-k3)."
+          "description": "Override Moonshot/Kimi coding-tier model (leave empty for the built-in default)."
         },
         "harmony.moonshot.baseUrl": {
           "type": "string",
@@ -9746,22 +9746,22 @@
         "harmony.providers.alibaba.light": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen light-tier model (default qwen3.6-flash)."
+          "description": "Override Alibaba/Qwen light-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.alibaba.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen mid-tier model (default qwen3.7-plus)."
+          "description": "Override Alibaba/Qwen mid-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.alibaba.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen heavy-tier model (default qwen3.7-max)."
+          "description": "Override Alibaba/Qwen heavy-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.alibaba.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen coding-tier model (default qwen3-coder-plus)."
+          "description": "Override Alibaba/Qwen coding-tier model (leave empty for the built-in default)."
         },
         "harmony.alibaba.baseUrl": {
           "type": "string",
@@ -9929,42 +9929,42 @@
         "harmony.providers.tencent.light": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan light-tier model (default hy3-preview)."
+          "description": "Override Tencent Hunyuan light-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.tencent.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan mid-tier model (default hy3-preview)."
+          "description": "Override Tencent Hunyuan mid-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.tencent.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan heavy-tier model (default hy3-preview)."
+          "description": "Override Tencent Hunyuan heavy-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.tencent.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan coding-tier model (default hy3-preview)."
+          "description": "Override Tencent Hunyuan coding-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.zhipu-coding.light": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu Coding Plan light-tier model (default glm-5.2)."
+          "description": "Override Zhipu Coding Plan light-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.zhipu-coding.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu Coding Plan mid-tier model (default glm-5.2)."
+          "description": "Override Zhipu Coding Plan mid-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.zhipu-coding.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu Coding Plan heavy-tier model (default glm-5.3)."
+          "description": "Override Zhipu Coding Plan heavy-tier model (leave empty for the built-in default)."
         },
         "harmony.providers.zhipu-coding.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu Coding Plan coding-tier model (default glm-5.3)."
+          "description": "Override Zhipu Coding Plan coding-tier model (leave empty for the built-in default)."
         },
         "harmony.tokenBudget": {
           "type": "number",
