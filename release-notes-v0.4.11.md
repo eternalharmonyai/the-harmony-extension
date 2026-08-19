@@ -17,6 +17,9 @@ BytePlus (international) model IDs corrected to the real ModelArk `seed-*` IDs (
 ### 🧠 Gemini native streaming + reasoning capture
 Native `generateContent` streaming with `thought_signature` preservation and `thinkingConfig` support. Added **Gemini 3.7 Flash** and **GLM 5.3**.
 
+### 🇨🇳 Qwen 3.8 Max + Qwen vision refresh
+Alibaba/Qwen heavy tier → **Qwen 3.8 Max** (flagship, text + vision); light tier → **Qwen 3.7 Flash**. Qwen vision upgraded from `qwen-vl-max` to **`qwen3.8-max`** (with `qwen3.7-plus` as a cheaper option).
+
 ### ⚡ Performance: DeepSeek caching + parallel read-only batching
 Stable prefix-cache ordering (system-first, deterministic tools) and mid-history truncation for DeepSeek. Independent read-only tool calls batch in parallel (`harmony.parallelToolBatching` escape hatch).
 

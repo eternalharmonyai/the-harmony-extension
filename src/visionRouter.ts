@@ -157,7 +157,7 @@ export async function describeImagesViaGemini(
 
 // ── Alibaba Qwen-VL ─────────────────────────────────────────────────
 
-const QWEN_VISION_MODEL_DEFAULT = 'qwen-vl-max';
+const QWEN_VISION_MODEL_DEFAULT = 'qwen3.8-max';
 const QWEN_VISION_ENDPOINT = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions';
 
 function qwenTierForModel(model: string): 'light' | 'mid' | 'heavy' {

@@ -137,9 +137,9 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'deepseek-v4-flash'
     },
     alibaba: {
-        light: 'qwen3.6-flash',
+        light: 'qwen3.7-flash',
         mid: 'qwen3.7-plus',
-        heavy: 'qwen3.7-max',
+        heavy: 'qwen3.8-max',
         coding: 'qwen3-coder-plus'
     },
     moonshot: {
@@ -203,8 +203,8 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'doubao-seed-2-1-pro'
     },
     'doubao-coding': {
-        light: 'doubao-seed-2-1-pro',
-        mid: 'doubao-seed-2-1-pro',
+        light: 'doubao-seed-code',
+        mid: 'doubao-seed-code',
         heavy: 'doubao-seed-2-1-pro',
         coding: 'doubao-seed-2-1-pro'
     },
