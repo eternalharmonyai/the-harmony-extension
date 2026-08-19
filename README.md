@@ -15,6 +15,24 @@ Harmony is a VS Code/Cursor extension for `@harmony` chat, workspace tools, prov
 - Provides guarded workspace tools, swarm planning, memory, receipts, and native UI diagnostics.
 - Keeps risky authority classes gated: source writes, terminal commands, provider calls, git mutation, package install, editor reload, and chat deletion stay separate.
 
+## ✨ What makes Harmony unique
+
+Harmony ships capabilities no other AI coding assistant offers today. Each one is a short scroll away — click to jump.
+
+| Unique capability | Why it matters |
+|:---|:---|
+| 📥 [Whisper Mode](#whisper-mode--mid-turn-human-messaging) | Message Harmony **mid-turn** — while it's still working — without opening chat or restarting. A one-way async human→AI side channel. |
+| 🎭 [Concert Hall](#concert-hall--persistent-collaboration-rooms) | Persistent multi-agent rooms that survive restarts — a living, reviewable paper trail of the AI's reasoning. |
+| 🎯 [Flow State Mode](#flow-state-mode--auto-continue-always-ask-next-steps) | Auto-continues to the next natural step and always asks what's next — designed with neurodivergent users in mind. |
+| 🔗 [Cross-Chat Continuity](#cross-chat-continuity) | One context thread across Copilot, Harmony, Gemini, and the terminal — pick up where you left off. |
+| 🛡️ [Reversible Effect Ledger](#reversible-effect-ledger) | Every tracked mutation is recorded and rollback-able — undo file writes, stop spawned processes, recover from interruption. |
+| 🛡️ [Self-Healing Harness](#self-healing-harness) | SHA256-verified atomic edits with checkpointing — partial writes are impossible, failed edits roll back. |
+| 🧠 [HarmonyHub](#harmonyhub--local-sovereign-memory) | Local-first sovereign memory — your context never leaves your machine. |
+| 🌐 [Translation Hub](#translation-hub-enzh) | Multi-model consensus EN↔ZH translation that guards against single-model errors — built for technical standards docs. |
+| 🌸 [CareBloom](#carebloom--self-improving-tool-usage) | Self-improving tool usage, learned locally with zero extra API calls *(default off)*. |
+| 🎨 [Creative Tools](#creative-tools) | Image generation, canvas editing, and video generation through a local creative backend. |
+| 🔤 [EN↔ZH Localization](#zh-chinese-localization) | Full bilingual UI, 150+ translated strings, and a Chinese README — toggle instantly from the sidebar. |
+
 ## Architecture
 
 ```
@@ -83,11 +101,15 @@ The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each pro
 
 ## What's New in v0.4.11
 
-*This summarizes the notable changes since v0.4.1, the last release published to the public remotes.*
+*v0.4.11 is a major release — 44+ commits since v0.4.1 spanning a reversible Effect Ledger, Exoskeleton v2.0, new ByteDance-family providers, Gemini native streaming, DeepSeek context caching, and long-running chat-reliability fixes.*
 
 ### 🛡️ Reversible Effect Ledger
 
-All mutating operations — file writes, terminal commands, background processes, and secret changes — now record a reversible effect in a local ledger. Harmony can roll back file mutations, stop spawned processes, and recover from interrupted operations. Pre-action snapshots are deduplicated and size-capped for performance.
+All mutating operations — file writes, terminal commands, background processes, and secret changes — now record a reversible effect in a local ledger. Harmony can roll back file mutations, stop spawned processes, and recover from interrupted operations. Pre-action snapshots are deduplicated, size-capped, and share a single code path.
+
+### 🦾 Exoskeleton v2.0
+
+Six new subsystem modules (Phase 0–5) form the Exoskeleton v2.0 skeleton, exposed as four native tools — `harmony_spine`, `harmony_oracle`, `harmony_guard`, and `harmony_dispatch` — giving the orchestration layer planning, verification, and dispatch in one pass.
 
 ### 🌏 BytePlus / Doubao / StepFun — correct model IDs
 
@@ -101,13 +123,13 @@ BytePlus (international) model IDs are corrected to the real ModelArk `seed-*` I
 
 Gemini requests now use the native `generateContent` streaming path with `thought_signature` preservation and `thinkingConfig` support. Added **Gemini 3.7 Flash** and **GLM 5.3** to the registry.
 
-### ⚡ DeepSeek context caching
+### ⚡ Performance: DeepSeek caching + parallel read-only batching
 
-DeepSeek requests are ordered for stable prefix caching — system message first, deterministic tool ordering, and mid-history truncation to keep the stable head and recent tail.
+DeepSeek requests are ordered for stable prefix caching — system message first, deterministic tool ordering, and mid-history truncation to keep the stable head and recent tail. Independent read-only tool calls also batch in parallel (with a `harmony.parallelToolBatching` escape hatch), cutting wall-clock time on multi-tool turns.
 
 ### 🤖 DeepSeek in the native model picker
 
-Harmony now registers **DeepSeek V4 Flash** and **DeepSeek V4 Pro** as native VS Code language models. They appear in Copilot Chat's model picker for everyone who installs the extension — each user only needs their own DeepSeek API key. Both models declare tool-calling capability, so they pass agent-mode model filtering.
+Harmony registers **DeepSeek V4 Flash** and **DeepSeek V4 Pro** as native VS Code language models, so they appear in Copilot Chat's model picker for anyone who installs the extension — each user only needs their own DeepSeek API key. **Note:** these picker entries are plain DeepSeek chat completions. The full `harmony_*` tool loop is available through `@harmony` via the sidebar / direct-provider route, not the native picker.
 
 ### 🩺 Harmony: LM Check
 
@@ -118,6 +140,7 @@ Run **Harmony: LM Check (DeepSeek Registry Diagnostic)** from the Command Palett
 - Hub prompt awaits are bounded (30s) — a slow local hub no longer stalls a turn
 - Streaming responses abort cleanly after 120s of idleness, with a clear error instead of a silent hang
 - Continuation fetches use a fresh AbortController per retry, fixing the post-tool "fetch failed" hang
+- Tool-routing guard now accepts substantive prose answers instead of hard-failing a good turn
 
 ### 🛡️ Triple-Check registry sync
 
@@ -126,8 +149,11 @@ The **Triple-Check** audit now verifies every provider's tier defaults exist in 
 ### 🔧 Fixes
 
 - Sidebar primary-model selection now drives the chat route
+- Fixed a desync where the sidebar dropdown and the chat label could show different DeepSeek models (single canonical source of truth)
 - Consult-model dispatch cases added for Doubao/BytePlus/StepFun/Zhipu Coding
 - Read-only gating no longer misfires on long messages that merely mention "read-only"
+- Creative Tools fully localized (EN + ZH)
+- Configurable snapshot size limit (`harmony.snapshotMaxBytes`)
 - Orchestration mode prompt text corrected (it never blocked writes)
 
 ## ⚠️ Before You Use Harmony

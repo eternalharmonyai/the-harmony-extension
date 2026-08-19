@@ -16,7 +16,7 @@ import { registerResearchUpgradeTools } from './researchTools';
 import { LanguageManager } from './languageManager';
 import { initializeErrorLearning } from './careBloom';
 import { registerProviderRegistryTools } from './providerRegistryTools';
-import { buildQuickPickEntries } from './providerModels';
+import { buildQuickPickEntries, getDeepSeekModel, setDeepSeekModel } from './providerModels';
 import { registerSwarmTools } from './swarmTools';
 import { registerExoskeletonTools } from './exoskeleton/exoskeletonTools';
 import { registerDeepOrchestrate } from './deepOrchestrate';
@@ -1125,7 +1125,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('harmony.selectModel', async () => {
             const cfg = vscode.workspace.getConfiguration('harmony');
             const currentProvider = cfg.get<string>('modelProvider') ?? 'vscode-lm';
-            const currentDeepSeek = cfg.get<string>('deepseekModel') ?? 'deepseek-v4-flash';
+            const currentDeepSeek = getDeepSeekModel();
             type ModelPick = vscode.QuickPickItem & { action?: 'set' | 'discover'; provider?: 'vscode-lm' | 'deepseek' | 'alibaba' | 'tencent' | 'moonshot' | 'kimiCode' | 'zhipu' | 'zhipu-coding' | 'openai' | 'openrouter' | 'gemini' | 'claude' | 'doubao' | 'doubao-coding' | 'doubao-rewards' | 'byteplus' | 'byteplus-coding' | 'stepfun'; model?: string };
             // Build model entries from the central registry (providerModels.ts).
             // This replaces ~100 lines of hardcoded per-model entries.
@@ -1168,7 +1168,7 @@ export function activate(context: vscode.ExtensionContext) {
             if (!pick.provider) return;
             await cfg.update('modelProvider', pick.provider, vscode.ConfigurationTarget.Global);
             if (pick.provider === 'deepseek' && pick.model) {
-                await cfg.update('deepseekModel', pick.model, vscode.ConfigurationTarget.Global);
+                await setDeepSeekModel(pick.model);
             } else if (pick.provider && pick.provider !== 'vscode-lm' && pick.model) {
                 await cfg.update(`providers.${pick.provider}.coding`, pick.model, vscode.ConfigurationTarget.Global);
             }
@@ -2525,7 +2525,7 @@ export function activate(context: vscode.ExtensionContext) {
             // Read per-provider model: DeepSeek from config setting, others from workspaceState
             let model: string;
             if (provider === 'deepseek') {
-                model = cfg.get<string>('deepseekModel') ?? modelFor('deepseek', 'coding');
+                model = getDeepSeekModel();
             } else {
                 model = context.workspaceState.get<string>(`harmony.primaryModel.${provider}`) ?? modelFor(provider as ProviderId, 'coding');
             }

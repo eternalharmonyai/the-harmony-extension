@@ -20,6 +20,7 @@
  * ════════════════════════════════════════════════════════════════════
  */
 
+import * as vscode from 'vscode';
 import type { ProviderId, Tier, ProviderTierMap } from './providers';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -343,6 +344,25 @@ export function getProviderDisplayNameZh(provider: ProviderId): string {
 /** Get the secret key path for a provider. */
 export function getProviderSecretKey(provider: ProviderId): string {
     return PROVIDER_REGISTRY.find(p => p.id === provider)?.secretKey ?? '';
+}
+
+// ── Canonical DeepSeek Model (single source of truth) ───────────────
+// The active DeepSeek model is stored in ONE place: the `harmony.deepseekModel`
+// config setting. Previously, config and workspaceState (`harmony.primaryModel.deepseek`)
+// could desync because different writers updated only one of the two stores,
+// producing a chat label that disagreed with the sidebar dropdown. All read/write
+// paths for the DeepSeek model now route through these two functions.
+
+const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
+
+/** Read the active DeepSeek model. Config is the single source of truth. */
+export function getDeepSeekModel(): string {
+    return vscode.workspace.getConfiguration('harmony').get<string>('deepseekModel') ?? DEEPSEEK_DEFAULT_MODEL;
+}
+
+/** Write the active DeepSeek model. Updates the authoritative config setting. */
+export async function setDeepSeekModel(model: string): Promise<void> {
+    await vscode.workspace.getConfiguration('harmony').update('deepseekModel', model, vscode.ConfigurationTarget.Global);
 }
 
 // ── Sidebar Dropdown Format ──────────────────────────────────────────

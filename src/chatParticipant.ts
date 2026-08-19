@@ -20,7 +20,7 @@ import { searchPatterns as searchGlobalMemory, autoCapturePattern } from './glob
 import { defaultVerificationCommand, defaultVerificationTimeoutSec, runVerification } from './verification';
 import { LanguageManager } from './languageManager';
 import { tendGarden, scanUnresolvedSprouts, scanResolvedSprouts } from './careBloom';
-import { buildAliasMap, PROVIDER_REGISTRY } from './providerModels';
+import { buildAliasMap, getDeepSeekModel, PROVIDER_REGISTRY, setDeepSeekModel } from './providerModels';
 import { callGeminiNativeStreaming, shouldUseGeminiNative, type OpenAICompatMessage } from './geminiNativeStreaming';
 
 /**
@@ -754,7 +754,7 @@ function isDirectPrimaryProvider(value: string | undefined): value is DirectPrim
 function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute {
     const cfg = vscode.workspace.getConfiguration('harmony');
     if (provider === 'deepseek') {
-        const model = cfg.get<string>('deepseekModel') ?? 'deepseek-v4-flash';
+        const model = getDeepSeekModel();
         return {
             provider,
             label: 'DeepSeek',
@@ -3363,7 +3363,7 @@ async function handleSlashCommand(
             } else {
                 await vscode.workspace.getConfiguration('harmony').update('modelProvider', pick.provider, true);
                 if (pick.provider === 'deepseek' && pick.model) {
-                    await vscode.workspace.getConfiguration('harmony').update('deepseekModel', pick.model, true);
+                    await setDeepSeekModel(pick.model);
                 } else if (pick.model) {
                     await vscode.workspace.getConfiguration('harmony').update(`providers.${pick.provider}.coding`, pick.model, true);
                 }

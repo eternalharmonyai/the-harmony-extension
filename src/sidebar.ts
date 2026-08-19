@@ -13,7 +13,7 @@ import { getUnreadCount, onWhisperChange, writeWhisper, isWhisperDisabled } from
 import { concertCheck } from './concertHall';
 import { getActiveDeliberations } from './deliberation';
 import { getScore, getStatusLabel } from './providerHealth';
-import { buildSidebarModelOptions, modelDisplayNameAny } from './providerModels';
+import { buildSidebarModelOptions, getDeepSeekModel, modelDisplayNameAny, setDeepSeekModel } from './providerModels';
 import { globalMemoryStats, clearGlobalMemory } from './globalMemory';
 import { LanguageManager } from './languageManager';
 import { ProfileRegistry } from './profileRegistry';
@@ -204,7 +204,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                         await this.context.workspaceState.update(`harmony.primaryModel.${msg.provider}`, msg.value);
                         // Also update deepseekModel setting for backward compat with /model command
                         if (msg.provider === 'deepseek') {
-                            await vscode.workspace.getConfiguration('harmony').update('deepseekModel', msg.value, true);
+                            await setDeepSeekModel(msg.value);
                         } else {
                             // Keep the chat route in sync: chatParticipant resolves the model via
                             // modelFor(provider, 'coding'), which reads providers.<provider>.coding.
@@ -725,7 +725,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             profile: this.context.workspaceState.get<string>('harmony.activeProfile')
                 ?? cfg.get<string>('defaultProfile') ?? 'default',
             provider: cfg.get<string>('modelProvider') ?? 'vscode-lm',
-            deepseekModel: cfg.get<string>('deepseekModel') ?? this.context.workspaceState.get<string>('harmony.primaryModel.deepseek') ?? 'deepseek-v4-flash',
+            deepseekModel: getDeepSeekModel(),
             alibabaPrimaryModel: this.context.workspaceState.get<string>('harmony.primaryModel.alibaba')
                 ?? modelFor('alibaba', 'coding'),
             moonshotPrimaryModel: this.context.workspaceState.get<string>('harmony.primaryModel.moonshot')
@@ -739,7 +739,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             zhipuCodingModel: this.context.workspaceState.get<string>('harmony.primaryModel.zhipu-coding')
                 ?? modelFor('zhipu-coding', 'coding'),
             // Generic per-provider model map — covers ALL providers including new ones
-            primaryModels: Object.fromEntries(providers.map(p => [p, this.context.workspaceState.get<string>(`harmony.primaryModel.${p}`) ?? (p === 'deepseek' ? (cfg.get<string>('deepseekModel') ?? 'deepseek-v4-flash') : modelFor(p, 'coding'))])),
+            primaryModels: Object.fromEntries(providers.map(p => [p, p === 'deepseek' ? getDeepSeekModel() : (this.context.workspaceState.get<string>(`harmony.primaryModel.${p}`) ?? modelFor(p, 'coding'))])),
             agentMaxSteps: cfg.get<number>('agentMaxSteps') ?? 1,
             autoApprove: !!cfg.get<boolean>('autoApproveTools'),
             planOnly: !!cfg.get<boolean>('planOnlyMode'),
