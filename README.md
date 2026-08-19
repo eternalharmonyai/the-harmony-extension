@@ -443,9 +443,9 @@ When OCR doesn't extract usable text, Harmony sends images to a vision model for
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `harmony.vision.provider` | `auto` | `auto` = tries configured providers in order. `gemini`, `alibaba`, or `auto-qwen-first` forces a specific provider or order. |
-| `harmony.vision.geminiModel` | `gemini-3.5-flash` | Gemini vision model (when Gemini is available) |
-| `harmony.vision.qwenModel` | `qwen-vl-max` | Qwen vision model (when Alibaba is available) |
-| `harmony.vision.zhipuModel` | `glm-5v-turbo` | Zhipu vision model (when Zhipu is available) |
+| `harmony.vision.geminiModel` | Gemini Flash (current) | Gemini vision model ID — defaults to Google's current Flash model. Set any Gemini model ID to override (when Gemini is available). |
+| `harmony.vision.qwenModel` | Qwen-VL (current) | Alibaba Qwen-VL model ID — defaults to Alibaba's current Qwen-VL model. Set any Qwen-VL ID to override (when Alibaba is available). |
+| `harmony.vision.zhipuModel` | GLM-V (current) | Zhipu GLM vision model ID — defaults to Zhipu's current GLM vision model. Set any GLM vision ID to override (when Zhipu is available). |
 | `harmony.gemini.useFreeQuota` | `false` | When ON, uses Gemini free tier where applicable |
 
 All vision providers require API keys stored in VS Code Secret Storage. Set them via the Harmony sidebar or Command Palette. Provider availability depends on which keys you have configured — there is no primary/secondary hierarchy; routing is determined by your `harmony.vision.provider` setting and which keys are present.

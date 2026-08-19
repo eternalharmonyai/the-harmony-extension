@@ -9585,12 +9585,12 @@
         "harmony.providers.openai.mid": {
           "type": "string",
           "default": "",
-          "description": "Override OpenAI mid-tier model (default gpt-5)."
+          "description": "Override OpenAI mid-tier model (default gpt-5.5)."
         },
         "harmony.providers.openai.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override OpenAI heavy-tier model (default o4)."
+          "description": "Override OpenAI heavy-tier model (default gpt-5.6)."
         },
         "harmony.providers.openai.coding": {
           "type": "string",
@@ -9600,12 +9600,12 @@
         "harmony.providers.gemini.light": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini light-tier model (default gemini-3.1-flash-lite)."
+          "description": "Override Gemini light-tier model (default gemini-3.7-flash)."
         },
         "harmony.providers.gemini.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini mid-tier model (default gemini-3.5-flash)."
+          "description": "Override Gemini mid-tier model (default gemini-3.7-flash)."
         },
         "harmony.providers.gemini.heavy": {
           "type": "string",
@@ -9615,7 +9615,7 @@
         "harmony.providers.gemini.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini coding-tier model (default gemini-3.5-flash)."
+          "description": "Override Gemini coding-tier model (default gemini-3.7-flash)."
         },
         "harmony.gemini.api": {
           "type": "string",
@@ -9678,7 +9678,7 @@
         "harmony.providers.openrouter.light": {
           "type": "string",
           "default": "",
-          "description": "Override OpenRouter light-tier model (default tencent/hunyuan-turbos-latest)."
+          "description": "Override OpenRouter light-tier model (default tencent/hy3-preview)."
         },
         "harmony.providers.openrouter.mid": {
           "type": "string",
@@ -9693,7 +9693,7 @@
         "harmony.providers.openrouter.coding": {
           "type": "string",
           "default": "",
-          "description": "Override OpenRouter coding-tier model (default tencent/hunyuan-turbos-latest)."
+          "description": "Override OpenRouter coding-tier model (default tencent/hy3-preview)."
         },
         "harmony.openrouter.baseUrl": {
           "type": "string",
@@ -9708,17 +9708,17 @@
         "harmony.providers.moonshot.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi mid-tier model (default kimi-k2.6)."
+          "description": "Override Moonshot/Kimi mid-tier model (default kimi-k2.7-code)."
         },
         "harmony.providers.moonshot.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi heavy-tier model (default kimi-k2.6)."
+          "description": "Override Moonshot/Kimi heavy-tier model (default kimi-k3)."
         },
         "harmony.providers.moonshot.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi coding-tier model (default kimi-k2.6)."
+          "description": "Override Moonshot/Kimi coding-tier model (default kimi-k3)."
         },
         "harmony.moonshot.baseUrl": {
           "type": "string",
@@ -9746,17 +9746,17 @@
         "harmony.providers.alibaba.light": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen light-tier model (default qwen-turbo-latest)."
+          "description": "Override Alibaba/Qwen light-tier model (default qwen3.6-flash)."
         },
         "harmony.providers.alibaba.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen mid-tier model (default qwen3.5-plus)."
+          "description": "Override Alibaba/Qwen mid-tier model (default qwen3.7-plus)."
         },
         "harmony.providers.alibaba.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen heavy-tier model (default qwen3-max)."
+          "description": "Override Alibaba/Qwen heavy-tier model (default qwen3.7-max)."
         },
         "harmony.providers.alibaba.coding": {
           "type": "string",
@@ -9787,7 +9787,7 @@
         },
         "harmony.vision.geminiModel": {
           "type": "string",
-          "default": "gemini-3.5-flash",
+          "default": "gemini-3.7-flash",
           "description": "Gemini model used for image analysis when you attach screenshots in the Harmony Compose panel."
         },
         "harmony.vision.provider": {
@@ -9823,11 +9823,13 @@
         "harmony.vision.autoGeminiModel": {
           "type": "string",
           "enum": [
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
             "gemini-3.5-flash",
             "gemini-3.1-flash-lite",
             "gemini-3.1-pro-preview"
           ],
-          "default": "gemini-3.5-flash",
+          "default": "gemini-3.7-flash",
           "description": "Gemini model used when the vision provider is set to Auto (Gemini-first or Qwen-first fallback mode)."
         },
         "harmony.vision.autoQwenModel": {
@@ -9927,22 +9929,22 @@
         "harmony.providers.tencent.light": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan light-tier model (default hunyuan-lite)."
+          "description": "Override Tencent Hunyuan light-tier model (default hy3-preview)."
         },
         "harmony.providers.tencent.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan mid-tier model (default hunyuan-turbos-latest)."
+          "description": "Override Tencent Hunyuan mid-tier model (default hy3-preview)."
         },
         "harmony.providers.tencent.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan heavy-tier model (default hunyuan-pro)."
+          "description": "Override Tencent Hunyuan heavy-tier model (default hy3-preview)."
         },
         "harmony.providers.tencent.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan coding-tier model (default hunyuan-turbos-latest)."
+          "description": "Override Tencent Hunyuan coding-tier model (default hy3-preview)."
         },
         "harmony.providers.zhipu-coding.light": {
           "type": "string",
@@ -9957,12 +9959,12 @@
         "harmony.providers.zhipu-coding.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu Coding Plan heavy-tier model (default glm-5.2)."
+          "description": "Override Zhipu Coding Plan heavy-tier model (default glm-5.3)."
         },
         "harmony.providers.zhipu-coding.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu Coding Plan coding-tier model (default glm-5.2)."
+          "description": "Override Zhipu Coding Plan coding-tier model (default glm-5.3)."
         },
         "harmony.tokenBudget": {
           "type": "number",
