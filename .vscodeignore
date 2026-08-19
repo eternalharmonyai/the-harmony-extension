@@ -12,8 +12,9 @@ exts.txt
 *_AI/**
 *.md
 !README.md
-# docs/: only the runtime-read provider discovery guide ships
+# docs/: ship the generic repair guide + the runtime-read discovery guide
 docs/*.md
+!docs/LIFELINE.md
 !docs/provider-model-discovery.md
 docs/primitives/**
 docs/test.pdf

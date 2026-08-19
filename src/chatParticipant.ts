@@ -1440,10 +1440,21 @@ function toolRoutingFailureLikely(content: string, prompt: string): boolean {
     const promptText = prompt.toLowerCase();
     const contentText = content.toLowerCase();
     const joined = `${promptText}\n${contentText}`;
+    // A bare "file:" placeholder is a stub — nothing was delivered.
     if (/^\s*file:\s*$/im.test(content)) return true;
+    // Explicit promise to call the ask-question tool without calling it.
     if (/\b(?:use|try|test|call|run|invoke)\b[\s\S]{0,100}\b(?:harmony_ask_question|ask_question)\b/.test(joined)) return true;
     if (/\b(?:harmony_ask_question|ask_question)\b[\s\S]{0,100}\b(?:tool|call|invoke)\b/.test(contentText)) return true;
-    return /\b(?:let me|i(?:'ll| will)|now i(?:'ll| will)|first i(?:'ll| will))\b[\s\S]{0,180}\b(?:read|check|inspect|open|edit|apply|write|patch|run|execute|ask|try|verify|search|grep)\b/.test(joined);
+    // Conversational action phrases ("let me check...") only count as a routing
+    // failure when the RESPONSE is a short promise with no delivered answer.
+    // Long answers that mention tool work are real prose. The prompt is
+    // excluded on purpose: instructions containing "let me read X" must not
+    // trigger a retry against a complete response.
+    if (/\b(?:let me|i(?:'ll| will)|now i(?:'ll| will)|first i(?:'ll| will))\b[\s\S]{0,180}\b(?:read|check|inspect|open|edit|apply|write|patch|run|execute|ask|try|verify|search|grep)\b/.test(contentText)) {
+        const substantive = content.replace(/```[\s\S]*?```/g, '').trim();
+        return substantive.length < 120;
+    }
+    return false;
 }
 
 /** Detect concluding/summarizing responses that may unintentionally end the turn. */
@@ -2723,6 +2734,20 @@ async function runDeepSeekAgent(
                         });
                         continue;
                     }
+                }
+
+                // Retry exhausted. If the model produced a substantive prose
+                // answer (not a bare stub), accept it instead of hard-failing
+                // the turn — the user gets their answer, and the recurring
+                // "tool routing failed" noise disappears.
+                const substantiveProse = content.replace(/```[\s\S]*?```/g, '').trim();
+                if (substantiveProse.length >= 40 && !/^\s*file:\s*$/im.test(content)) {
+                    debugLog(`[Tool Routing] retry produced substantive prose (${substantiveProse.length} chars) — accepting as text-only response`);
+                    if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
+                    return {
+                        result: { metadata: { functionCalls: usageCalls } },
+                        finalText: assistantTextSoFar
+                    };
                 }
 
                 const failure = toolRoutingFailureMessage(model, advertisedToolNames);
