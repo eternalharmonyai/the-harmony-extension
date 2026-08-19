@@ -204,9 +204,14 @@ async function verifyTextOnDisk(label: string, resolved: string, expected: strin
     } catch (error: any) {
         return `error: write verification failed for ${label}: could not re-read file (${error?.message ?? String(error)})`;
     }
-    if (actual !== expected) {
-        const expectedHash = sha256Buffer(Buffer.from(expected, 'utf8')).slice(0, 12);
-        const actualHash = sha256Buffer(Buffer.from(actual, 'utf8')).slice(0, 12);
+    // Compare line-ending-agnostically: the patch-safe harness (Python) and
+    // VS Code may normalize CRLF/LF differently, so a raw string compare
+    // would false-alarm on otherwise-identical content.
+    const normalizedActual = adaptLineEndings(actual, '\n');
+    const normalizedExpected = adaptLineEndings(expected, '\n');
+    if (normalizedActual !== normalizedExpected) {
+        const expectedHash = sha256Buffer(Buffer.from(normalizedExpected, 'utf8')).slice(0, 12);
+        const actualHash = sha256Buffer(Buffer.from(normalizedActual, 'utf8')).slice(0, 12);
         return `error: write verification failed for ${label}: disk contents do not match requested contents (expected sha256 ${expectedHash}, found ${actualHash}). Re-read the file before retrying.`;
     }
     return undefined;
