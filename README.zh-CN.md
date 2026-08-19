@@ -454,9 +454,9 @@ Harmony 的文件编辑工具支持可选的基于 Python 的自愈引擎，用�
 | 设置 | 默认值 | 描述 |
 |---------|---------|-------------|
 | `harmony.vision.provider` | `auto` | `auto` = 按顺序尝试已配置的服务商。`gemini`、`alibaba` 或 `auto-qwen-first` 强制使用特定服务商或顺序。 |
-| `harmony.vision.geminiModel` | `gemini-3.5-flash` | Gemini 视觉模型（当 Gemini 可用时） |
-| `harmony.vision.qwenModel` | `qwen-vl-max` | Qwen 视觉模型（当阿里巴巴可用时） |
-| `harmony.vision.zhipuModel` | `glm-5v-turbo` | 智谱视觉模型（当智谱可用时） |
+| `harmony.vision.geminiModel` | Gemini Flash（当前） | Gemini 视觉模型 ID——默认使用 Google 当前的 Flash 模型。可设置为任意 Gemini 模型 ID 进行覆盖（当 Gemini 可用时）。 |
+| `harmony.vision.qwenModel` | Qwen-VL（当前） | 阿里巴巴 Qwen-VL 模型 ID——默认使用阿里巴巴当前的 Qwen-VL 模型。可设置为任意 Qwen-VL ID 进行覆盖（当阿里巴巴可用时）。 |
+| `harmony.vision.zhipuModel` | GLM-V（当前） | 智谱 GLM 视觉模型 ID——默认使用智谱当前的 GLM 视觉模型。可设置为任意 GLM 视觉 ID 进行覆盖（当智谱可用时）。 |
 | `harmony.gemini.useFreeQuota` | `false` | 开启时，在适用情况下使用 Gemini 免费额度 |
 
 所有视觉服务商需要存储在 VS Code Secret Storage 中的 API 密钥。通过 Harmony 侧边栏或命令面板设置。服务商可用性取决于您已配置的密钥——没有主/次层级；路由由您的 `harmony.vision.provider` 设置和哪些密钥存在决定。
