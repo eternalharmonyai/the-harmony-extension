@@ -300,7 +300,7 @@ CareBloom is Harmony's built-in learning system that tracks tool usage patterns 
 
 ## 📥 Whisper Mode — Mid-Turn Human Messaging
 
-Ever been mid-project and realized you forgot to tell your AI something important — or gave it wrong info — after it was already deep in the work? Whisper Mode lets you send that message **right then**, as naturally as tapping a colleague on the shoulder. No need to open the chat panel or start a new conversation — type a message into the Whisper box and press Send, and Harmony catches it at the next natural pause, even **mid-turn** while it's still working on something else.
+Ever been mid-project and realized you forgot to tell your AI something important — or gave it wrong info — after it was already deep in the work? Whisper Mode lets you send that message **right then**, as naturally as turning to your colleague and whispering. No need to open the chat panel or start a new conversation — type a message into the Whisper box and press Send, and Harmony catches it at the next natural pause, even **mid-turn** while it's still working on something else.
 
 ### How it works
 
