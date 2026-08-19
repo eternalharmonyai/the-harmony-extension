@@ -21,17 +21,17 @@ Harmony ships capabilities no other AI coding assistant offers today. Each one i
 
 | Unique capability | Why it matters |
 |:---|:---|
-| 📥 [Whisper Mode](#whisper-mode--mid-turn-human-messaging) | Message Harmony **mid-turn** — while it's still working — without opening chat or restarting. A one-way async human→AI side channel. |
-| 🎭 [Concert Hall](#concert-hall--persistent-collaboration-rooms) | Persistent multi-agent rooms that survive restarts — a living, reviewable paper trail of the AI's reasoning. |
-| 🎯 [Flow State Mode](#flow-state-mode--auto-continue-always-ask-next-steps) | Auto-continues to the next natural step and always asks what's next — designed with neurodivergent users in mind. |
+| 📥 [Whisper Mode](#whisper-mode) | Message Harmony **mid-turn** — while it's still working — without opening chat or restarting. A one-way async human→AI side channel. |
+| 🎭 [Concert Hall](#concert-hall) | Persistent multi-agent rooms that survive restarts — a living, reviewable paper trail of the AI's reasoning. |
+| 🎯 [Flow State Mode](#flow-state-mode) | Auto-continues to the next natural step and always asks what's next — designed with neurodivergent users in mind. |
 | 🔗 [Cross-Chat Continuity](#cross-chat-continuity) | One context thread across Copilot, Harmony, Gemini, and the terminal — pick up where you left off. |
-| 🛡️ [Reversible Effect Ledger](#reversible-effect-ledger) | Every tracked mutation is recorded and rollback-able — undo file writes, stop spawned processes, recover from interruption. |
+| 🛡️ [Reversible Effect Ledger](#effect-ledger) | Every tracked mutation is recorded and rollback-able — undo file writes, stop spawned processes, recover from interruption. |
 | 🛡️ [Self-Healing Harness](#self-healing-harness) | SHA256-verified atomic edits with checkpointing — partial writes are impossible, failed edits roll back. |
-| 🧠 [HarmonyHub](#harmonyhub--local-sovereign-memory) | Local-first sovereign memory — your context never leaves your machine. |
-| 🌐 [Translation Hub](#translation-hub-enzh) | Multi-model consensus EN↔ZH translation that guards against single-model errors — built for technical standards docs. |
-| 🌸 [CareBloom](#carebloom--self-improving-tool-usage) | Self-improving tool usage, learned locally with zero extra API calls *(default off)*. |
+| 🧠 [HarmonyHub](#harmonyhub) | Local-first sovereign memory — your context never leaves your machine. |
+| 🌐 [Translation Hub](#translation-hub) | Multi-model consensus EN↔ZH translation that guards against single-model errors — built for technical standards docs. |
+| 🌸 [CareBloom](#carebloom) | Self-improving tool usage, learned locally with zero extra API calls *(default off)*. |
 | 🎨 [Creative Tools](#creative-tools) | Image generation, canvas editing, and video generation through a local creative backend. |
-| 🔤 [EN↔ZH Localization](#zh-chinese-localization) | Full bilingual UI, 150+ translated strings, and a Chinese README — toggle instantly from the sidebar. |
+| 🔤 [EN↔ZH Localization](#zh-localization) | Full bilingual UI, 150+ translated strings, and a Chinese README — toggle instantly from the sidebar. |
 
 ## Architecture
 
@@ -102,6 +102,8 @@ The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each pro
 ## What's New in v0.4.11
 
 *v0.4.11 is a major release — 44+ commits since v0.4.1 spanning a reversible Effect Ledger, Exoskeleton v2.0, new ByteDance-family providers, Gemini native streaming, DeepSeek context caching, and long-running chat-reliability fixes.*
+
+<a id="effect-ledger"></a>
 
 ### 🛡️ Reversible Effect Ledger
 
@@ -234,6 +236,8 @@ node bin/harmony-cli.js ui native
 
 That starts or reuses the localhost backend at `http://127.0.0.1:8788` and opens the native window. For exact steps, provider-key notes, and failure states, read `docs/outside-vs-quickstart.md`.
 
+<a id="harmonyhub"></a>
+
 ## HarmonyHub — Local Sovereign Memory
 
 HarmonyHub is a local daemon (default `http://127.0.0.1:7878`) that powers cross-project semantic search across every project you've indexed. It runs alongside Harmony's backend on your machine, keeping your project knowledge private and local. HarmonyHub starts automatically with Harmony — no separate install needed.
@@ -270,6 +274,8 @@ Over time, Harmony accumulates local state: continuity handoffs, supervisor even
 
 All operations are wrapped in try/catch — cleanup failures are non-fatal. Run it periodically to keep `.harmony/` lean, or before packaging a VSIX for distribution.
 
+<a id="carebloom"></a>
+
 ## 🌸 CareBloom — Self-Improving Tool Usage
 
 CareBloom is Harmony's built-in learning system that tracks tool usage patterns and gradually improves over time. It operates locally with zero additional API calls.
@@ -290,9 +296,11 @@ CareBloom is Harmony's built-in learning system that tracks tool usage patterns 
 | **Storage** | Error patterns stored in `.carebloom/troubleshooting_index.json` with PII redacted. Sprouts stored in `.carebloom/` as Markdown files (your reflection responses). |
 | **Data sharing** | Error text is redacted (emails, IPs, API keys removed) before storage and is never directly sent to AI providers by this feature. |
 
+<a id="whisper-mode"></a>
+
 ## 📥 Whisper Mode — Mid-Turn Human Messaging
 
-Whisper Mode lets you send messages to Harmony **between chat turns** — without opening the chat panel, without starting a new conversation. Type a message into the Whisper box and press Send. Harmony catches it at the next natural pause — even **mid-turn**, while still working on something else.
+Ever been mid-project and realized you forgot to tell your AI something important — or gave it wrong info — after it was already deep in the work? Whisper Mode lets you send that message **right then**, as naturally as tapping a colleague on the shoulder. No need to open the chat panel or start a new conversation — type a message into the Whisper box and press Send, and Harmony catches it at the next natural pause, even **mid-turn** while it's still working on something else.
 
 ### How it works
 
@@ -322,6 +330,8 @@ Whisper Mode is a **one-way, async human→AI channel** that operates outside th
 It turns rigid turn-taking into a continuous conversation — less like scheduled meetings, more like working side-by-side. Whisper something to your AI collaborator and they'll catch it without missing a beat, just as they would with a human collaborator beside them. If the moment passes, the message waits like a note on the desk, picked up at the very next opportunity.
 
 No other AI coding assistant offers a mid-turn human whisper channel. This is a Harmony original.
+
+<a id="translation-hub"></a>
 
 ## Translation Hub (EN↔ZH)
 
@@ -586,6 +596,8 @@ By default, Harmony detects when a model describes using tools but forgets to ac
 
 Harmony includes several unique capabilities beyond the core workflow. These features are what make Harmony more than just another AI chat extension.
 
+<a id="concert-hall"></a>
+
 ### 🎭 Concert Hall — Persistent Collaboration Rooms
 
 The Concert Hall is Harmony's shared whiteboard for multi-agent workflows. Every DeepSwarm pipeline, Swarm primitive, and orchestration step posts findings to persistent rooms — creating a living paper trail of the AI's reasoning that you can review anytime.
@@ -613,6 +625,8 @@ The Concert Hall is Harmony's shared whiteboard for multi-agent workflows. Every
 
 The Concert Hall turns AI reasoning from a black box into a transparent, reviewable conversation between specialized roles — each leaving notes the others (and you) can read.
 
+<a id="flow-state-mode"></a>
+
 ### 🎯 Flow State Mode — Auto-Continue, Always Ask Next Steps
 
 Flow State Mode keeps the collaboration alive by auto-continuing to the next natural step and always asking what's next — instead of ending the turn when there's clearly more to do. It's designed to be **neurodivergent-friendly**: the "what now?" decision is externalized so you don't have to carry it alone.
@@ -625,6 +639,8 @@ Flow State Mode keeps the collaboration alive by auto-continuing to the next nat
 
 Where standard AI chat ends every turn with a text question that breaks flow, Flow State Mode weaves the conversation forward — less like scheduled meetings, more like working side-by-side
 
+<a id="cross-chat-continuity"></a>
+
 ### 🔗 Cross-Chat Continuity
 
 Harmony preserves context across different AI chat surfaces — VS Code Copilot, Harmony Chat, Gemini, and terminal sessions. Use continuity handoffs to pass task state between environments without losing context.
@@ -632,6 +648,8 @@ Harmony preserves context across different AI chat surfaces — VS Code Copilot,
 - **Handoff files** — `.harmony/handoffs/*.md` carry task state between sessions
 - **Cross-tool resume** — pick up where you left off in Copilot, Harmony, Gemini, or terminal
 - **Continuity ledger** — persistent record of handoff/sync state across all chat surfaces
+
+<a id="creative-tools"></a>
 
 ### 🎨 Creative Tools
 
@@ -658,6 +676,8 @@ Full browser automation toolkit for testing, design review, and performance audi
 | **Lighthouse** | Performance, accessibility, best-practices, and SEO scores |
 | **Page Inspect** | DOM, headings, links, forms, images, landmarks, console messages |
 
+<a id="self-healing-harness"></a>
+
 ### 🛡️ Self-Healing Harness
 
 Harmony's file editing tools use SHA256-verified atomic edits with checkpointing and rollback. Before every edit, a checkpoint is written. After every edit, the change is verified. If verification fails, the harness rolls back to the last known-good state.
@@ -668,6 +688,8 @@ Harmony's file editing tools use SHA256-verified atomic edits with checkpointing
 - **Conflict detection** — stale/conflicting edits are detected and refused
 
 See [Optional: Python & Self-Healing Harness](#optional-python--self-healing-harness) for setup. A TypeScript fallback works without Python.
+
+<a id="zh-localization"></a>
 
 ### 🌐 ZH (Chinese) Localization
 
