@@ -68,10 +68,12 @@ const DEEPSEEK_MODELS: ModelMeta[] = [
 ];
 
 const ALIBABA_MODELS: ModelMeta[] = [
-    { id: 'qwen3.6-flash', label: 'qwen3.6-flash (fast, cheap)', labelZh: 'qwen3.6-flash（轻量高效）', aliases: ['qwen-flash', 'qwen-turbo', 'qwen-turbo-latest'], detail: 'Fast low-cost Alibaba text route. Curated flash-equivalent primary option.' },
+    { id: 'qwen3.8-max', label: 'qwen3.8-max (flagship, multimodal)', labelZh: 'qwen3.8-max（旗舰，多模态）', aliases: ['qwen-max', 'qwen-max-latest'], detail: 'Alibaba Qwen 3.8 flagship — text and vision capable. Higher-capability route for hard turns. Pricing is materially higher; use deliberately.' },
+    { id: 'qwen3.7-flash', label: 'qwen3.7-flash (fast, cheap)', labelZh: 'qwen3.7-flash（轻量高效）', aliases: ['qwen-flash', 'qwen-turbo', 'qwen-turbo-latest'], detail: 'Fast low-cost Alibaba text route. Curated flash-equivalent primary option.' },
     { id: 'qwen3.7-plus', label: 'qwen3.7-plus (balanced mid)', labelZh: 'qwen3.7-plus（均衡实用）', aliases: ['qwen-plus'], detail: 'Balanced Alibaba route for general tasks.' },
-    { id: 'qwen3.7-max', label: 'qwen3.7-max (best quality)', labelZh: 'qwen3.7-max（效果最佳）', aliases: ['qwen-max', 'qwen3-max', 'qwen-max-latest'], detail: 'Higher-capability Qwen Max route for hard turns. Use deliberately; pricing is materially higher.' },
     { id: 'qwen3-coder-plus', label: 'qwen3-coder-plus (coding specialist)', labelZh: 'qwen3-coder-plus（代码专精）', aliases: ['qwen', 'qwen-coder'], detail: 'Alibaba DashScope coding route. Uses your Alibaba / Qwen API key.' },
+    { id: 'qwen3.6-flash', label: 'qwen3.6-flash (legacy light)', labelZh: 'qwen3.6-flash（上一代轻量）', detail: 'Previous-generation light route. Hidden from the dropdown; still selectable.', featured: false },
+    { id: 'qwen3.7-max', label: 'qwen3.7-max (previous flagship)', labelZh: 'qwen3.7-max（上一代旗舰）', aliases: ['qwen3-max'], detail: 'Previous-generation Max route. Hidden from the dropdown; still selectable.', featured: false },
 ];
 
 const MOONSHOT_MODELS: ModelMeta[] = [
