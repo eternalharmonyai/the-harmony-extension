@@ -17,7 +17,8 @@ docs/*.md
 !docs/provider-model-discovery.md
 docs/primitives/**
 docs/test.pdf
-test/test.pdf
+test/*.pdf
+out/*.md
 _*/**
 *.zip
 *.vsix
