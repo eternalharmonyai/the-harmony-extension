@@ -12,7 +12,9 @@ export const PRE_ACTION_SNAPSHOT_EXCLUDED_PARTS = new Set([
 ]);
 
 export const PRE_ACTION_SNAPSHOT_TEXT_EXTS = new Set([
-    '.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.txt', '.yml', '.yaml', '.toml', '.ps1', '.css', '.html', '.rs', '.py', '.cs', '.go', '.java', '.xml',
+    // '' covers extensionless files: dotfiles (.gitattributes, .gitignore,
+    // .editorconfig), LICENSE, Makefile, Dockerfile, etc.
+    '', '.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.txt', '.yml', '.yaml', '.toml', '.ps1', '.css', '.html', '.rs', '.py', '.cs', '.go', '.java', '.xml',
 ]);
 
 export interface PreActionSnapshotRecord {
