@@ -9804,11 +9804,13 @@
         "harmony.vision.qwenModel": {
           "type": "string",
           "enum": [
+            "qwen3.8-max",
+            "qwen3.7-plus",
             "qwen-vl-max",
             "qwen-vl-plus"
           ],
-          "default": "qwen-vl-max",
-          "description": "Alibaba Qwen-VL model for image analysis."
+          "default": "qwen3.8-max",
+          "description": "Alibaba Qwen vision model for image analysis. qwen3.8-max and qwen3.7-plus are the current generation; qwen-vl-* are legacy."
         },
         "harmony.vision.ocrOnly": {
           "type": "boolean",
@@ -9835,11 +9837,13 @@
         "harmony.vision.autoQwenModel": {
           "type": "string",
           "enum": [
+            "qwen3.8-max",
+            "qwen3.7-plus",
             "qwen-vl-max",
             "qwen-vl-plus"
           ],
-          "default": "qwen-vl-max",
-          "description": "Alibaba Qwen-VL model used when the vision provider is set to Auto (Gemini-first or Qwen-first fallback mode)."
+          "default": "qwen3.8-max",
+          "description": "Alibaba Qwen vision model used when the vision provider is set to Auto (Gemini-first or Qwen-first fallback mode)."
         },
         "harmony.imageGen.provider": {
           "type": "string",

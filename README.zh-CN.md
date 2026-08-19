@@ -125,6 +125,10 @@ BytePlus（国际版）模型 ID 已修正为真实的 ModelArk `seed-*` ID（Se
 
 Gemini 请求现已使用原生 `generateContent` 流式路径，支持 `thought_signature` 保留和 `thinkingConfig` 配置。注册表新增 **Gemini 3.7 Flash** 与 **GLM 5.3**。
 
+### 🇨🇳 Qwen 3.8 Max 与 Qwen 视觉升级
+
+阿里巴巴/Qwen 现以 **Qwen 3.8 Max**（旗舰，文本+视觉）作为 heavy 层默认，**Qwen 3.7 Flash** 作为 light 层默认。Qwen 视觉从旧版 `qwen-vl-max` 升级为 **`qwen3.8-max`**（并提供 `qwen3.7-plus` 作为更便宜选项）。
+
 ### ⚡ 性能：DeepSeek 缓存 + 并行只读批量
 
 DeepSeek 请求已按稳定前缀缓存排序——系统消息置前、确定性工具排序，并采用中段截断以保留稳定头部和最近尾部。独立的只读工具调用也会并行批量执行（提供 `harmony.parallelToolBatching` 逃生开关），缩短多工具轮次的耗时。
@@ -455,7 +459,7 @@ Harmony 的文件编辑工具支持可选的基于 Python 的自愈引擎，用�
 |---------|---------|-------------|
 | `harmony.vision.provider` | `auto` | `auto` = 按顺序尝试已配置的服务商。`gemini`、`alibaba` 或 `auto-qwen-first` 强制使用特定服务商或顺序。 |
 | `harmony.vision.geminiModel` | Gemini Flash（当前） | Gemini 视觉模型 ID——默认使用 Google 当前的 Flash 模型。可设置为任意 Gemini 模型 ID 进行覆盖（当 Gemini 可用时）。 |
-| `harmony.vision.qwenModel` | Qwen-VL（当前） | 阿里巴巴 Qwen-VL 模型 ID——默认使用阿里巴巴当前的 Qwen-VL 模型。可设置为任意 Qwen-VL ID 进行覆盖（当阿里巴巴可用时）。 |
+| `harmony.vision.qwenModel` | Qwen 视觉（当前） | 阿里巴巴 Qwen 视觉模型 ID——默认使用阿里巴巴当前的 Qwen 3.x 模型。可设置为任意 Qwen 视觉 ID 进行覆盖（当阿里巴巴可用时）。 |
 | `harmony.vision.zhipuModel` | GLM-V（当前） | 智谱 GLM 视觉模型 ID——默认使用智谱当前的 GLM 视觉模型。可设置为任意 GLM 视觉 ID 进行覆盖（当智谱可用时）。 |
 | `harmony.gemini.useFreeQuota` | `false` | 开启时，在适用情况下使用 Gemini 免费额度 |
 

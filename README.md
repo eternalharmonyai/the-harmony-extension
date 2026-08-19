@@ -125,6 +125,10 @@ BytePlus (international) model IDs are corrected to the real ModelArk `seed-*` I
 
 Gemini requests now use the native `generateContent` streaming path with `thought_signature` preservation and `thinkingConfig` support. Added **Gemini 3.7 Flash** and **GLM 5.3** to the registry.
 
+### 🇨🇳 Qwen 3.8 Max + Qwen vision refresh
+
+Alibaba/Qwen now ships **Qwen 3.8 Max** (flagship, text + vision) as the heavy-tier default and **Qwen 3.7 Flash** as the light-tier default. Qwen vision upgraded from the legacy `qwen-vl-max` to **`qwen3.8-max`** (with `qwen3.7-plus` as a cheaper option).
+
 ### ⚡ Performance: DeepSeek caching + parallel read-only batching
 
 DeepSeek requests are ordered for stable prefix caching — system message first, deterministic tool ordering, and mid-history truncation to keep the stable head and recent tail. Independent read-only tool calls also batch in parallel (with a `harmony.parallelToolBatching` escape hatch), cutting wall-clock time on multi-tool turns.
@@ -444,7 +448,7 @@ When OCR doesn't extract usable text, Harmony sends images to a vision model for
 |---------|---------|-------------|
 | `harmony.vision.provider` | `auto` | `auto` = tries configured providers in order. `gemini`, `alibaba`, or `auto-qwen-first` forces a specific provider or order. |
 | `harmony.vision.geminiModel` | Gemini Flash (current) | Gemini vision model ID — defaults to Google's current Flash model. Set any Gemini model ID to override (when Gemini is available). |
-| `harmony.vision.qwenModel` | Qwen-VL (current) | Alibaba Qwen-VL model ID — defaults to Alibaba's current Qwen-VL model. Set any Qwen-VL ID to override (when Alibaba is available). |
+| `harmony.vision.qwenModel` | Qwen vision (current) | Alibaba Qwen vision model ID — defaults to Alibaba's current Qwen 3.x model. Set any Qwen vision ID to override (when Alibaba is available). |
 | `harmony.vision.zhipuModel` | GLM-V (current) | Zhipu GLM vision model ID — defaults to Zhipu's current GLM vision model. Set any GLM vision ID to override (when Zhipu is available). |
 | `harmony.gemini.useFreeQuota` | `false` | When ON, uses Gemini free tier where applicable |
 

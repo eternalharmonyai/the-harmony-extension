@@ -768,11 +768,11 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
               const provider = cfg.get<string>('vision.provider') ?? 'auto';
               if (provider === 'auto') return 'auto';
               if (provider === 'zhipu') return cfg.get<string>('vision.zhipuModel') || 'glm-5v-turbo';
-              if (provider === 'alibaba') return cfg.get<string>('vision.qwenModel') || 'qwen-vl-max';
+              if (provider === 'alibaba') return cfg.get<string>('vision.qwenModel') || 'qwen3.8-max';
               return cfg.get<string>('vision.geminiModel') || 'gemini-3.7-flash';
             })(),
             autoGeminiModel: cfg.get<string>('vision.autoGeminiModel') ?? 'gemini-3.7-flash',
-            autoQwenModel: cfg.get<string>('vision.autoQwenModel') ?? 'qwen-vl-max',
+            autoQwenModel: cfg.get<string>('vision.autoQwenModel') ?? 'qwen3.8-max',
             visionFallbackOrder: cfg.get<string[]>('vision.fallbackOrder') ?? ['gemini', 'zhipu', 'alibaba'],
             contextHealth: { harmonyBytes: 0, healthStatus: 'ok' },
             imageGenProvider: cfg.get<string>('imageGen.provider') ?? 'gemini',
@@ -1384,8 +1384,10 @@ ${PROVIDER_IDS.map(p => {
         <option value="glm-5v">glm-5v (standard)</option>
       </optgroup>
       <optgroup label="Alibaba / Qwen-VL">
-        <option value="qwen-vl-plus">qwen-vl-plus (faster, cheaper)</option>
-        <option value="qwen-vl-max">qwen-vl-max (best quality)</option>
+        <option value="qwen3.8-max">qwen3.8-max (best, multimodal)</option>
+        <option value="qwen3.7-plus">qwen3.7-plus (faster, cheaper)</option>
+        <option value="qwen-vl-max">qwen-vl-max (legacy)</option>
+        <option value="qwen-vl-plus">qwen-vl-plus (legacy)</option>
       </optgroup>
     </select>
     <div id="vision-fallback-order" style="display:none; margin-top:6px;">
@@ -1404,8 +1406,10 @@ ${PROVIDER_IDS.map(p => {
       </select>
       <div style="font-size:10px; margin-bottom:2px; margin-top:4px;">${lm.getString('visual.autoQwenModel')}</div>
       <select id="auto-qwen-model">
-        <option value="qwen-vl-plus">qwen-vl-plus</option>
+        <option value="qwen3.8-max">qwen3.8-max</option>
+        <option value="qwen3.7-plus">qwen3.7-plus</option>
         <option value="qwen-vl-max">qwen-vl-max</option>
+        <option value="qwen-vl-plus">qwen-vl-plus</option>
       </select>
     </div>
   </div>
