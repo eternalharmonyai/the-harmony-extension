@@ -119,8 +119,6 @@ Harmony 现已将 **DeepSeek V4 Flash** 和 **DeepSeek V4 Pro** 注册为原生 
 - 流式响应空闲 120 秒后干净中止并给出明确错误，而不是无声挂起
 - 续写请求每次重试都使用全新的 AbortController（中止控制器），修复工具调用后的 "fetch failed" 挂起
 
-***REMOVED***
-
 ### 🛡️ Triple-Check 注册表同步
 
 **Triple-Check** 审核现在会验证每个服务商的层级默认值是否存在于其模型注册表中，在错误模型调用发生前捕捉失同步的默认值。

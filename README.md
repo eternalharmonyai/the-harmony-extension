@@ -119,8 +119,6 @@ Run **Harmony: LM Check (DeepSeek Registry Diagnostic)** from the Command Palett
 - Streaming responses abort cleanly after 120s of idleness, with a clear error instead of a silent hang
 - Continuation fetches use a fresh AbortController per retry, fixing the post-tool "fetch failed" hang
 
-***REMOVED***
-
 ### 🛡️ Triple-Check registry sync
 
 The **Triple-Check** audit now verifies every provider's tier defaults exist in its model registry, catching out-of-sync defaults before they cause wrong-model calls.

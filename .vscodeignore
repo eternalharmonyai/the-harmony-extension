@@ -12,7 +12,12 @@ exts.txt
 *_AI/**
 *.md
 !README.md
-!docs/*.md
+# docs/: only the runtime-read provider discovery guide ships
+docs/*.md
+!docs/provider-model-discovery.md
+docs/primitives/**
+docs/test.pdf
+test/test.pdf
 _*/**
 *.zip
 *.vsix
