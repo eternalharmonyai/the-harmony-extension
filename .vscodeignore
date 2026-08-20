@@ -41,6 +41,17 @@ native-ui/node_modules/**
 native-ui/dist/**
 native-ui/src-tauri/target/**
 
+# Native build artifacts and source that should never ship in the VSIX.
+**/*.pdb
+**/*.iobj
+**/*.ipdb
+**/*.obj
+**/*.lib
+**/*.exp
+**/*.map
+node_modules/better-sqlite3/deps/**
+node_modules/duckdb/src/**
+
 # Backups should never ship.
 _askView_*.js
 *.backup*
