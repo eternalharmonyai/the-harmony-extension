@@ -39,6 +39,7 @@ Run **Harmony: LM Check (DeepSeek Registry Diagnostic)** from the Command Palett
 The Triple-Check audit now verifies every provider's tier defaults against its model registry.
 
 ### 🔧 Fixes
+- Qwen vision now respects the premium-model confirmation gate (was missing, unlike Gemini)
 - Sidebar primary-model selection now drives the chat route
 - Fixed a desync where the sidebar dropdown and the chat label could show different DeepSeek models (single canonical source of truth)
 - Consult-model dispatch cases for Doubao/BytePlus/StepFun/Zhipu Coding
