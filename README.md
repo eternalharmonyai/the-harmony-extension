@@ -472,7 +472,7 @@ DeepSwarm lets you run structured analysis pipelines that call multiple AI provi
 | 🛡️ **Triple-Check Audit** | Thorough+Scrutinize | 4-step safety audit: scan → inspect → grep → verdict. GO/NO-GO for every file. |
 | 🌐 **Website Analysis** | Thorough+Scrutinize | 5-step website review: design, a11y, perf/SEO, content, prioritized recommendations. |
 | 🐝 **Sequential Design Review** | Thorough | 5-step chain: Aesthetic Analyst → UX Analyst → Technical Analyst → Lead Synthesizer. Each step builds on previous analysis for cohesive web design critique. |
-| ⚖️ **Standard EN→ZH Translation** | Thorough+Scrutinize | Multi-model consensus EN→ZH: Flash intake → Jargon resolution → Multi-model convergence (across your configured providers) → Adjudication → Guardrail QA. Self-verifying. |
+| ⚖️ **Standard EN→ZH Translation** | Thorough+Scrutinize | Multi-model consensus EN→ZH: Flash intake → Jargon resolution → Multi-model convergence (Qwen + DeepSeek + Gemini, fixed 3-model consensus) → Adjudication → Guardrail QA. Self-verifying. |
 | 📜 **Faithful EN→ZH Translation** | Thorough | Literal EN→ZH without enhancements — preserves original meaning exactly. No terminology adaptation, no cultural localization. For when fidelity matters above all. |
 | 📄 **Bilingual Document Compilation** | Thorough+Scrutinize | EN+ZH side-by-side + clean Chinese executive version + translator's notes appendix. Produces three deliverables from one source. |
 
