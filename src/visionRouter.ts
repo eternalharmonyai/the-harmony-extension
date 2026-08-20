@@ -162,8 +162,9 @@ const QWEN_VISION_ENDPOINT = 'https://dashscope-intl.aliyuncs.com/compatible-mod
 
 function qwenTierForModel(model: string): 'light' | 'mid' | 'heavy' {
     const lower = model.toLowerCase();
-    if (lower.includes('plus')) return 'light';
-    if (lower.includes('max')) return 'mid';
+    if (lower.includes('flash')) return 'light';
+    if (lower.includes('max')) return 'heavy';
+    if (lower.includes('plus')) return 'mid';
     if (lower.includes('72b')) return 'heavy';
     return 'mid';
 }
@@ -198,6 +199,15 @@ export async function describeImagesViaQwen(
         return {
             description: `[Vision: no Alibaba API key set. Set harmony.alibaba.apiKey in SecretStorage or ALIBABA_VISION_API_KEY in .env.]`,
             routedTo: 'none',
+            partial: true
+        };
+    }
+
+    const allowed = await confirmPremiumModel('alibaba', qwenTierForModel(model), model, 'vision/image analysis');
+    if (!allowed) {
+        return {
+            description: `[Vision routing cancelled before calling ${model}.]`,
+            routedTo: `alibaba/${model}`,
             partial: true
         };
     }

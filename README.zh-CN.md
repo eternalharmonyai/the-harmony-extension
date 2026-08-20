@@ -483,7 +483,7 @@ DeepSwarm 让您运行结构化的分析流水线，并行或顺序调用多个 
 | 🛡️ **三重审核** | Thorough+Scrutinize | 4 步安全审核：扫描 → 检查 → grep → 裁决。每个文件 GO/NO-GO。 |
 | 🌐 **网站分析** | Thorough+Scrutinize | 5 步网站审查：设计、无障碍、性能/SEO、内容、优先级建议。 |
 | 🐝 **顺序设计审查** | Thorough | 5 步链：美学分析师 → UX 分析师 → 技术分析师 → 首席综合师。每步建立在先前分析之上，形成连贯的网页设计评论。 |
-| ⚖️ **标准 EN→ZH 翻译** | Thorough+Scrutinize | 多模型共识 EN→ZH：Flash 摄入 → 术语解决 → 多模型收敛（跨您已配置的服务商）→ 裁定 → 护栏 QA。自验证。 |
+| ⚖️ **标准 EN→ZH 翻译** | Thorough+Scrutinize | 多模型共识 EN→ZH：Flash 摄入 → 术语解决 → 多模型收敛（Qwen + DeepSeek + Gemini，固定三模型共识）→ 裁定 → 护栏 QA。自验证。 |
 | 📜 **忠实 EN→ZH 翻译** | Thorough | 字面 EN→ZH，无增强——精确保留原意。无术语适配，无文化本地化。适用于忠实度高于一切的情况。 |
 | 📄 **双语文件编译** | Thorough+Scrutinize | EN+ZH 并排 + 清洁中文执行版 + 译者备注附录。从一份源文件生成三份交付物。 |
 
