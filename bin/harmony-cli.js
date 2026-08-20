@@ -294,9 +294,18 @@ const CLI_PROVIDER_DEFAULTS = {
     openrouter: { model: 'deepseek/deepseek-r1:free', env: ['HARMONY_OPENROUTER_API_KEY', 'OPENROUTER_API_KEY'], executable: true, baseUrl: 'https://openrouter.ai/api/v1' },
     openai: { model: 'gpt-4o-mini', env: ['HARMONY_OPENAI_API_KEY', 'OPENAI_API_KEY'], executable: true, baseUrl: 'https://api.openai.com/v1' },
     claude: { model: 'claude-sonnet-4', env: ['HARMONY_CLAUDE_API_KEY', 'ANTHROPIC_API_KEY'], executable: false },
+    kimiCode: { model: 'kimi-for-coding', env: ['HARMONY_KIMICODE_API_KEY', 'KIMICODE_API_KEY'], executable: true, baseUrl: 'https://api.kimi.com/coding/v1' },
+    tencent: { model: 'hy3-preview', env: ['HARMONY_TENCENT_API_KEY', 'TENCENT_API_KEY'], executable: true, baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1' },
+    zhipu: { model: 'glm-5.3', env: ['HARMONY_ZHIPU_API_KEY', 'ZHIPU_API_KEY'], executable: true, baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+    'zhipu-coding': { model: 'glm-5.3', env: ['HARMONY_ZHIPU_API_KEY', 'ZHIPU_API_KEY'], executable: true, baseUrl: 'https://api.z.ai/api/coding/paas/v4' },
+    doubao: { model: 'doubao-seed-2-1-turbo', env: ['HARMONY_BYTEDANCE_API_KEY', 'DOUBAO_API_KEY', 'ARK_API_KEY'], executable: true, baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' },
+    'doubao-coding': { model: 'doubao-seed-code', env: ['HARMONY_BYTEDANCE_API_KEY', 'DOUBAO_API_KEY', 'ARK_API_KEY'], executable: true, baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' },
+    byteplus: { model: 'seed-2-0-lite-260428', env: ['HARMONY_BYTEPLUS_API_KEY', 'BYTEPLUS_API_KEY'], executable: true, baseUrl: 'https://ark.ap-southeast.bytepluses.com/api/v3' },
+    'byteplus-coding': { model: 'seed-2-0-code-preview-260328', env: ['HARMONY_BYTEPLUS_API_KEY', 'BYTEPLUS_API_KEY'], executable: true, baseUrl: 'https://ark.ap-southeast.bytepluses.com/api/v3' },
+    stepfun: { model: 'step-3.7-flash', env: ['HARMONY_STEPFUN_API_KEY', 'STEPFUN_API_KEY'], executable: true, baseUrl: 'https://api.stepfun.ai/v1' },
 };
 
-const CLI_PROVIDER_ORDER = ['deepseek', 'alibaba', 'moonshot', 'gemini', 'openrouter', 'openai', 'claude'];
+const CLI_PROVIDER_ORDER = ['deepseek', 'alibaba', 'moonshot', 'kimiCode', 'gemini', 'openrouter', 'openai', 'claude', 'tencent', 'zhipu', 'zhipu-coding', 'doubao', 'doubao-coding', 'byteplus', 'byteplus-coding', 'stepfun'];
 const CLI_ALIBABA_ENDPOINTS = {
     international: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
     mainland: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -642,9 +651,9 @@ function providerStatusRows(root) {
 }
 
 function providerLiveHarnessProviders(options) {
-    const raw = String(options.providers || options.provider || 'alibaba,moonshot');
+    const raw = String(options.providers || options.provider || CLI_PROVIDER_ORDER.join(','));
     const providers = raw.split(/[\s,]+/).map(item => item.toLowerCase().trim()).filter(Boolean);
-    return Array.from(new Set(providers.length ? providers : ['alibaba', 'moonshot']));
+    return Array.from(new Set(providers.length ? providers : CLI_PROVIDER_ORDER));
 }
 
 function providerLiveHarnessPlannedCommand(root, provider, model, options = {}) {
@@ -686,7 +695,7 @@ function buildProviderLiveHarnessReport(root, options = {}) {
         { name: 'requested_providers_present', status: providerPlans.length ? 'passed' : 'failed', detail: providerPlans.map(item => item.provider).join(', ') || 'none' },
         { name: 'provider_calls_disabled', status: 'passed', detail: 'providerCalls=false for this harness run' },
         { name: 'network_disabled', status: 'passed', detail: 'no HTTP request is issued by provider live harness' },
-        { name: 'alibaba_moonshot_planned', status: providers.includes('alibaba') && providers.includes('moonshot') ? 'passed' : 'failed', detail: providers.join(', ') },
+        { name: 'requested_providers_known', status: providers.every(p => Boolean(CLI_PROVIDER_DEFAULTS[p])) ? 'passed' : 'failed', detail: providers.join(', ') },
     ];
     return {
         version: 1,
@@ -709,7 +718,7 @@ function buildProviderLiveHarnessReport(root, options = {}) {
         approvalPlan: {
             status: 'not-approved-not-executed',
             requiredBeforeAnyLiveProviderCall: [
-                'User explicitly approves live Alibaba/Moonshot smoke in chat or the native UI.',
+                'User explicitly approves a live provider smoke in chat or the native UI.',
                 'Operator confirms provider keys are present in the intended store: VS Code Secret Storage for extension-side calls, Windows DPAPI or env for CLI/native calls.',
                 'Operator confirms a small budget cap for the smoke run.',
                 'Operator runs a separate command that includes --execute --confirm; smoke/provider-live-harness never upgrades itself into a live call.',
@@ -721,7 +730,7 @@ function buildProviderLiveHarnessReport(root, options = {}) {
         providers: providerPlans,
         checks,
         notes: [
-            'This harness prepares Alibaba/Moonshot live smoke metadata only.',
+            'This harness prepares live smoke metadata for the configured CLI providers.',
             'It does not call provider APIs, spend budget, print key values, write source files, run terminal commands, mutate git, install packages, reload editors, or delete chats.',
             'Later live smoke requires an explicit separate command with --execute --confirm after keys and budget are approved.',
         ],
@@ -4399,19 +4408,26 @@ async function writeSmokeReport(root, report) {
 }
 
 async function commandProviderLiveHarnessSmoke(root, options) {
-    const fakeAlibaba = 'fake-alibaba-live-harness-secret-value';
-    const fakeMoonshot = 'fake-moonshot-live-harness-secret-value';
-    const previousAlibaba = process.env.HARMONY_ALIBABA_API_KEY;
-    const previousMoonshot = process.env.HARMONY_MOONSHOT_API_KEY;
+    const providers = providerLiveHarnessProviders(options);
+    const fakeByProvider = new Map();
+    const previousByEnv = new Map();
     try {
-        process.env.HARMONY_ALIBABA_API_KEY = fakeAlibaba;
-        process.env.HARMONY_MOONSHOT_API_KEY = fakeMoonshot;
-        const report = buildProviderLiveHarnessReport(root, { ...options, providers: 'alibaba,moonshot' });
+        for (const provider of providers) {
+            const config = CLI_PROVIDER_DEFAULTS[provider];
+            const envName = config?.env?.[0];
+            if (!envName) continue;
+            const fake = `fake-${provider}-live-harness-secret-value`;
+            fakeByProvider.set(provider, fake);
+            previousByEnv.set(envName, process.env[envName]);
+            process.env[envName] = fake;
+        }
+        const report = buildProviderLiveHarnessReport(root, options);
         const serializedBeforeSecretCheck = JSON.stringify(report);
+        const leakedFakes = [...fakeByProvider.values()].filter(fake => serializedBeforeSecretCheck.includes(fake));
         report.checks.push({
             name: 'secret_values_excluded_from_report',
-            status: !serializedBeforeSecretCheck.includes(fakeAlibaba) && !serializedBeforeSecretCheck.includes(fakeMoonshot) ? 'passed' : 'failed',
-            detail: 'fake provider key values are not present in harness report JSON',
+            status: leakedFakes.length === 0 ? 'passed' : 'failed',
+            detail: leakedFakes.length === 0 ? 'fake provider key values are not present in harness report JSON' : `leaked fake provider values: ${leakedFakes.join(', ')}`,
         });
         report.checks.push({
             name: 'planned_commands_are_not_executed',
@@ -4432,10 +4448,10 @@ async function commandProviderLiveHarnessSmoke(root, options) {
         }
         return report.status === 'passed' ? 0 : 2;
     } finally {
-        if (previousAlibaba === undefined) delete process.env.HARMONY_ALIBABA_API_KEY;
-        else process.env.HARMONY_ALIBABA_API_KEY = previousAlibaba;
-        if (previousMoonshot === undefined) delete process.env.HARMONY_MOONSHOT_API_KEY;
-        else process.env.HARMONY_MOONSHOT_API_KEY = previousMoonshot;
+        for (const [envName, previous] of previousByEnv) {
+            if (previous === undefined) delete process.env[envName];
+            else process.env[envName] = previous;
+        }
     }
 }
 
