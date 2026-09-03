@@ -99,6 +99,24 @@ The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each pro
 
 **Legacy key migration:** If you previously configured a single API key for a provider, Harmony automatically migrates it to slot 0 (Chat) on first launch. No manual reconfiguration is needed — your existing keys continue to work.
 
+## What's New in v0.4.12
+
+*After VS Code 1.136, some existing provider keys could be treated as missing. v0.4.12 prevents those keys from being discarded, expands `.env` import coverage, and adds an opt-in self-heal setting.*
+
+### 🛡️ VS Code 1.136 Secret Storage resilience
+
+VS Code 1.136.0 changed how `SecretStorage` behaves when a stored key can't be decrypted — it may read as "not set" and drop the entry. Harmony now resolves every provider key through a fallback chain: saved keys → keys stored by earlier versions → process environment → workspace `.env`. Authentication still succeeds when the encrypted store comes up empty, and the missing-key message now reports exactly what was checked.
+
+### 📥 Expanded `.env` import coverage
+
+**Harmony: Import Provider Keys From .env** now covers every supported provider, including Doubao (Volcengine), BytePlus, and StepFun. The import now notes that **Zhipu Coding** uses the same `Z_*` key fields as Zhipu and only switches the API endpoint, so it no longer appears missing. The extension also includes an `env.example` template documenting every variable.
+
+### 🎛️ Self-heal keys from .env (opt-in)
+
+A new **"Self-heal keys from .env"** sidebar checkbox (backed by `harmony.providers.selfHealFromEnv`, off by default) controls whether a key recovered from `.env` is automatically written back into Secret Storage. Reading `.env` is always on; writing a recovered key into the OS keychain is now your explicit choice.
+
+*v0.4.12 keeps the same minimum VS Code (`^1.95.0`) as v0.4.11 — the 1.136 change only affects newer editors, and this release handles it without raising the requirement.*
+
 ## What's New in v0.4.11
 
 *v0.4.11 is a major release — 44+ commits since v0.4.1 spanning a reversible Effect Ledger, Exoskeleton v2.0, new ByteDance-family providers, Gemini native streaming, DeepSeek context caching, and long-running chat-reliability fixes.*

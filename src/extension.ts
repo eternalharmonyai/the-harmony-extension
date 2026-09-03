@@ -99,7 +99,7 @@ const PROVIDER_ENV_IMPORTS: ProviderEnvImport[] = [
     },
     {
         provider: 'zhipu' as ProviderId,
-        label: 'Zhipu (Z.AI / GLM)',
+        label: 'Zhipu (Z.AI / GLM) + Coding',
         secretKey: 'harmony.zhipu.apiKey',
         envNames: ['HARMONY_ZHIPU_API_KEY', 'Z_API_KEY', 'Z_AGENT_API_KEY', 'Z_VISION_API_KEY', 'Z_EXTERNAL_API_KEY'],
         slotEnvNames: {
@@ -158,6 +158,87 @@ const PROVIDER_ENV_IMPORTS: ProviderEnvImport[] = [
         pairedKey: 'harmony.tencent.secretKey',
         envNames: ['TENCENT_SecretID', 'TENCENT_SecretID_AGENT', 'TENCENT_AGENT_SecretId', 'TENCENT_SecretID_EXTERNAL', 'TENCENT_SecretID_VISION'],
         pairedEnvNames: ['TENCENT_SecretKey', 'TENCENT_SecretKey_AGENT', 'TENCENT_AGENT_SecretKey', 'TENCENT_SecretKey_EXTERNAL', 'TENCENT_SecretKey_VISION']
+    },
+    {
+        provider: 'doubao',
+        label: 'Doubao (Volcengine) + Coding + Rewards',
+        secretKey: 'harmony.bytedance.apiKey',
+        envNames: ['HARMONY_VOLCENGINE_API_KEY', 'VOLCENGINE_API_KEY', 'VOLCENGINE_AGENT_API_KEY', 'VOLCENGINE_EXTERNAL_API_KEY', 'VOLCENGINE_VISION_API_KEY'],
+        slotEnvNames: {
+            0: ['VOLCENGINE_API_KEY'],
+            1: ['VOLCENGINE_AGENT_API_KEY'],
+            2: ['VOLCENGINE_EXTERNAL_API_KEY'],
+            3: ['VOLCENGINE_VISION_API_KEY']
+        }
+    },
+    {
+        provider: 'byteplus',
+        label: 'BytePlus + Coding',
+        secretKey: 'harmony.byteplus.apiKey',
+        envNames: ['HARMONY_BYTEPLUS_API_KEY', 'BYTEPLUS_API_KEY', 'BYTEPLUS_AGENT_API_KEY', 'BYTEPLUS_EXTERNAL_API_KEY'],
+        slotEnvNames: {
+            0: ['BYTEPLUS_API_KEY'],
+            1: ['BYTEPLUS_AGENT_API_KEY'],
+            2: ['BYTEPLUS_EXTERNAL_API_KEY']
+        }
+    },
+    {
+        provider: 'stepfun',
+        label: 'StepFun (Jieyue Xingchen)',
+        secretKey: 'harmony.stepfun.apiKey',
+        envNames: ['HARMONY_STEPFUN_API_KEY', 'STEPFUN_API_KEY', 'STEPFUN_AGENT_API_KEY', 'STEPFUN_EXTERNAL_API_KEY'],
+        slotEnvNames: {
+            0: ['STEPFUN_API_KEY'],
+            1: ['STEPFUN_AGENT_API_KEY'],
+            2: ['STEPFUN_EXTERNAL_API_KEY']
+        }
+    },
+    {
+        provider: 'zhipu-coding',
+        label: 'Zhipu Coding (Z.AI Coding Plan)',
+        secretKey: 'harmony.zhipu.apiKey',
+        envNames: ['HARMONY_ZHIPU_API_KEY', 'Z_API_KEY', 'Z_AGENT_API_KEY', 'Z_VISION_API_KEY', 'Z_EXTERNAL_API_KEY'],
+        slotEnvNames: {
+            0: ['Z_API_KEY'],
+            1: ['Z_AGENT_API_KEY'],
+            2: ['Z_EXTERNAL_API_KEY'],
+            3: ['Z_VISION_API_KEY']
+        }
+    },
+    {
+        provider: 'doubao-coding',
+        label: 'Doubao Coding',
+        secretKey: 'harmony.bytedance.apiKey',
+        envNames: ['HARMONY_VOLCENGINE_API_KEY', 'VOLCENGINE_API_KEY', 'VOLCENGINE_AGENT_API_KEY', 'VOLCENGINE_EXTERNAL_API_KEY', 'VOLCENGINE_VISION_API_KEY'],
+        slotEnvNames: {
+            0: ['VOLCENGINE_API_KEY'],
+            1: ['VOLCENGINE_AGENT_API_KEY'],
+            2: ['VOLCENGINE_EXTERNAL_API_KEY'],
+            3: ['VOLCENGINE_VISION_API_KEY']
+        }
+    },
+    {
+        provider: 'doubao-rewards',
+        label: 'Doubao Rewards',
+        secretKey: 'harmony.bytedance.apiKey',
+        envNames: ['HARMONY_VOLCENGINE_API_KEY', 'VOLCENGINE_API_KEY', 'VOLCENGINE_AGENT_API_KEY', 'VOLCENGINE_EXTERNAL_API_KEY', 'VOLCENGINE_VISION_API_KEY'],
+        slotEnvNames: {
+            0: ['VOLCENGINE_API_KEY'],
+            1: ['VOLCENGINE_AGENT_API_KEY'],
+            2: ['VOLCENGINE_EXTERNAL_API_KEY'],
+            3: ['VOLCENGINE_VISION_API_KEY']
+        }
+    },
+    {
+        provider: 'byteplus-coding',
+        label: 'BytePlus Coding',
+        secretKey: 'harmony.byteplus.apiKey',
+        envNames: ['HARMONY_BYTEPLUS_API_KEY', 'BYTEPLUS_API_KEY', 'BYTEPLUS_AGENT_API_KEY', 'BYTEPLUS_EXTERNAL_API_KEY'],
+        slotEnvNames: {
+            0: ['BYTEPLUS_API_KEY'],
+            1: ['BYTEPLUS_AGENT_API_KEY'],
+            2: ['BYTEPLUS_EXTERNAL_API_KEY']
+        }
     }
 ];
 
@@ -2740,7 +2821,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
         rows.unshift({ label: 'Endpoint profiles', description: 'DeepSeek / Alibaba / Moonshot / Zhipu / StepFun / ByteDance', detail: 'Choose regional provider endpoint profiles (international vs mainland China).', command: 'harmony.selectProviderEndpointProfile' });
         rows.unshift({ label: 'KimiCode context window', description: '256k Moderato / 1M Allegretto+', detail: 'Set the KimiCode context window. Default 262144 (256k) works on all plans; 1048576 (1M) requires Allegretto+. Run this if KimiCode returns HTTP 401.', command: 'harmony.selectKimiCodeContextWindow' });
-        rows.unshift({ label: 'Import Provider Keys From .env', description: 'VS Code Secret Storage', detail: 'Imports DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Tencent, and Zhipu/GLM keys into the extension-side store without printing values.', command: 'harmony.importProviderKeysFromEnv' });
+        rows.unshift({ label: 'Import Provider Keys From .env', description: 'VS Code Secret Storage', detail: 'Imports provider API keys from a workspace .env into VS Code Secret Storage without printing values.', command: 'harmony.importProviderKeysFromEnv' });
         rows.unshift({ label: 'Set Tencent / Hunyuan API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.tencent.apiKey for primary and Agents routes.', command: 'harmony.setTencentApiKey' });
         rows.unshift({ label: 'Set Zhipu / GLM API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.zhipu.apiKey for primary and Agents routes.', command: 'harmony.setZhipuApiKey' });
         rows.unshift({ label: 'Set Doubao / Volcengine (Mainland) API Key', description: 'VS Code Secret Storage', detail: 'Stores harmony.bytedance.apiKey for Doubao, Doubao Coding, and Doubao Rewards routes.', command: 'harmony.setDoubaoApiKey' });
