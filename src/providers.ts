@@ -700,25 +700,144 @@ export async function setProviderKeys(secrets: vscode.SecretStorage, provider: P
  *   4. .env (process.env)
  * Returns empty string if nothing found. Tencent is handled separately.
  */
-export async function resolveProviderKey(
+export type ProviderKeySource = 'slot' | 'legacy' | 'process-env' | 'dotenv' | 'none';
+
+// ── .env fallback for provider keys ──────────────────────────────────────
+// Step 4 of the resolution chain. Two distinct situations need it:
+//   1. The key only ever lived in a workspace .env and was never imported
+//      into SecretStorage.
+//   2. SecretStorage reports "not set" for a key that IS saved. VS Code 1.136
+//      returns undefined (and deletes the row) when a secret's ciphertext no
+//      longer decrypts, and silently swaps the whole store for an in-memory
+//      one when OS-level encryption is unavailable. Neither is surfaced to the
+//      extension — both are indistinguishable from "the user saved nothing".
+// Ordered per provider: the HARMONY_ override, then the conventional name,
+// then the slot variants.
+const PROVIDER_ENV_NAMES: Record<ProviderId, string[]> = {
+    deepseek: ['HARMONY_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY', 'DEEPSEEK_AGENT_API_KEY', 'DEEPSEEK_EXTERNAL_API_KEY', 'EXTERNAL_UI_DEEPSEEK_API_KEY'],
+    alibaba: ['HARMONY_ALIBABA_API_KEY', 'ALIBABA_API_KEY', 'DASHSCOPE_API_KEY', 'ALIBABA_AGENT_API_KEY', 'ALIBABA_EXTERNAL_API_KEY', 'ALIBABA_VISION_API_KEY'],
+    moonshot: ['HARMONY_MOONSHOT_API_KEY', 'MOONSHOT_API_KEY', 'MOONSHOT_AGENT_API_KEY', 'MOONSHOT_EXTERNAL_API_KEY'],
+    kimiCode: ['HARMONY_KIMICODE_API_KEY', 'KIMICODE_API_KEY', 'KIMICODE_AGENT_API_KEY', 'KIMICODE_EXTERNAL_API_KEY'],
+    gemini: ['HARMONY_GEMINI_API_KEY', 'GEMINI_API_KEY'],
+    openrouter: ['HARMONY_OPENROUTER_API_KEY', 'OPENROUTER_API_KEY'],
+    openai: ['HARMONY_OPENAI_API_KEY', 'OPENAI_API_KEY', 'openai_api_key'],
+    claude: ['HARMONY_CLAUDE_API_KEY', 'CLAUDE_API_KEY', 'ANTHROPIC_API_KEY'],
+    tencent: ['HARMONY_TENCENT_API_KEY', 'TENCENT_API_KEY', 'TENCENT_AGENT_API_KEY', 'TENCENT_EXTERNAL_API_KEY'],
+    zhipu: ['HARMONY_ZHIPU_API_KEY', 'Z_API_KEY', 'Z_AGENT_API_KEY', 'Z_EXTERNAL_API_KEY', 'Z_VISION_API_KEY'],
+    'zhipu-coding': ['HARMONY_ZHIPU_API_KEY', 'Z_API_KEY', 'Z_AGENT_API_KEY', 'Z_EXTERNAL_API_KEY', 'Z_VISION_API_KEY'],
+    doubao: ['HARMONY_VOLCENGINE_API_KEY', 'VOLCENGINE_API_KEY', 'VOLCENGINE_AGENT_API_KEY', 'VOLCENGINE_EXTERNAL_API_KEY', 'VOLCENGINE_VISION_API_KEY'],
+    'doubao-coding': ['HARMONY_VOLCENGINE_API_KEY', 'VOLCENGINE_API_KEY', 'VOLCENGINE_AGENT_API_KEY', 'VOLCENGINE_EXTERNAL_API_KEY', 'VOLCENGINE_VISION_API_KEY'],
+    'doubao-rewards': ['HARMONY_VOLCENGINE_API_KEY', 'VOLCENGINE_API_KEY', 'VOLCENGINE_AGENT_API_KEY', 'VOLCENGINE_EXTERNAL_API_KEY', 'VOLCENGINE_VISION_API_KEY'],
+    byteplus: ['HARMONY_BYTEPLUS_API_KEY', 'BYTEPLUS_API_KEY', 'BYTEPLUS_AGENT_API_KEY', 'BYTEPLUS_EXTERNAL_API_KEY'],
+    'byteplus-coding': ['HARMONY_BYTEPLUS_API_KEY', 'BYTEPLUS_API_KEY', 'BYTEPLUS_AGENT_API_KEY', 'BYTEPLUS_EXTERNAL_API_KEY'],
+    stepfun: ['HARMONY_STEPFUN_API_KEY', 'STEPFUN_API_KEY', 'STEPFUN_AGENT_API_KEY', 'STEPFUN_EXTERNAL_API_KEY']
+};
+
+/** The variable a user should set to unlock this provider without Secret Storage. */
+export function primaryEnvNameFor(provider: ProviderId): string {
+    const names = PROVIDER_ENV_NAMES[provider] ?? [];
+    return names[1] ?? names[0] ?? '';
+}
+
+const dotenvCache = new Map<string, { entries: Map<string, string>; ts: number }>();
+const DOTENV_CACHE_TTL_MS = 30_000;
+
+function parseDotenvText(text: string): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const raw of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+        const trimmed = raw.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const line = trimmed.startsWith('export ') ? trimmed.slice(7).trim() : trimmed;
+        const eq = line.indexOf('=');
+        if (eq <= 0) continue;
+        const name = line.slice(0, eq).trim();
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+        let value = line.slice(eq + 1).trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.slice(1, -1);
+        }
+        value = value.replace(/[\u0000-\u001f\u007f]+/g, '').trim();
+        if (value && !out.has(name)) out.set(name, value);
+    }
+    return out;
+}
+
+/** Merge .env across workspace folders. Cached — this sits on the chat hot path. */
+async function readWorkspaceDotenv(): Promise<Map<string, string>> {
+    const merged = new Map<string, string>();
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+        const cacheKey = folder.uri.toString();
+        const cached = dotenvCache.get(cacheKey);
+        let entries: Map<string, string>;
+        if (cached && Date.now() - cached.ts < DOTENV_CACHE_TTL_MS) {
+            entries = cached.entries;
+        } else {
+            try {
+                const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folder.uri, '.env'));
+                entries = parseDotenvText(Buffer.from(bytes).toString('utf8'));
+            } catch {
+                entries = new Map(); // a missing .env is the common case, not an error
+            }
+            dotenvCache.set(cacheKey, { entries, ts: Date.now() });
+        }
+        for (const [k, v] of entries) if (!merged.has(k)) merged.set(k, v);
+    }
+    return merged;
+}
+
+/** Provider key from process.env or a workspace .env. Never throws. */
+export async function providerKeyFromEnv(
+    provider: ProviderId
+): Promise<{ key: string; source: ProviderKeySource }> {
+    const names = PROVIDER_ENV_NAMES[provider] ?? [];
+    for (const name of names) {
+        const fromProcess = process.env[name];
+        if (fromProcess && fromProcess.trim()) return { key: fromProcess.trim(), source: 'process-env' };
+    }
+    try {
+        const entries = await readWorkspaceDotenv();
+        for (const name of names) {
+            const value = entries.get(name);
+            if (value) return { key: value, source: 'dotenv' };
+        }
+    } catch {
+        // Unreadable workspace — fall through to 'none'.
+    }
+    return { key: '', source: 'none' };
+}
+
+/**
+ * Resolve a key and report which store answered, so callers can self-heal a
+ * SecretStorage entry VS Code dropped and can tell the user what actually
+ * unlocked the turn.
+ */
+export async function resolveProviderKeyDetailed(
     secrets: vscode.SecretStorage, provider: ProviderId, slotIndex?: number
-): Promise<string> {
+): Promise<{ key: string; source: ProviderKeySource }> {
     if (provider === 'tencent') {
         // Tencent uses native dual-auth — not slot-based
-        return (await secrets.get(SECRET_KEY.tencent)) ?? '';
+        const direct = (await secrets.get(SECRET_KEY.tencent))?.trim();
+        if (direct) return { key: direct, source: 'legacy' };
+        return providerKeyFromEnv(provider);
     }
     const slots = await getProviderKeys(secrets, provider);
     // 1. Specific slot
     if (slotIndex !== undefined && slotIndex >= 0 && slotIndex < KEY_SLOT_COUNT && slots[slotIndex]) {
-        return slots[slotIndex];
+        return { key: slots[slotIndex], source: 'slot' };
     }
     // 2. Default slot
-    if (slots[0]) return slots[0];
+    if (slots[0]) return { key: slots[0], source: 'slot' };
     // 3. Legacy key
-    const legacy = await secrets.get(SECRET_KEY[provider]);
-    if (legacy) return legacy.trim();
-    // 4. .env fallback
-    return '';
+    const legacy = (await secrets.get(SECRET_KEY[provider]))?.trim();
+    if (legacy) return { key: legacy, source: 'legacy' };
+    // 4. process.env / workspace .env
+    return providerKeyFromEnv(provider);
+}
+
+export async function resolveProviderKey(
+    secrets: vscode.SecretStorage, provider: ProviderId, slotIndex?: number
+): Promise<string> {
+    return (await resolveProviderKeyDetailed(secrets, provider, slotIndex)).key;
 }
 
 /** Count non-empty slots for a provider. Used by sidebar indicators. */
@@ -771,6 +890,12 @@ export async function hasKey(secrets: vscode.SecretStorage, provider: ProviderId
     // Fall back to legacy single key
     const k = await secrets.get(SECRET_KEY[provider]);
     if (k) { keyCache.set(provider, { value: true, ts: Date.now() }); return true; }
+    // Env fallback: the same chain resolveProviderKeyDetailed walks, so the
+    // availability shown in the UI matches what a turn can authenticate with.
+    if (provider !== 'tencent') {
+        const fromEnv = await providerKeyFromEnv(provider);
+        if (fromEnv.key) { keyCache.set(provider, { value: true, ts: Date.now() }); return true; }
+    }
     // Tencent dual auth: also check native SecretId+SecretKey
     if (provider === 'tencent') {
         const sid = await secrets.get('harmony.tencent.secretId');
@@ -790,6 +915,8 @@ export function invalidateKeyCache(provider?: ProviderId): void {
     } else {
         keyCache.clear();
     }
+    // A re-saved key often means an edited .env too — drop the parsed copy.
+    dotenvCache.clear();
 }
 
 export async function listAvailableProviders(secrets: vscode.SecretStorage): Promise<ProviderId[]> {

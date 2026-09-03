@@ -34,9 +34,9 @@ function main() {
   for (const expected of ['default', 'coder', 'reviewer']) {
     if (!profileValues.includes(expected)) fail(failures, `profile select missing ${expected}`);
   }
-  for (const provider of ['vscode-lm', 'deepseek', 'alibaba', 'moonshot']) {
-    if (!providerValues.includes(provider)) fail(failures, `provider select missing ${provider}`);
-    if (profileValues.includes(provider)) fail(failures, `profile select incorrectly includes provider ${provider}`);
+  if (!providerValues.includes('vscode-lm')) fail(failures, 'provider select missing vscode-lm');
+  if (!providerValues.includes('${p}') || !source.includes('PROVIDER_IDS.map')) {
+    fail(failures, 'provider select is not rendered dynamically from PROVIDER_IDS');
   }
 
   const setKeyIdCount = (source.match(/id="set-key"/g) || []).length;
@@ -45,24 +45,24 @@ function main() {
   if (!source.includes("provider: $('provider').value")) fail(failures, 'set key button does not target selected provider');
   if (!source.includes('refreshInFlight') || !source.includes('refreshQueued') || !source.includes('postCurrentState')) fail(failures, 'sidebar refresh coalescing guard is missing');
   if (!source.includes('scheduleRefresh') || !source.includes('SIDEBAR_REFRESH_DELAY_MS')) fail(failures, 'sidebar refresh throttling is missing');
-  if (!source.includes('Low-memory sidebar mode') || !source.includes('Harmony sidebar isolation is active') || !source.includes("sidebar.mode") || !source.includes('cappedAccountingSummary') || !pkg.includes('"default": "isolated"')) fail(failures, 'sidebar low-memory/isolation mode and payload caps are missing');
+  if (!source.includes('steering.lowMemory') || !source.includes('isolation.title') || !source.includes("sidebar.mode") || !source.includes('cappedAccountingSummary') || !pkg.includes('"default": "isolated"')) fail(failures, 'sidebar low-memory/isolation mode and payload caps are missing');
   if (!source.includes('configure-sidebar-mode') || !extension.includes('harmony.configureSidebarMode') || !extension.includes('Harmony sidebar display mode')) fail(failures, 'sidebar display mode command/menu surface is missing');
   if (!source.includes('write-oom-diagnostics') || !extension.includes('harmony.writeOomDiagnostics') || !extension.includes('OOM_DIAGNOSTIC_MAX_LOG_FILES')) fail(failures, 'OOM diagnostic report command is missing');
   if (!source.includes('enable-low-memory-safety') || !extension.includes('harmony.enableLowMemorySafetyMode') || !pkg.includes('Harmony: Enable Low-Memory Safety Mode')) fail(failures, 'low-memory safety mode command/sidebar surface is missing');
   if (!source.includes('restore-low-memory-safety') || !extension.includes('harmony.restoreLowMemorySafetySettings') || !pkg.includes('Harmony: Restore Settings Before Low-Memory Safety Mode')) fail(failures, 'low-memory safety restore command/sidebar surface is missing');
   if (!source.includes('prepare-self-update') || !extension.includes('harmony.prepareSelfUpdateCheckpoint')) fail(failures, 'self-update checkpoint command/sidebar surface is missing');
   if (!source.includes('create-seat-handoff') || !extension.includes('harmony.createSeatHandoffBundle') || !pkg.includes('Harmony: Create Seat Handoff Bundle')) fail(failures, 'seat handoff command/sidebar surface is missing');
-  if (!source.includes('AbortSignal.timeout(2500)')) fail(failures, 'Hub status refresh timeout is not bounded to 2500ms');
+  if (!source.includes('setTimeout(() => ctl.abort(), 800)')) fail(failures, 'Hub status refresh timeout is not bounded');
   if (!source.includes('indexedPathCount') || source.includes('indexedPaths:')) fail(failures, 'sidebar should post Hub indexed path count, not the full indexed path list');
   if (!source.includes('providerSecretKeys') || !source.includes('secretKeyFor(provider)')) fail(failures, 'sidebar does not expose provider secret key ids as metadata');
-  if (!source.includes('Import provider .env keys')) fail(failures, 'sidebar import-provider .env action is missing');
-  if (!source.includes('none in VS Code Secret Storage')) fail(failures, 'sidebar direct provider missing-key text does not name VS Code Secret Storage');
+  if (!source.includes('import-provider-env') || !source.includes('consult.importKeys')) fail(failures, 'sidebar import-provider .env action is missing');
+  if (!source.includes("'Key set'") || !source.includes("'No key'")) fail(failures, 'sidebar provider key indicator is missing');
   if (!source.includes('formatLatency') || !source.includes('lastDurationMs') || !source.includes('averageDurationMs')) fail(failures, 'sidebar usage rows do not surface provider latency');
   if (!source.includes('cta-chat') || !source.includes('cta-compose') || !source.includes('#2f7d4a') || !source.includes('#6c4ab6')) fail(failures, 'sidebar primary Compose/Open Chat CTA styling is missing');
   if (!extension.includes('CLI/native provider keys use Windows DPAPI or env and are separate from this status')) fail(failures, 'provider status does not distinguish extension Secret Storage from CLI/native DPAPI');
   if (!extension.includes('Import Provider Keys From .env') || !extension.includes('harmony.importProviderKeysFromEnv')) fail(failures, 'provider status does not surface the .env import command');
   if (!extension.includes('DEEPSEEK_AGENT_API_KEY') || !extension.includes('ALIBABA_AGENT_API_KEY') || !extension.includes('MOONSHOT_AGENT_API_KEY')) fail(failures, 'provider env import does not include the new agent aliases');
-  if (!chat.includes('no API key is saved in VS Code Secret Storage at') || !chat.includes('Windows DPAPI store')) fail(failures, 'chat missing-key message does not explain provider key scopes');
+  if (!chat.includes('no usable API key was found') || !chat.includes('Windows DPAPI store') || !chat.includes('key slots') || !chat.includes('VS Code 1.136')) fail(failures, 'chat missing-key message does not explain provider key scopes');
 
   const report = {
     version: 1,

@@ -497,6 +497,10 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                     case 'importProviderKeysFromEnv':
                       await vscode.commands.executeCommand('harmony.importProviderKeysFromEnv');
                       break;
+                    case 'toggleSelfHealEnv':
+                      await vscode.workspace.getConfiguration('harmony')
+                        .update('providers.selfHealFromEnv', !!msg.value, true);
+                      break;
                     case 'resetUsage':
                         await vscode.commands.executeCommand('harmony.resetCostCounters');
                         break;
@@ -782,6 +786,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             ocrOnly: !!cfg.get<boolean>('vision.ocrOnly'),
             skipOcr: !!cfg.get<boolean>('vision.skipOcr'),
             localFirst: !!cfg.get<boolean>('vision.localFirst'),
+            selfHealEnv: !!cfg.get<boolean>('providers.selfHealFromEnv'),
             providerHealth: null,
             swarmProvider: providerDisplayName(swarmProvider),
             swarmTier,
@@ -1361,6 +1366,7 @@ ${PROVIDER_IDS.map(p => {
   <button class="subtle" id="show-provider-status" style="margin-top:4px;">${lm.getString('consult.showStatus')}</button>
   <button class="subtle" id="configure-provider-endpoints" style="margin-top:4px;">${lm.getString('consult.configureEndpoints')}</button>
   <button class="subtle" id="import-provider-env" style="margin-top:4px;">${lm.getString('consult.importKeys')}</button>
+  <label class="row" style="margin-top:6px;"><input type="checkbox" id="self-heal-env"> ${lm.getString('consult.selfHealEnv')} <span class="hint">${lm.getString('consult.selfHealEnvHint')}</span></label>
   <button class="subtle" id="discover-models" style="margin-top:4px;">${lm.getString('consult.discoverModels')}</button>
   <button class="subtle" id="model-discovery-guide" style="margin-top:4px;">${lm.getString('consult.updateGuide')}</button>
 
@@ -1855,6 +1861,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
     $('ocr-only').checked = !!s.ocrOnly;
     $('skip-ocr').checked = !!s.skipOcr;
       $('local-first').checked = !!s.localFirst;
+    $('self-heal-env').checked = !!s.selfHealEnv;
     const wEl = $('whisper-inbox');
     if (s.whisperCount > 0) wEl.innerHTML = '<div class="item">' + s.whisperCount + ' ' + LOC.whisper_unread + '</div>';
     else wEl.innerHTML = '<div class="empty">' + LOC.whisper_no_pending + '</div>';
@@ -2343,6 +2350,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
   $('ocr-only').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleOcrOnly', value: e.target.checked }));
   $('skip-ocr').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleSkipOcr', value: e.target.checked }));
   $('local-first').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleLocalFirst', value: e.target.checked }));
+  $('self-heal-env').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleSelfHealEnv', value: e.target.checked }));
   $('check-whispers').addEventListener('click', () => vscode.postMessage({ type: 'checkWhispers' }));
   $('refresh-concert-board').addEventListener('click', () => vscode.postMessage({ type: 'refreshConcertBoard' }));
   $('add-custom-role').addEventListener('click', () => vscode.postMessage({ type: 'addCustomRole' }));

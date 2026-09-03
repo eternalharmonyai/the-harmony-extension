@@ -13,7 +13,7 @@ import { formatHarmonyToolLedger } from './opsTools';
 import { showHarmonyAsk } from './askView';
 import { appendContinuityEntry, compactContinuity, createContinuityHandoff, forkContinuity, formatContinuityEntry, formatContinuityForPrompt, getContinuityStatus, importContinuityFromText, listContinuityEntries } from './continuity';
 import { formatRulesDetails, formatRulesStatus, loadRulesContext } from './rules';
-import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, listAvailableProviders, modelFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, Tier, tencentSignV3, TENCENT_NATIVE_HOST, TENCENT_NATIVE_SERVICE, TENCENT_NATIVE_REGION, TENCENT_NATIVE_VERSION, sha256Hex, hmacSha256, CollabDirectProvider } from './providers';
+import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, invalidateKeyCache, listAvailableProviders, modelFor, primaryEnvNameFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, resolveProviderKey, resolveProviderKeyDetailed, secretKeyFor, Tier, tencentSignV3, TENCENT_NATIVE_HOST, TENCENT_NATIVE_SERVICE, TENCENT_NATIVE_REGION, TENCENT_NATIVE_VERSION, sha256Hex, hmacSha256, CollabDirectProvider } from './providers';
 import { formatMcpStatus, mcpStatusSummary } from './mcp';
 import { readUnread, markAllRead, formatWhispersForPrompt, onWhisperChange, getUnreadCount, startMidSessionTracking, getPendingMidSessionWhispers, markMidSessionWhispersDelivered } from './whisperInbox';
 import { searchPatterns as searchGlobalMemory, autoCapturePattern } from './globalMemory';
@@ -3105,7 +3105,7 @@ async function handleSlashCommand(
     if (request.command === 'status') {
         const cfg = vscode.workspace.getConfiguration('harmony');
         const provider = cfg.get<string>('modelProvider') ?? 'vscode-lm';
-        const hasDeepSeekKey = !!await context.secrets.get('harmony.deepseekApiKey');
+        const hasDeepSeekKey = !!await resolveProviderKey(context.secrets, 'deepseek');
         const expectedTools = activeToolNames(false);
         const registeredTools = await waitForActiveHarmonyTools(false, 2000);
         const registeredHarmonyTools = registeredTools.filter(tool => tool.name.startsWith('harmony_'));
@@ -4029,8 +4029,38 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
             let turnOutcome: AgentRunOutcome;
 
             if (directRoute) {
-                let apiKey = await context.secrets.get(directRoute.secretKey);
-                
+                // Walk the full chain (slots → legacy secret → process.env → workspace
+                // .env) rather than reading the legacy secret alone. A key saved through
+                // the slot editor, or living only in .env, used to fail here while the
+                // sidebar happily reported the provider as ready.
+                const resolvedKey = await resolveProviderKeyDetailed(context.secrets, directRoute.provider);
+                let apiKey = resolvedKey.key;
+
+                // Self-heal the legacy entry when something else answered. VS Code 1.136
+                // deletes a secret whose ciphertext no longer decrypts and reports it as
+                // unset, so an update can silently empty the store; rewriting it here
+                // restores the other legacy readers without prompting the user.
+                // Slot keys always heal (same store). Keys pulled from .env / process.env
+                // only heal when opted in via harmony.providers.selfHealFromEnv, because
+                // that silently promotes a plaintext secret into Secret Storage.
+                const selfHealFromEnv = vscode.workspace.getConfiguration('harmony').get<boolean>('providers.selfHealFromEnv') === true;
+                const shouldHeal = resolvedKey.source === 'slot'
+                    || (selfHealFromEnv && (resolvedKey.source === 'dotenv' || resolvedKey.source === 'process-env'));
+                if (apiKey && shouldHeal) {
+                    const healProvider = directRoute.provider;
+                    const healKey = directRoute.secretKey;
+                    void (async () => {
+                        try {
+                            if (!(await context.secrets.get(healKey))) {
+                                await context.secrets.store(healKey, apiKey as string);
+                                invalidateKeyCache(healProvider as ProviderId);
+                            }
+                        } catch {
+                            // Secret Storage unavailable — the turn still runs on the resolved key.
+                        }
+                    })();
+                }
+
                 // For Tencent, PREFER native SecretId+SecretKey auth when available (TC3-HMAC-SHA256 signing).
                 // Only fall back to the OpenAI-compatible API key if native creds are not set.
                 // This prevents stale/wrong values in harmony.tencent.apiKey from causing 401 errors.
@@ -4044,10 +4074,13 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
                 }
                 
                 if (!apiKey) {
+                    const envName = primaryEnvNameFor(directRoute.provider as ProviderId);
                     stream.markdown(
-                        `${directRoute.label} is selected for primary Harmony turns, but no API key is saved in VS Code Secret Storage at \`${directRoute.secretKey}\`.\n\n` +
-                        `Keys saved for terminal/native provider routes use a separate Windows DPAPI store and do not automatically unlock this VS Code primary route. ` +
-                        `Run **Harmony: Set ${directRoute.label} API Key** from the Command Palette, or run **Harmony: Import Provider Keys From .env** for DeepSeek, Alibaba/Qwen, or Moonshot/Kimi keys, then try again.`
+                        `**${directRoute.label} is selected for primary Harmony turns, but no usable API key was found.**\n\n` +
+                        `Harmony checked, in order: the \`${directRoute.provider}\` key slots, the secret \`${directRoute.secretKey}\`, \`process.env.${envName}\`, and \`${envName}\` in each workspace \`.env\`.\n\n` +
+                        `Keys saved for terminal/native provider routes live in a separate Windows DPAPI store and never unlock this VS Code primary route.\n\n` +
+                        `If you know this key **was** saved, suspect VS Code Secret Storage rather than the key itself. Since VS Code 1.136, a stored secret whose ciphertext no longer decrypts is deleted and reported as unset, and when OS-level encryption is unavailable the entire store is silently replaced by an in-memory one that reads empty every session. A VS Code update can trigger either.\n\n` +
+                        `To recover: run **Harmony: Set ${directRoute.label} API Key**, or **Harmony: Import Provider Keys From .env**. Setting \`${envName}\` in your workspace \`.env\` also works on its own — Harmony reads that directly, so the route survives an empty Secret Storage.`
                     );
                     return;
                 }
@@ -4084,14 +4117,14 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
                     let fbProvider: DirectPrimaryProvider | undefined;
                     let fbKey: string | undefined;
                     for (const candidate of fallbackOrder) {
-                        const key = await context.secrets.get(secretKeyFor(candidate));
+                        const key = await resolveProviderKey(context.secrets, candidate as ProviderId);
                         if (key) { fbProvider = candidate; fbKey = key; break; }
                     }
                     if (!fbProvider || !fbKey) {
                         // No affordable provider available — offer premium rescue with confirmation.
                         const premiumAvailable: DirectPrimaryProvider[] = [];
                         for (const candidate of premiumFallbackOrder) {
-                            if (await context.secrets.get(secretKeyFor(candidate))) premiumAvailable.push(candidate);
+                            if (await resolveProviderKey(context.secrets, candidate as ProviderId)) premiumAvailable.push(candidate);
                         }
                         if (premiumAvailable.length > 0) {
                             const choice = await withBoundedPrompt(
@@ -4108,7 +4141,7 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
                             const picked = premiumAvailable.find(p => providerLabelFor(p) === choice);
                             if (picked) {
                                 fbProvider = picked;
-                                fbKey = await context.secrets.get(secretKeyFor(picked));
+                                fbKey = await resolveProviderKey(context.secrets, picked as ProviderId);
                             }
                         }
                     }
