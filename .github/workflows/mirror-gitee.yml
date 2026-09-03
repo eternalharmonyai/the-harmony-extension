@@ -1,0 +1,97 @@
+name: Mirror to Gitee
+
+# Automatically keep the public Gitee mirror in sync with this GitHub repo.
+# - Every push to `main` or a `v*` tag mirrors code + tags to Gitee.
+# - Every published release is re-created on Gitee (same notes + VSIX attached).
+#
+# Requires one repo secret on the public repo:
+#   GITEE_REPO  ->  a Gitee repo-scoped PAT with read-write (读写) access.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  GITEE_OWNER: eternalharmony
+  GITEE_REPO: the-harmony-extension
+
+jobs:
+  mirror:
+    # Only run in the public repo so the private mirror (origin) never burns
+    # private-repo Action minutes and never double-mirrors.
+    if: github.repository == 'eternalharmonyai/the-harmony-extension'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Mirror main + tags to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_REPO }}
+        run: |
+          set -euo pipefail
+          git remote add gitee \
+            "https://eternalharmonyai:${GITEE_TOKEN}@gitee.com/${GITEE_OWNER}/${GITEE_REPO}.git"
+          git push gitee origin/main:main
+          git push gitee --tags
+          echo "Mirrored main + tags to Gitee."
+
+      - name: Recreate release on Gitee (notes + VSIX)
+        if: github.event_name == 'release'
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_REPO }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          # 1. Pull the GitHub release JSON for this tag (body + VSIX asset URL).
+          RELEASE_JSON="$(curl -sSL \
+            -H "Authorization: token ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+
+          # 2. Extract the release body and the .vsix asset download URL.
+          echo "${RELEASE_JSON}" | jq -r '.body // ""' > release-body.md
+          VSIX_URL="$(echo "${RELEASE_JSON}" \
+            | jq -r '.assets[]? | select(.name | endswith(".vsix")) | .browser_download_url' \
+            | head -n 1)"
+
+          # 3. The commit SHA the tag points at (Gitee calls this target_commitish).
+          TARGET_SHA="$(git rev-list -n 1 "${TAG}")"
+
+          # 4. Create the Gitee release with the same notes.
+          RELEASE_ID="$(curl -sS -X POST \
+            "https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases" \
+            -d "access_token=${GITEE_TOKEN}" \
+            -d "tag_name=${TAG}" \
+            -d "name=${TAG}" \
+            -d "target_commitish=${TARGET_SHA}" \
+            --data-urlencode "body@release-body.md" \
+            | jq -r '.id')"
+          echo "Gitee release created: id=${RELEASE_ID}"
+
+          # 5. Attach the VSIX if the GitHub release had one.
+          if [ -n "${VSIX_URL}" ] && [ "${VSIX_URL}" != "null" ]; then
+            curl -sSL \
+              -H "Authorization: token ${GH_TOKEN}" \
+              -H "Accept: application/octet-stream" \
+              -o harmony-extension.vsix "${VSIX_URL}"
+            curl -sS -X POST \
+              "https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/${RELEASE_ID}/attach_files" \
+              -F "access_token=${GITEE_TOKEN}" \
+              -F "file=@harmony-extension.vsix"
+            echo "VSIX attached to Gitee release."
+          else
+            echo "No VSIX asset on the GitHub release; skipped attach."
+          fi
