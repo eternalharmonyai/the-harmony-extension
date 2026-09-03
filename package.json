@@ -2,7 +2,7 @@
   "name": "harmony-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "publisher": "harmony",
   "private": true,
   "license": "UNLICENSED",
@@ -327,6 +327,155 @@
       }
     ],
     "languageModelTools": [
+      {
+        "name": "harmony_pdf_ingest",
+        "displayName": "Ingest PDF",
+        "modelDescription": "Ingest a PDF (from a local file path or a URL) into a local research corpus for downstream analysis. Returns the extracted text preview, word count, and corpus ID.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyPdfIngest",
+        "tags": [
+          "research",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file_path": {
+              "type": "string",
+              "description": "Workspace-relative or absolute path to a PDF file."
+            },
+            "url": {
+              "type": "string",
+              "description": "HTTP(S) URL of a PDF to fetch."
+            },
+            "title": {
+              "type": "string",
+              "description": "Optional title for the corpus entry."
+            }
+          }
+        }
+      },
+      {
+        "name": "harmony_conflict_detector",
+        "displayName": "Detect conflicts",
+        "modelDescription": "Detect potential conflicting claims across multiple texts (corpus IDs or raw text blocks). Produces keyword-level candidate conflicts; human review is recommended.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyConflictDetector",
+        "tags": [
+          "research",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "texts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Corpus entry IDs (e.g. corpus-...) or raw text blocks to compare."
+            },
+            "topic": {
+              "type": "string",
+              "description": "Optional topic label for the analysis."
+            }
+          },
+          "required": [
+            "texts"
+          ]
+        }
+      },
+      {
+        "name": "harmony_citation_influence",
+        "displayName": "Citation influence",
+        "modelDescription": "Look up a paper's citation influence via Semantic Scholar by DOI, title, or paper ID. Returns citation counts, influence rank, top citing papers, and top references.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyCitationInfluence",
+        "tags": [
+          "research",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "doi": {
+              "type": "string",
+              "description": "DOI of the paper."
+            },
+            "title": {
+              "type": "string",
+              "description": "Title of the paper to search."
+            },
+            "paper_id": {
+              "type": "string",
+              "description": "Semantic Scholar paper ID."
+            }
+          }
+        }
+      },
+      {
+        "name": "harmony_research_state",
+        "displayName": "Research project state",
+        "modelDescription": "Manage a local research project state machine (create, list, or advance). Projects move through briefing, scanning, evidence, synthesis, and publication states.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyResearchState",
+        "tags": [
+          "research",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "description": "One of: create, list, advance."
+            },
+            "project_id": {
+              "type": "string",
+              "description": "Project ID (required for advance)."
+            },
+            "topic": {
+              "type": "string",
+              "description": "Topic (required for create)."
+            },
+            "state": {
+              "type": "string",
+              "description": "Target state for advance: briefing|scanning|evidence|synthesis|publication."
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      },
+      {
+        "name": "harmony_code_theory_bridge",
+        "displayName": "Code theory bridge",
+        "modelDescription": "Bridge code (by file path, symbol, or algorithm name) to related academic papers via Semantic Scholar. Returns the code context and matching literature.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyCodeTheoryBridge",
+        "tags": [
+          "research",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file_path": {
+              "type": "string",
+              "description": "Workspace-relative or absolute path to a source file."
+            },
+            "symbol": {
+              "type": "string",
+              "description": "A symbol/identifier name to look up."
+            },
+            "algorithm": {
+              "type": "string",
+              "description": "An algorithm name to look up."
+            }
+          }
+        }
+      },
       {
         "name": "harmony_read_file",
         "displayName": "Read file",
@@ -9361,6 +9510,11 @@
           "type": "boolean",
           "default": false,
           "description": "When true, Harmony makes Gemini calls without asserting billing requirements. The API enforces its own free-tier limits (15 req/min for Flash). Quota errors are surfaced clearly rather than silently burning credits. Your AI Studio key works on both free and paid paths Ã¢â‚¬â€ this setting just controls which path Harmony expects."
+        },
+        "harmony.providers.selfHealFromEnv": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, Harmony may silently write a provider key recovered from a workspace .env (or process environment) back into VS Code Secret Storage so other readers see it. Off by default because it promotes a plaintext secret into encrypted storage without an explicit Import. Slot-saved keys always self-heal regardless of this setting."
         },
         "harmony.providerAccounting.enabled": {
           "type": "boolean",
