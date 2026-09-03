@@ -25,7 +25,7 @@ export interface VisionRouteResult {
 
 // ── Gemini ──────────────────────────────────────────────────────────
 
-const GEMINI_VISION_MODEL_DEFAULT = 'gemini-3.7-flash';
+const GEMINI_VISION_MODEL_DEFAULT = 'gemini-3.8-flash';
 
 function geminiTierForModel(model: string): 'light' | 'mid' | 'heavy' {
     const lower = model.toLowerCase();

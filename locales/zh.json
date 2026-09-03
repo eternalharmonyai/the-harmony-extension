@@ -129,7 +129,7 @@
   "consult.discoverModels": "⚡ 实时探索可用模型…",
   "consult.updateGuide": "模型更新指南…",
   "consult.selfHealEnv": "从 .env 自愈密钥",
-  "consult.selfHealEnvHint": "静默将恢复的 .env 密钥重新保存到 Secret Storage",
+  "consult.selfHealEnvHint": "开启后：无需手动导入——直接发送消息，Harmony 会自动从 .env 恢复密钥（静默重新保存）。手动导入仍随时可用。",
 
   "visual.title": "视觉工具",
   "visual.visionModel": "视觉模型（图像分析）",

@@ -2,7 +2,7 @@
   "name": "harmony-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "publisher": "harmony",
   "private": true,
   "license": "UNLICENSED",
@@ -241,7 +241,7 @@
           },
           {
             "name": "plan",
-            "description": "Plan a multi-step change before any edits. No tools writes Ã¢â‚¬â€ just a plan."
+            "description": "Plan a multi-step change before any edits. No tools writes — just a plan."
           },
           {
             "name": "commit",
@@ -561,7 +561,7 @@
       {
         "name": "harmony_write_file",
         "displayName": "Write file",
-        "modelDescription": "Create or overwrite a workspace-relative file with the given UTF-8 content. Requires user confirmation. PREFER harmony_edit_file for changes to existing files Ã¢â‚¬â€ this tool rewrites the entire file and is best reserved for new files or full rewrites.",
+        "modelDescription": "Create or overwrite a workspace-relative file with the given UTF-8 content. Requires user confirmation. PREFER harmony_edit_file for changes to existing files — this tool rewrites the entire file and is best reserved for new files or full rewrites.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonyWrite",
         "tags": [
@@ -6852,7 +6852,7 @@
       {
         "name": "harmony_search_patterns",
         "displayName": "Search Cross-Workspace Patterns",
-        "modelDescription": "Search for technical patterns and solutions stored across all workspaces. Use this when you think a similar problem may have been solved before â€” returns only the technical solution, never private context. Safe to call liberally.",
+        "modelDescription": "Search for technical patterns and solutions stored across all workspaces. Use this when you think a similar problem may have been solved before — returns only the technical solution, never private context. Safe to call liberally.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonySearchPatterns",
         "tags": [
@@ -7397,7 +7397,7 @@
       {
         "name": "harmony_uncertainty_fabric",
         "displayName": "Uncertainty Fabric",
-        "modelDescription": "Track calibrated confidence on every claim. Auto-escalates low-confidence claims for peer review. Active uncertainty â€” not just passive metadata. USE FOR: tracking what the swarm is unsure about, triggering review when confidence drops.",
+        "modelDescription": "Track calibrated confidence on every claim. Auto-escalates low-confidence claims for peer review. Active uncertainty — not just passive metadata. USE FOR: tracking what the swarm is unsure about, triggering review when confidence drops.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonyUncertaintyFabric",
         "tags": [
@@ -7557,7 +7557,7 @@
       {
         "name": "harmony_value_resolver",
         "displayName": "Value Resolver",
-        "modelDescription": "Resolve tradeoff disputes through explicit value hierarchies with auditable justification. Define principles with priorities, then resolve tensions by priority comparison. Not majority vote â€” auditable, principle-based resolution. USE FOR: deciding between speed vs security, innovation vs stability, user freedom vs safety.",
+        "modelDescription": "Resolve tradeoff disputes through explicit value hierarchies with auditable justification. Define principles with priorities, then resolve tensions by priority comparison. Not majority vote — auditable, principle-based resolution. USE FOR: deciding between speed vs security, innovation vs stability, user freedom vs safety.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonyValueResolver",
         "tags": [
@@ -9048,7 +9048,7 @@
             "zh"
           ],
           "default": "en",
-          "description": "Language for Harmony chat responses and sidebar UI. 'zh' for Chinese (ä¸­æ–‡)."
+          "description": "Language for Harmony chat responses and sidebar UI. 'zh' for Chinese (中文)."
         },
         "harmony.modelProvider": {
           "type": "string",
@@ -9078,9 +9078,9 @@
             "mix"
           ],
           "enumDescriptions": [
-            "Harmony Ã¢â‚¬â€ sub-agents always call Harmony's own provider (e.g. DeepSeek direct API). VS Code LM is never used.",
-            "VS Code Ã¢â‚¬â€ sub-agents always use the model VS Code chat resolves.",
-            "Mix Ã¢â‚¬â€ prefer VS Code LM; fall back to Harmony's provider when VS Code LM is unavailable."
+            "Harmony — sub-agents always call Harmony's own provider (e.g. DeepSeek direct API). VS Code LM is never used.",
+            "VS Code — sub-agents always use the model VS Code chat resolves.",
+            "Mix — prefer VS Code LM; fall back to Harmony's provider when VS Code LM is unavailable."
           ],
           "default": "mix",
           "description": "Routing mode for collaborative sub-agents and the local agent loop."
@@ -9095,11 +9095,11 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Auto / Balanced Ã¢â‚¬â€ recommended default. Uses a coding-tier direct provider when Route needs Harmony. Prefers Gemini only when Gemini free-quota mode is enabled.",
-            "Economy / Fast Ã¢â‚¬â€ use light-tier models for routine collaborative scouts and lower-intensity sessions.",
-            "Balanced Ã¢â‚¬â€ explicit balanced profile, currently equivalent to coding tier for collaborative agents.",
-            "Power / Hard Sessions Ã¢â‚¬â€ use heavy-tier models with premium/cost guards.",
-            "Custom Ã¢â‚¬â€ use harmony.collabDirectProvider and harmony.collabDirectTier exactly."
+            "Auto / Balanced — recommended default. Uses a coding-tier direct provider when Route needs Harmony. Prefers Gemini only when Gemini free-quota mode is enabled.",
+            "Economy / Fast — use light-tier models for routine collaborative scouts and lower-intensity sessions.",
+            "Balanced — explicit balanced profile, currently equivalent to coding tier for collaborative agents.",
+            "Power / Hard Sessions — use heavy-tier models with premium/cost guards.",
+            "Custom — use harmony.collabDirectProvider and harmony.collabDirectTier exactly."
           ],
           "default": "auto",
           "description": "Model profile for Harmony direct collaborative agents. This is separate from harmony.modelProvider and harmony.collabProvider."
@@ -9162,8 +9162,8 @@
             "deepseek-v4-pro"
           ],
           "enumDescriptions": [
-            "DeepSeek V4 Flash Ã¢â‚¬â€ fast, cost-effective, thinking ON by default.",
-            "DeepSeek V4 Pro Ã¢â‚¬â€ most capable, currently 75% off until May 2026."
+            "DeepSeek V4 Flash — fast, cost-effective, thinking ON by default.",
+            "DeepSeek V4 Pro — most capable, currently 75% off until May 2026."
           ],
           "default": "deepseek-v4-flash",
           "description": "DeepSeek model to use when harmony.modelProvider is 'deepseek'."
@@ -9378,7 +9378,7 @@
         "harmony.planOnlyMode": {
           "type": "boolean",
           "default": false,
-          "description": "When true, Harmony cannot call write/edit/patch/run-terminal tools Ã¢â‚¬â€ she can only read, list, grep, open, and ask questions. Useful for planning-before-doing sessions."
+          "description": "When true, Harmony cannot call write/edit/patch/run-terminal tools — she can only read, list, grep, open, and ask questions. Useful for planning-before-doing sessions."
         },
         "harmony.bigGunsMode": {
           "type": "string",
@@ -9497,24 +9497,24 @@
         "harmony.claude.enableThinking": {
           "type": "boolean",
           "default": false,
-          "description": "Enable extended thinking on Anthropic Claude model calls. DISABLED by default because thinking tokens are billed separately and can cause Ã¢â€”ÂÃ¢â€”ÂÃ¢â€”Â High impact on a single Opus call. Only enable intentionally for specialized deep-reasoning tasks, and pair it with harmony.claude.thinkingBudgetTokens to cap spend."
+          "description": "Enable extended thinking on Anthropic Claude model calls. DISABLED by default because thinking tokens are billed separately and can cause High impact on a single Opus call. Only enable intentionally for specialized deep-reasoning tasks, and pair it with harmony.claude.thinkingBudgetTokens to cap spend."
         },
         "harmony.claude.thinkingBudgetTokens": {
           "type": "number",
           "default": 4000,
           "minimum": 1000,
           "maximum": 32000,
-          "description": "Maximum thinking tokens per Anthropic Claude model call when harmony.claude.enableThinking is true. 4000 tokens: Ã¢â€”ÂÃ¢â€”ÂÃ¢â€”â€¹ Medium on Sonnet, Ã¢â€”ÂÃ¢â€”ÂÃ¢â€”Â High on Opus. A hard cap so accidental thinking spikes cannot exceed this."
+          "description": "Maximum thinking tokens per Anthropic Claude model call when harmony.claude.enableThinking is true. 4000 tokens: Medium on Sonnet, High on Opus. A hard cap so accidental thinking spikes cannot exceed this."
         },
         "harmony.gemini.useFreeQuota": {
           "type": "boolean",
           "default": false,
-          "description": "When true, Harmony makes Gemini calls without asserting billing requirements. The API enforces its own free-tier limits (15 req/min for Flash). Quota errors are surfaced clearly rather than silently burning credits. Your AI Studio key works on both free and paid paths Ã¢â‚¬â€ this setting just controls which path Harmony expects."
+          "description": "When true, Harmony makes Gemini calls without asserting billing requirements. The API enforces its own free-tier limits (15 req/min for Flash). Quota errors are surfaced clearly rather than silently burning credits. Your AI Studio key works on both free and paid paths — this setting just controls which path Harmony expects."
         },
         "harmony.providers.selfHealFromEnv": {
           "type": "boolean",
           "default": false,
-          "description": "When true, Harmony may silently write a provider key recovered from a workspace .env (or process environment) back into VS Code Secret Storage so other readers see it. Off by default because it promotes a plaintext secret into encrypted storage without an explicit Import. Slot-saved keys always self-heal regardless of this setting."
+          "description": "When true, Harmony may silently write a provider key recovered from a workspace .env (or process environment) back into VS Code Secret Storage so other readers see it. When enabled, a forgotten manual Import isn't necessary — simply sending a message recovers the key from .env automatically. Off by default because it promotes a plaintext secret into encrypted storage without an explicit Import. Slot-saved keys always self-heal regardless of this setting."
         },
         "harmony.providerAccounting.enabled": {
           "type": "boolean",
@@ -9671,7 +9671,7 @@
             "coding"
           ],
           "default": "coding",
-          "description": "Default model tier for harmony_orchestrate_codebase. 'coding' maps to DeepSeek Flash by default Ã¢â‚¬â€ cheap, transparent billing, strong code reasoning. Change to 'heavy' only for questions that truly need the full model."
+          "description": "Default model tier for harmony_orchestrate_codebase. 'coding' maps to DeepSeek Flash by default — cheap, transparent billing, strong code reasoning. Change to 'heavy' only for questions that truly need the full model."
         },
         "harmony.hub.url": {
           "type": "string",
@@ -9704,7 +9704,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Absolute folder paths HarmonyHub is allowed to index. Set once Ã¢â‚¬â€ the extension syncs them to the daemon automatically on startup and whenever the list changes."
+          "description": "Absolute folder paths HarmonyHub is allowed to index. Set once — the extension syncs them to the daemon automatically on startup and whenever the list changes."
         },
         "harmony.sidebar.mode": {
           "type": "string",
@@ -9941,7 +9941,7 @@
         },
         "harmony.vision.geminiModel": {
           "type": "string",
-          "default": "gemini-3.7-flash",
+          "default": "gemini-3.8-flash",
           "description": "Gemini model used for image analysis when you attach screenshots in the Harmony Compose panel."
         },
         "harmony.vision.provider": {
@@ -9969,7 +9969,7 @@
         "harmony.vision.ocrOnly": {
           "type": "boolean",
           "default": false,
-          "description": "When ON, Compose images are processed with local Windows OCR only Ã¢â‚¬â€ no API call. If OCR finds no text, the image is skipped (no fallback to paid vision). Turn ON to guarantee zero-cost, zero-cloud image processing."
+          "description": "When ON, Compose images are processed with local Windows OCR only — no API call. If OCR finds no text, the image is skipped (no fallback to paid vision). Turn ON to guarantee zero-cost, zero-cloud image processing."
         },
         "harmony.vision.localFirst": {
           "type": "boolean",
@@ -9979,13 +9979,14 @@
         "harmony.vision.autoGeminiModel": {
           "type": "string",
           "enum": [
+            "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
             "gemini-3.1-flash-lite",
             "gemini-3.1-pro-preview"
           ],
-          "default": "gemini-3.7-flash",
+          "default": "gemini-3.8-flash",
           "description": "Gemini model used when the vision provider is set to Auto (Gemini-first or Qwen-first fallback mode)."
         },
         "harmony.vision.autoQwenModel": {
@@ -10123,6 +10124,166 @@
           "type": "string",
           "default": "",
           "description": "Override Zhipu Coding Plan coding-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.zhipu.light": {
+          "type": "string",
+          "default": "",
+          "description": "Override Zhipu / GLM (Z.AI) light-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.zhipu.mid": {
+          "type": "string",
+          "default": "",
+          "description": "Override Zhipu / GLM (Z.AI) mid-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.zhipu.heavy": {
+          "type": "string",
+          "default": "",
+          "description": "Override Zhipu / GLM (Z.AI) heavy-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.zhipu.coding": {
+          "type": "string",
+          "default": "",
+          "description": "Override Zhipu / GLM (Z.AI) coding-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.kimiCode.light": {
+          "type": "string",
+          "default": "",
+          "description": "Override KimiCode light-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.kimiCode.mid": {
+          "type": "string",
+          "default": "",
+          "description": "Override KimiCode mid-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.kimiCode.heavy": {
+          "type": "string",
+          "default": "",
+          "description": "Override KimiCode heavy-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.kimiCode.coding": {
+          "type": "string",
+          "default": "",
+          "description": "Override KimiCode coding-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao.light": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao (Volcengine) light-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao.mid": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao (Volcengine) mid-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao.heavy": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao (Volcengine) heavy-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao.coding": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao (Volcengine) coding-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao-coding.light": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao Coding Plan light-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao-coding.mid": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao Coding Plan mid-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao-coding.heavy": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao Coding Plan heavy-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao-coding.coding": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao Coding Plan coding-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao-rewards.light": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao Rewards light-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao-rewards.mid": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao Rewards mid-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao-rewards.heavy": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao Rewards heavy-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.doubao-rewards.coding": {
+          "type": "string",
+          "default": "",
+          "description": "Override Doubao Rewards coding-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.byteplus.light": {
+          "type": "string",
+          "default": "",
+          "description": "Override BytePlus / Doubao (International) light-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.byteplus.mid": {
+          "type": "string",
+          "default": "",
+          "description": "Override BytePlus / Doubao (International) mid-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.byteplus.heavy": {
+          "type": "string",
+          "default": "",
+          "description": "Override BytePlus / Doubao (International) heavy-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.byteplus.coding": {
+          "type": "string",
+          "default": "",
+          "description": "Override BytePlus / Doubao (International) coding-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.byteplus-coding.light": {
+          "type": "string",
+          "default": "",
+          "description": "Override ByteDance Coding Plan (Intl) light-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.byteplus-coding.mid": {
+          "type": "string",
+          "default": "",
+          "description": "Override ByteDance Coding Plan (Intl) mid-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.byteplus-coding.heavy": {
+          "type": "string",
+          "default": "",
+          "description": "Override ByteDance Coding Plan (Intl) heavy-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.byteplus-coding.coding": {
+          "type": "string",
+          "default": "",
+          "description": "Override ByteDance Coding Plan (Intl) coding-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.stepfun.light": {
+          "type": "string",
+          "default": "",
+          "description": "Override StepFun light-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.stepfun.mid": {
+          "type": "string",
+          "default": "",
+          "description": "Override StepFun mid-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.stepfun.heavy": {
+          "type": "string",
+          "default": "",
+          "description": "Override StepFun heavy-tier model (leave empty for the built-in default)."
+        },
+        "harmony.providers.stepfun.coding": {
+          "type": "string",
+          "default": "",
+          "description": "Override StepFun coding-tier model (leave empty for the built-in default)."
         },
         "harmony.tokenBudget": {
           "type": "number",
