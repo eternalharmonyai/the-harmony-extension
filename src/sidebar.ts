@@ -773,9 +773,9 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
               if (provider === 'auto') return 'auto';
               if (provider === 'zhipu') return cfg.get<string>('vision.zhipuModel') || 'glm-5v-turbo';
               if (provider === 'alibaba') return cfg.get<string>('vision.qwenModel') || 'qwen3.8-max';
-              return cfg.get<string>('vision.geminiModel') || 'gemini-3.7-flash';
+              return cfg.get<string>('vision.geminiModel') || 'gemini-3.8-flash';
             })(),
-            autoGeminiModel: cfg.get<string>('vision.autoGeminiModel') ?? 'gemini-3.7-flash',
+            autoGeminiModel: cfg.get<string>('vision.autoGeminiModel') ?? 'gemini-3.8-flash',
             autoQwenModel: cfg.get<string>('vision.autoQwenModel') ?? 'qwen3.8-max',
             visionFallbackOrder: cfg.get<string[]>('vision.fallbackOrder') ?? ['gemini', 'zhipu', 'alibaba'],
             contextHealth: { harmonyBytes: 0, healthStatus: 'ok' },
@@ -1379,7 +1379,8 @@ ${PROVIDER_IDS.map(p => {
       <option value="zhipu">🧠 Zhipu / GLM only</option>
       <option value="alibaba">☁️ Alibaba / Qwen only</option>
       <optgroup label="Gemini">
-        <option value="gemini-3.7-flash">gemini-3.7-flash (default, newest Flash)</option>
+        <option value="gemini-3.8-flash">gemini-3.8-flash (default, newest Flash)</option>
+        <option value="gemini-3.7-flash">gemini-3.7-flash</option>
         <option value="gemini-3.6-flash">gemini-3.6-flash</option>
         <option value="gemini-3.5-flash">gemini-3.5-flash</option>
         <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (cheapest Flash-Lite)</option>
@@ -1404,6 +1405,7 @@ ${PROVIDER_IDS.map(p => {
     <div id="auto-vision-models" style="display:none; margin-top:4px; margin-left:8px;">
       <div style="font-size:10px; margin-bottom:2px;">${lm.getString('visual.autoGeminiModel')}</div>
       <select id="auto-gemini-model">
+        <option value="gemini-3.8-flash">gemini-3.8-flash</option>
         <option value="gemini-3.7-flash">gemini-3.7-flash</option>
         <option value="gemini-3.6-flash">gemini-3.6-flash</option>
         <option value="gemini-3.5-flash">gemini-3.5-flash</option>
@@ -1815,7 +1817,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
       LOC.steering_tool_routing_guard_label + ' <code>' + (s.toolRoutingGuard !== false ? LOC.on_label : LOC.off_label) + '</code><br>' +
       LOC.steering_auto_retry_label + ' <code>' + (s.autoRetry !== false ? LOC.on_label : LOC.off_label) + '</code><br>' +
       LOC.steering_auto_approve_label + ' <code>' + (s.autoApprove ? LOC.on_label : LOC.off_label) + '</code>';
-    $('vision-model').value = s.visionModel || 'gemini-3.7-flash';
+    $('vision-model').value = s.visionModel || 'gemini-3.8-flash';
     // Show/hide fallback order when auto is selected
     (() => { const v = s.visionModel || ''; $('vision-fallback-order').style.display = (v === 'auto') ? '' : 'none'; })();
     // Render fallback order list

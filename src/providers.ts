@@ -20,6 +20,7 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'gemini-2.5-flash': 65536,
     'gemini-2.0-flash': 8192,
     'gemini-3.7-flash': 65536,
+    'gemini-3.8-flash': 65536,
     'qwen-max': 8192,
     'qwen-plus': 8192,
     'qwen-turbo': 8192,
@@ -161,10 +162,10 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'hy3-preview'
     },
     gemini: {
-        light: 'gemini-3.7-flash',
-        mid: 'gemini-3.7-flash',
+        light: 'gemini-3.8-flash',
+        mid: 'gemini-3.8-flash',
         heavy: 'gemini-3.1-pro-preview',
-        coding: 'gemini-3.7-flash'
+        coding: 'gemini-3.8-flash'
     },
     openrouter: {
         light: 'tencent/hy3-preview',

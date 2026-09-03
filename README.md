@@ -99,6 +99,26 @@ The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each pro
 
 **Legacy key migration:** If you previously configured a single API key for a provider, Harmony automatically migrates it to slot 0 (Chat) on first launch. No manual reconfiguration is needed — your existing keys continue to work.
 
+## What's New in v0.4.13
+
+*v0.4.13 adds Gemini 3.8 Flash support, refines `.env` key-import slot separation, and clarifies the self-heal setting.*
+
+### ✨ Gemini 3.8 Flash
+
+Gemini 3.8 Flash is now available in the provider registry and vision routing, alongside existing Gemini models.
+
+### 🔧 Key-import refinements
+
+The `.env` import now keeps provider variant slots separate (for example **Zhipu Coding** vs **Zhipu**), so each slot imports its own key correctly.
+
+### 🎛️ Self-heal clarity
+
+The **"Self-heal keys from .env"** setting now explains the payoff: leave it on and you can skip the manual Import — just send a message and Harmony recovers the key from `.env` automatically.
+
+### 🧹 Settings text cleanup
+
+Repaired corrupted text (mojibake em-dashes and Chinese characters) that appeared in some Settings descriptions.
+
 ## What's New in v0.4.12
 
 *After VS Code 1.136, some existing provider keys could be treated as missing. v0.4.12 prevents those keys from being discarded, expands `.env` import coverage, and adds an opt-in self-heal setting.*
@@ -113,7 +133,7 @@ VS Code 1.136.0 changed how `SecretStorage` behaves when a stored key can't be d
 
 ### 🎛️ Self-heal keys from .env (opt-in)
 
-A new **"Self-heal keys from .env"** sidebar checkbox (backed by `harmony.providers.selfHealFromEnv`, off by default) controls whether a key recovered from `.env` is automatically written back into Secret Storage. Reading `.env` is always on; writing a recovered key into the OS keychain is now your explicit choice.
+A new **"Self-heal keys from .env"** sidebar checkbox (backed by `harmony.providers.selfHealFromEnv`, off by default) controls whether a key recovered from `.env` is automatically written back into Secret Storage. With it enabled, a forgotten manual Import isn't a problem — just send a message and Harmony recovers the key from `.env` automatically (silently re-saved). Reading `.env` is always on; writing a recovered key into the OS keychain is now your explicit choice.
 
 *v0.4.12 keeps the same minimum VS Code (`^1.95.0`) as v0.4.11 — the 1.136 change only affects newer editors, and this release handles it without raising the requirement.*
 
