@@ -94,9 +94,10 @@ const TENCENT_MODELS: ModelMeta[] = [
 ];
 
 const GEMINI_MODELS: ModelMeta[] = [
-    { id: 'gemini-3.5-flash', label: 'gemini-3.5-flash (fast, multimodal)', labelZh: 'gemini-3.5-flash（快速，多模态）', aliases: ['gemini', 'gemini-3.5'], detail: 'Google Gemini 3.5 Flash via OpenAI-compatible endpoint. Uses your Gemini API key.' },
+    { id: 'gemini-3.8-flash', label: 'gemini-3.8-flash (newest, fast, multimodal)', labelZh: 'gemini-3.8-flash（最新，快速，多模态）', aliases: ['gemini-3.8', 'g38'], detail: 'Google Gemini 3.8 Flash — newest release. Uses your Gemini API key.' },
+    { id: 'gemini-3.7-flash', label: 'gemini-3.7-flash (fast, multimodal)', labelZh: 'gemini-3.7-flash（快速，多模态）', aliases: ['gemini-3.7', 'g37'], detail: 'Google Gemini 3.7 Flash. Uses your Gemini API key.' },
     { id: 'gemini-3.6-flash', label: 'gemini-3.6-flash (fast, multimodal)', labelZh: 'gemini-3.6-flash（快速，多模态）', aliases: ['gemini-3.6', 'g36'], detail: 'Google Gemini 3.6 Flash. Uses your Gemini API key.' },
-    { id: 'gemini-3.7-flash', label: 'gemini-3.7-flash (newest, fast, multimodal)', labelZh: 'gemini-3.7-flash（最新，快速，多模态）', aliases: ['gemini-3.7', 'g37'], detail: 'Google Gemini 3.7 Flash — newest release. Uses your Gemini API key.' },
+    { id: 'gemini-3.5-flash', label: 'gemini-3.5-flash (fast, multimodal)', labelZh: 'gemini-3.5-flash（快速，多模态）', aliases: ['gemini', 'gemini-3.5'], detail: 'Google Gemini 3.5 Flash via OpenAI-compatible endpoint. Uses your Gemini API key.' },
     { id: 'gemini-3.1-flash-lite', label: 'gemini-3.1-flash-lite (lightest, cheapest)', labelZh: 'gemini-3.1-flash-lite（最轻量）', aliases: ['gemini-lite', 'glite'], detail: 'Lightest Gemini model for routine tasks.' },
     { id: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview (most capable)', labelZh: 'gemini-3.1-pro-preview（综合最强）', aliases: ['gemini-pro', 'gpro'], detail: 'Most capable Gemini Pro model.' },
 ];

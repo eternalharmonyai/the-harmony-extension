@@ -129,7 +129,7 @@
   "consult.discoverModels": "⚡ Discover models live…",
   "consult.updateGuide": "Model update guide…",
   "consult.selfHealEnv": "Self-heal keys from .env",
-  "consult.selfHealEnvHint": "silently re-save recovered .env keys into Secret Storage",
+  "consult.selfHealEnvHint": "On: skip the manual Import — just send a message and Harmony auto-recovers the key from .env (silently re-saved). Manual Import always works too.",
 
   "visual.title": "Visual tools",
   "visual.visionModel": "Vision model (image analysis)",
