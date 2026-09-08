@@ -9,6 +9,7 @@
  */
 
 import * as vscode from 'vscode';
+import { clipResult } from '../toolResultCap';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -46,11 +47,8 @@ import {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-const MAX_RESULT_CHARS = 60_000;
-
 function clip(text: string): string {
-    if (text.length <= MAX_RESULT_CHARS) return text;
-    return text.slice(0, MAX_RESULT_CHARS) + `\n...[truncated, ${text.length - MAX_RESULT_CHARS} more chars]`;
+    return clipResult(text);
 }
 
 function textResult(text: string): vscode.LanguageModelToolResult {

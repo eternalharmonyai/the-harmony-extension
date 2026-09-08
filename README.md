@@ -17,7 +17,7 @@ Harmony is a VS Code/Cursor extension for `@harmony` chat, workspace tools, prov
 
 ## ✨ What makes Harmony unique
 
-Harmony ships capabilities no other AI coding assistant offers today. Each one is a short scroll away — click to jump.
+Harmony ships capabilities no other AI coding collaborator offers today. Each one is a short scroll away — click to jump.
 
 | Unique capability | Why it matters |
 |:---|:---|
@@ -39,7 +39,7 @@ Harmony ships capabilities no other AI coding assistant offers today. Each one i
 ┌─────────────────────────────────────────────────┐
 │  VS Code / Cursor                               │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │ @harmony │  │ Sidebar  │  │ 175+ Tools   │  │
+│  │ @harmony │  │ Sidebar  │  │ 185+ Tools   │  │
 │  │   Chat   │  │ Controls │  │ (primitives, │  │
 │  │Participant│  │ & Board  │  │ swarm, git,  │  │
 │  │          │  │          │  │ browser, ...) │  │
@@ -69,7 +69,7 @@ Harmony ships capabilities no other AI coding assistant offers today. Each one i
 └─────────────────────────────────────────────────┘
 ```
 
-The chat interface, sidebar, and 175+ workspace tools run inside VS Code. The 15 swarm primitives (convergence, memory, reasoning, planning, skills) form the cognitive foundation. AI model calls are routed through Harmony's own provider layer to external APIs via your API keys.
+The chat interface, sidebar, and 185+ workspace tools run inside VS Code. The 15 swarm primitives (convergence, memory, reasoning, planning, skills) form the cognitive foundation. AI model calls are routed through Harmony's own provider layer to external APIs via your API keys.
 
 ### Provider access — what makes Harmony different
 
@@ -98,6 +98,22 @@ Each AI provider supports up to **4 API key slots**, allowing different keys for
 The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each provider. A green pill means a key is configured for that slot; a gray pill means no key is set. Click any pill to set or change the key for that slot.
 
 **Legacy key migration:** If you previously configured a single API key for a provider, Harmony automatically migrates it to slot 0 (Chat) on first launch. No manual reconfiguration is needed — your existing keys continue to work.
+
+## What's New in v0.4.14
+
+*v0.4.14 adds web search with jurisdiction-aware corroboration, a unified tool-result cap with per-model auto-cap, chat recall, and grows the tool set to 185+.*
+
+### 🔍 Web search — sovereign by default
+
+`harmony_web_search` runs three modes — **resolve** (single-engine cascade), **corroborate** (cross-index agreement/divergence; honestly reports when fewer than two indexes are available), and **federate** (free, keyless open endpoints: arXiv, Crossref, Wikipedia, Wayback). A keyless **institutional-index harness** (on-demand OAI-PMH / sitemap harvest of repositories you configure) powers primary-source retrieval, and every engine carries a **uniform provenance label** (index, operator, jurisdiction, retrieval class).
+
+### 🎚️ Unified tool-result cap + per-model auto-cap
+
+Every tool now honors one setting — `harmony.toolResultMaxChars` (default 160,000) — read fresh on each call, so changes apply mid-session. A new `harmony.toolResultAutoCap` toggle (default ON) clamps a single result to about 40% of the live model's context window (with a 1,000-character floor), protecting small-context models from overflow while applying whichever limit is smaller.
+
+### 🧠 Chat recall
+
+`harmony_recall_chat` bridges Harmony's own chat ledger into the local search index, making past prompt/response pairs searchable and citable like any other indexed corpus.
 
 ## What's New in v0.4.13
 
@@ -223,6 +239,8 @@ Harmony is a **multi-provider AI orchestration tool**. Every feature that calls 
 - `harmony.defaultProfile` — profile id sent with each request.
 - `harmony.modelProvider` — primary route for `@harmony` turns.
 - `harmony.swarm.defaultProvider` / `harmony.swarm.defaultTier` — default swarm provider/tier. Provider calls still require explicit swarm provider-call authority.
+- `harmony.toolResultMaxChars` — maximum characters a tool result may return before truncation (default `160000`, range `1000–2000000`). Read fresh on every call, so changes apply mid-session.
+- `harmony.toolResultAutoCap` — when ON (default), automatically lowers the cap to about 40% of the live model's context window (with a 1,000-character floor). Turn OFF to always use your exact `toolResultMaxChars` value.
 
 ## Manual Model Discovery
 
@@ -304,7 +322,7 @@ After the initial approval burst, the firewall remembers your choice and the pro
 
 If you send very long prompts or many attachments, VS Code may drop them from the visible chat history upon reloading the window to save memory. 
 To prevent data loss, Harmony uses an enterprise-grade JSONL ledger (`.harmony/history/chat_ledger.jsonl`). 
-Whenever you send a large payload, Harmony provides a snippet in the chat and adds a native VS Code Reference (e.g., `1717081234.md`). Clicking this reference opens a virtual, read-only document generated from the ledger, allowing you to recover your exact prompt and attachment list without cluttering your hard drive with thousands of loose files.
+Whenever you send a large payload, Harmony provides a snippet in the chat and adds a native VS Code Reference (e.g., `1717081234.md`). Clicking this reference opens a virtual, read-only document generated from the ledger, allowing you to recover your exact prompt and attachment list without cluttering your hard drive with thousands of loose files. The `harmony_recall_chat` tool indexes this ledger into Harmony's local search index, making any past turn searchable and citable.
 
 ## Context Cleanup
 
@@ -373,7 +391,7 @@ Whisper Mode is a **one-way, async human→AI channel** that operates outside th
 
 It turns rigid turn-taking into a continuous conversation — less like scheduled meetings, more like working side-by-side. Whisper something to your AI collaborator and they'll catch it without missing a beat, just as they would with a human collaborator beside them. If the moment passes, the message waits like a note on the desk, picked up at the very next opportunity.
 
-No other AI coding assistant offers a mid-turn human whisper channel. This is a Harmony original.
+No other AI coding collaborator offers a mid-turn human whisper channel. This is a Harmony original.
 
 <a id="translation-hub"></a>
 

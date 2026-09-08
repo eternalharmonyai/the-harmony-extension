@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { effectiveToolResultMaxChars } from './toolResultCap';
 import * as fs from 'fs/promises';
 import * as http from 'http';
 import * as https from 'https';
@@ -278,11 +279,14 @@ export interface CreativeInvokeResult {
     result: string;
 }
 
-const MAX_RESULT_CHARS = 16000;
+function toolResultMaxChars(): number {
+    return effectiveToolResultMaxChars();
+}
 
 function clip(s: string): string {
-    if (s.length <= MAX_RESULT_CHARS) return s;
-    return s.slice(0, MAX_RESULT_CHARS) + `\n…[truncated, ${s.length - MAX_RESULT_CHARS} more chars]`;
+    const max = toolResultMaxChars();
+    if (s.length <= max) return s;
+    return s.slice(0, max) + `\n…[truncated, ${s.length - max} more chars]`;
 }
 
 function sha256Text(text: string): string {

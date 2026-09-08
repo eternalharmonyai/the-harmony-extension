@@ -24,7 +24,9 @@ import { getTemplateById, listTemplateIds, runPipeline, formatPipelineResult, de
 import { buildWebsiteContext, type WebsiteSourceType } from './websiteContextBuilder';
 import { detectWorkspaceProject, offerDevServer, startDevServer, stopDevServer } from './projectAutoDetect';
 import { registerSymbolTools } from './symbolTools';
-import { registerChatHistoryProvider } from './chatHistory';
+import { registerWebSearchTools } from './webSearch';
+import { registerChatRecallTool } from './chatRecall';
+import { registerChatHistoryProvider, HARMONY_HISTORY_SCHEME } from './chatHistory';
 import { registerHarmonyParticipant } from './chatParticipant';
 import { registerDeepSeekProvider } from './deepseekProvider';
 import { registerHarmonyView } from './sidebar';
@@ -1162,6 +1164,15 @@ export function activate(context: vscode.ExtensionContext) {
     
     registerChatHistoryProvider(context);
 
+    // View the full Harmony conversation (memory + preserved memory) as a read-only document.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('harmony.viewConversation', async () => {
+            const uri = vscode.Uri.parse(`${HARMONY_HISTORY_SCHEME}:/conversation.md`);
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(doc, { preview: false });
+        })
+    );
+
     // Register DeepSeek as a native language model provider in Copilot Chat.
     // Models deepseek-v4-flash and deepseek-v4-pro will appear in the model picker.
     // Safe: if this fails, the error is caught and Harmony continues normally.
@@ -1277,6 +1288,8 @@ export function activate(context: vscode.ExtensionContext) {
     registerExoskeletonTools(context);
     registerDeepOrchestrate(context);
     registerSymbolTools(context);
+    registerWebSearchTools(context);
+    registerChatRecallTool(context);
 
     // 2. Register the @harmony chat participant (lives in the native Chat panel).
     registerHarmonyParticipant(context);

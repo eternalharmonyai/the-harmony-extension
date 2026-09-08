@@ -983,7 +983,7 @@ export async function consult(
         }
     }
     
-    const system = req.system ?? 'You are a helpful assistant. Be concise and direct.';
+    const system = req.system ?? 'You are a helpful collaborator. Be concise and direct.';
     // Read user-configured token budget from workspace state, fall back to req.maxTokens or 32768
     const cfg = vscode.workspace.getConfiguration('harmony');
     const userBudget = cfg.get<number>('tokenBudget') ?? req.maxTokens ?? 32768;

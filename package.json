@@ -2,7 +2,7 @@
   "name": "harmony-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "publisher": "harmony",
   "private": true,
   "license": "UNLICENSED",
@@ -20,12 +20,15 @@
     "onChatParticipant:harmony.chat",
     "onLanguageModelTool:harmony_read_file",
     "onLanguageModelTool:harmony_list_dir",
+    "onLanguageModelTool:harmony_github_search",
     "onLanguageModelTool:harmony_grep",
     "onLanguageModelTool:harmony_write_file",
     "onLanguageModelTool:harmony_edit_file",
     "onLanguageModelTool:harmony_apply_patch",
     "onLanguageModelTool:harmony_open_file",
+    "onLanguageModelTool:harmony_run_task",
     "onLanguageModelTool:harmony_run_terminal",
+    "onLanguageModelTool:harmony_pdf_ingest",
     "onLanguageModelTool:harmony_port_status",
     "onLanguageModelTool:harmony_git_status",
     "onLanguageModelTool:harmony_git_diff",
@@ -48,9 +51,12 @@
     "onLanguageModelTool:harmony_ask_harmony",
     "onLanguageModelTool:harmony_fetch_url",
     "onLanguageModelTool:harmony_todo",
+    "onLanguageModelTool:harmony_conductor_mesh",
+    "onLanguageModelTool:harmony_conflict_detector",
     "onLanguageModelTool:harmony_consult_model",
     "onLanguageModelTool:harmony_spawn_worker",
     "onLanguageModelTool:harmony_recall_across_projects",
+    "onLanguageModelTool:harmony_recall_chat",
     "onLanguageModelTool:harmony_continuity",
     "onLanguageModelTool:harmony_orchestrate_codebase",
     "onLanguageModelTool:harmony_run_fail_fix",
@@ -73,6 +79,7 @@
     "onLanguageModelTool:harmony_lighthouse",
     "onLanguageModelTool:harmony_client_brief",
     "onLanguageModelTool:harmony_accessibility_audit",
+    "onLanguageModelTool:harmony_benchmark",
     "onLanguageModelTool:harmony_brand_asset_pack",
     "onLanguageModelTool:harmony_cost_estimator",
     "onLanguageModelTool:harmony_deploy_check",
@@ -88,6 +95,7 @@
     "onLanguageModelTool:harmony_route_map",
     "onLanguageModelTool:harmony_test_probe",
     "onLanguageModelTool:harmony_change_summary",
+    "onLanguageModelTool:harmony_citation_influence",
     "onLanguageModelTool:harmony_claim_check",
     "onLanguageModelTool:harmony_dependency_audit",
     "onLanguageModelTool:harmony_provider_status",
@@ -99,6 +107,7 @@
     "onLanguageModelTool:harmony_swarm_escrow",
     "onLanguageModelTool:harmony_swarm_execute",
     "onLanguageModelTool:harmony_swarm_autonomy_run",
+    "onLanguageModelTool:harmony_swarm_autonomy_v2",
     "onLanguageModelTool:harmony_swarm_commit_dry_run",
     "onLanguageModelTool:harmony_swarm_commit_execute",
     "onLanguageModelTool:harmony_swarm_autonomy_design",
@@ -109,6 +118,7 @@
     "onLanguageModelTool:harmony_research_backlog",
     "onLanguageModelTool:harmony_patch_preflight",
     "onLanguageModelTool:harmony_code_surgery_plan",
+    "onLanguageModelTool:harmony_rename_symbol",
     "onLanguageModelTool:harmony_repo_health_scan",
     "onLanguageModelTool:harmony_tool_ledger",
     "onLanguageModelTool:harmony_backup_advisor",
@@ -121,14 +131,17 @@
     "onLanguageModelTool:harmony_process_registry",
     "onLanguageModelTool:harmony_operation_ledger",
     "onLanguageModelTool:harmony_supervisor_state",
+    "onLanguageModelTool:harmony_self_improvement",
     "onLanguageModelTool:harmony_self_inspect",
     "onLanguageModelTool:harmony_self_diagnose",
     "onLanguageModelTool:harmony_self_propose_tool",
     "onLanguageModelTool:harmony_self_patch_tool",
+    "onLanguageModelTool:harmony_code_theory_bridge",
     "onLanguageModelTool:harmony_compile_check",
     "onLanguageModelTool:harmony_package_and_install",
     "onLanguageModelTool:harmony_self_repair_summary",
     "onLanguageModelTool:harmony_capability_audit",
+    "onLanguageModelTool:harmony_vscode_command",
     "onLanguageModelTool:harmony_working_memory",
     "onLanguageModelTool:harmony_uncertainty_map",
     "onLanguageModelTool:harmony_metacognitive_check",
@@ -145,25 +158,30 @@
     "onLanguageModelTool:harmony_generate_video",
     "onLanguageModelTool:harmony_recall_memory",
     "onLanguageModelTool:harmony_list_layer_sets",
+    "onLanguageModelTool:harmony_get_errors",
     "onLanguageModelTool:harmony_get_generation_status",
     "onLanguageModelTool:harmony_save_to_likeness",
     "onLanguageModelTool:harmony_composite_preview",
     "onLanguageModelTool:harmony_get_image_info",
     "onLanguageModelTool:harmony_crop_image",
+    "onLanguageModelTool:harmony_research_state",
     "onLanguageModelTool:harmony_resize_image",
     "onLanguageModelTool:harmony_remove_background",
     "onLanguageModelTool:harmony_composite_layer",
     "onLanguageModelTool:harmony_draw_text",
     "onLanguageModelTool:harmony_search_patterns",
+    "onLanguageModelTool:harmony_check_python",
     "onLanguageModelTool:harmony_check_whispers",
     "onLanguageModelTool:harmony_parallel",
     "onLanguageModelTool:harmony_sandbox",
     "onLanguageModelTool:harmony_concert_speak",
+    "onLanguageModelTool:harmony_composition_engine",
     "onLanguageModelTool:harmony_concert_check",
     "onLanguageModelTool:harmony_convergence_arbiter",
     "onLanguageModelTool:harmony_adversarial_critic",
     "onLanguageModelTool:harmony_deliberation_challenge",
     "onLanguageModelTool:harmony_episodic_memory",
+    "onLanguageModelTool:harmony_debug_dashboard",
     "onLanguageModelTool:harmony_decision_log",
     "onLanguageModelTool:harmony_uncertainty_fabric",
     "onLanguageModelTool:harmony_task_auction",
@@ -172,6 +190,7 @@
     "onLanguageModelTool:harmony_execution_sandbox",
     "onLanguageModelTool:harmony_thought_graph",
     "onLanguageModelTool:harmony_horizon_planner",
+    "onLanguageModelTool:harmony_semantic_search",
     "onLanguageModelTool:harmony_skill_distiller",
     "onLanguageModelTool:harmony_property_tester",
     "onLanguageModelTool:harmony_analogy_engine",
@@ -327,6 +346,34 @@
       }
     ],
     "languageModelTools": [
+      {
+        "name": "harmony_recall_chat",
+        "displayName": "Recall chat history",
+        "modelDescription": "Search this workspace's own Harmony chat history (every prompt and response, stored in .harmony/history/chat_ledger-*.jsonl) using local BM25. Use when the user asks what was discussed or decided earlier, or needs to recall past conversation context from any point in time. Returns ranked matching turns with dates and clickable references.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyRecallChat",
+        "tags": [
+          "recall",
+          "memory",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Natural-language query to search the chat history."
+            },
+            "maxResults": {
+              "type": "number",
+              "description": "Number of hits to return (1-25, default 8)."
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
       {
         "name": "harmony_pdf_ingest",
         "displayName": "Ingest PDF",
@@ -8925,6 +8972,10 @@
         "title": "Harmony: Manage Saved Sessions"
       },
       {
+        "command": "harmony.viewConversation",
+        "title": "Harmony: View Conversation"
+      },
+      {
         "command": "harmony.createHandoff",
         "title": "Harmony: Create Continuity Handoff Packet"
       },
@@ -10059,6 +10110,18 @@
           "type": "boolean",
           "default": true,
           "description": "When ON (default), Harmony detects when a model describes tool work but forgets to call tools, and automatically retries with a stricter tool-routing reminder. This adds one extra API call per failure but prevents silent stalls. Turn OFF if you prefer manual recovery or want to minimize API costs."
+        },
+        "harmony.toolResultMaxChars": {
+          "type": "number",
+          "default": 160000,
+          "minimum": 1000,
+          "maximum": 2000000,
+          "description": "Maximum characters a tool result may return before Harmony truncates it (applies to read_file, grep, and other tool output). Read fresh on every tool call, so changes apply mid-session. Lower it for smaller context-window models; raise it to return fuller files."
+        },
+        "harmony.toolResultAutoCap": {
+          "type": "boolean",
+          "default": true,
+          "description": "When ON (default), Harmony automatically lowers the tool-result cap so a single tool result never exceeds about 40% of the active model's context window. This protects small-context models from overflow while your manual toolResultMaxChars value still wins whenever the model has room to spare. Turn OFF to always use your exact toolResultMaxChars value."
         },
         "harmony.autoRetry": {
           "type": "boolean",

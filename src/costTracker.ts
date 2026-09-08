@@ -151,7 +151,7 @@ function modelMatchesPattern(model: string, pattern: string): boolean {
     if (!normalizedPattern) return false;
     if (normalizedPattern === normalizedModel) return true;
     if (!normalizedPattern.includes('*')) return false;
-    const escaped = normalizedPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    const escaped = normalizedPattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
     return new RegExp(`^${escaped}$`).test(normalizedModel);
 }
 

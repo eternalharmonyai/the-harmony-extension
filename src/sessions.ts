@@ -110,7 +110,7 @@ export function formatSessionPreamble(s: SessionFile): string {
     lines.push('');
     lines.push('Prior conversation:');
     for (const t of s.turns) {
-        lines.push(`${t.role === 'user' ? 'User' : 'Assistant'}: ${t.text}`);
+        lines.push(`${t.role === 'user' ? 'User' : 'Collaborator'}: ${t.text}`);
         lines.push('');
     }
     const result = lines.join('\n');

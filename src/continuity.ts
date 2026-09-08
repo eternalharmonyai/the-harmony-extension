@@ -340,12 +340,12 @@ export async function createContinuityHandoff(notes = ''): Promise<string> {
         '',
         recentMemory.length === 0 ? '_No persisted Harmony memory yet._' : recentMemory.map((entry, index) => {
             const summary = entry.summary ?? 'No summary available.';
-            return `### ${index + 1}. ${entry.ts}\n\n${summary}\n\nUser:\n${entry.prompt.trim().slice(0, 1200)}\n\nAssistant:\n${entry.response.trim().slice(0, 1800)}`;
+            return `### ${index + 1}. ${entry.ts}\n\n${summary}\n\nUser:\n${entry.prompt.trim().slice(0, 1200)}\n\nCollaborator:\n${entry.response.trim().slice(0, 1800)}`;
         }).join('\n\n'),
         '',
         '## How To Resume',
         '',
-        'Paste or attach this packet into Harmony, Copilot, Gemini, a terminal agent, or another AI seat. Ask the next assistant to continue from this handoff. This packet contains visible summaries and recent excerpts only; it does not contain API keys or hidden reasoning traces.',
+        'Paste or attach this packet into Harmony, Copilot, Gemini, a terminal agent, or another AI seat. Ask the next collaborator to continue from this handoff. This packet contains visible summaries and recent excerpts only; it does not contain API keys or hidden reasoning traces.',
         ''
     ].filter(Boolean).join('\n');
 
