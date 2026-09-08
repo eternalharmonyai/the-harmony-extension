@@ -190,6 +190,9 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                     case 'setTokenBudget':
                       await vscode.workspace.getConfiguration('harmony').update('tokenBudget', Number(msg.value), true);
                       break;
+                    case 'setToolResultMaxChars':
+                      await vscode.workspace.getConfiguration('harmony').update('toolResultMaxChars', Number(msg.value), true);
+                      break;
                     case 'runDeepSwarm':
                       await vscode.commands.executeCommand('harmony.runDeepSwarm', msg.pipelineId || '', msg.mode || 'thorough', msg.strategy || 'cost-optimized', msg.provider || 'auto', msg.tier || 'auto');
                       break;
@@ -507,6 +510,9 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                     case 'runCleanup':
                         await vscode.commands.executeCommand('harmony.runCleanup');
                         break;
+                    case 'viewConversation':
+                        await vscode.commands.executeCommand('harmony.viewConversation');
+                        break;
                     case 'manageSessions':
                         await vscode.commands.executeCommand('harmony.listSessions');
                         break;
@@ -801,6 +807,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             deepswarmProvider: compactSidebar ? '' : (this.context.workspaceState.get<string>('harmony.deepswarmProvider') || 'auto'),
             deepswarmTier: compactSidebar ? '' : (this.context.workspaceState.get<string>('harmony.deepswarmTier') || 'auto'),
             tokenBudget: cfg.get<number>('tokenBudget') ?? 32768,
+            toolResultMaxChars: cfg.get<number>('toolResultMaxChars') ?? 160000,
             tripleCheckAuto: !!cfg.get<boolean>('tripleCheck.autoReminder'),
             agentsPreset: collabPreset,
             agentsProvider: collabProvider === 'auto' ? 'auto' : providerDisplayName(collabProvider),
@@ -1217,6 +1224,13 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   </div>
   <div class="hint" id="token-budget-hint" style="margin-top:2px;">${lm.getString('token.desc')}</div>
 
+  <h3>📏 Tool result cap</h3>
+  <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+    <input type="number" id="tool-result-max-chars" min="1000" max="2000000" step="1000" style="flex:1;width:100%;">
+    <span id="tool-result-max-chars-label" style="font-size:11px;white-space:nowrap;">160,000 chars</span>
+  </div>
+  <div class="hint" style="margin-top:2px;">Max chars per tool result before truncation (1000–2,000,000).</div>
+
   <h3>${lm.getString('swarm.title')}</h3>
   <button class="subtle" id="open-swarm-launcher" style="margin-top:4px;">${lm.getString('swarm.openLauncher')}</button>
   <button class="subtle" id="open-swarm-direct" style="margin-top:4px;">${lm.getString('swarm.directControls')}</button>
@@ -1450,6 +1464,7 @@ ${PROVIDER_IDS.map(p => {
   <h3>${lm.getString('sessions.title')}</h3>
   <div id="sessions" class="stack"><div class="empty">${lm.getString('sessions.none')}</div></div>
   <button class="subtle" id="manage-sessions" style="margin-top:4px;">${lm.getString('sessions.manage')}</button>
+  <button class="subtle" id="view-conversation" style="margin-top:4px;">View conversation</button>
 
   <h3>${lm.getString('whisper.title')}</h3>
   <label class="row" style="margin-bottom:6px;"><input type="checkbox" id="whisper-disabled"> ${lm.getString('whisper.disable')} <span class="hint">${lm.getString('whisper.disableHint')}</span></label>
@@ -1693,6 +1708,26 @@ ${PROVIDER_IDS.map(p => {
           vscode.postMessage({ type: 'setTokenBudget', value: val });
         });
       }
+    }
+    // Tool result cap: number input + label from state
+    var trcInput = $('tool-result-max-chars');
+    var trcLabel = $('tool-result-max-chars-label');
+    if (trcInput && trcLabel) {
+      trcInput.value = s.toolResultMaxChars || 160000;
+      trcLabel.textContent = Number(trcInput.value).toLocaleString() + ' chars';
+      trcInput.addEventListener('input', function() {
+        var v = Number(this.value);
+        if (isFinite(v)) trcLabel.textContent = Number(v).toLocaleString() + ' chars';
+      });
+      trcInput.addEventListener('change', function() {
+        var v = Number(this.value);
+        if (!isFinite(v)) v = 160000;
+        if (v < 1000) v = 1000;
+        if (v > 2000000) v = 2000000;
+        this.value = v;
+        trcLabel.textContent = Number(v).toLocaleString() + ' chars';
+        vscode.postMessage({ type: 'setToolResultMaxChars', value: v });
+      });
     }
     // ── Belt-and-suspenders: dynamically inject DeepSwarm provider/tier dropdowns if missing ──
     (function ensureDeepSwarmDropdowns() {
@@ -2390,6 +2425,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
   $('toggle-hub-autostart').addEventListener('click', () => vscode.postMessage({ type: 'toggleHubAutoStart' }));
   $('index-workspace').addEventListener('click', () => vscode.postMessage({ type: 'indexWorkspace' }));
   $('run-cleanup').addEventListener('click', () => vscode.postMessage({ type: 'runCleanup' }));
+$('view-conversation').addEventListener('click', () => vscode.postMessage({ type: 'viewConversation' }));
   $('set-key').addEventListener('click', () => vscode.postMessage({ type: 'setProviderKey', provider: $('provider').value }));
 
   // Ask for initial state.

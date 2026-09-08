@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
+import { clipResult } from './toolResultCap';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { PROVIDER_DEFAULTS, ProviderId } from './providers';
 
-const MAX_RESULT_CHARS = 60000;
 const PRICING_DIR = '.harmony/provider-pricing';
 const STALE_AFTER_DAYS = 7;
 
@@ -235,8 +235,7 @@ const PROVIDER_REGISTRY: ProviderRegistryEntry[] = [
 ];
 
 function clip(text: string): string {
-    if (text.length <= MAX_RESULT_CHARS) return text;
-    return text.slice(0, MAX_RESULT_CHARS) + `\n...[truncated, ${text.length - MAX_RESULT_CHARS} more chars]`;
+    return clipResult(text);
 }
 
 function textResult(text: string): vscode.LanguageModelToolResult {

@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://harmony.local/schema/citation.schema.json",
+  "title": "Search Citation Candidate",
+  "description": "A single search result shaped for verbatim-or-abstain citation. A citation with evidence_tier 'content' may be used as an authority directly; 'snippet' is a lead that must be resolved to operative text before it can be cited.",
+  "type": "object",
+  "required": ["verbatim", "source", "retrieved", "engine", "jurisdiction", "evidence_tier"],
+  "properties": {
+    "verbatim": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Operative text returned verbatim by the engine (title + snippet), or fetched page text when evidence_tier is 'content'. Non-empty is the verbatim-or-abstain gate."
+    },
+    "source": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL of the cited authority."
+    },
+    "retrieved": {
+      "type": "string",
+      "format": "date",
+      "description": "ISO date (YYYY-MM-DD) of the ORIGINAL retrieval. MUST survive cache hits — never overwritten with the cache-hit time, or the freshness validator silently stops working."
+    },
+    "engine": {
+      "type": "string",
+      "description": "Provenance: which index answered (google-cse | gemini | ddg | brave | yandex | baidu | mojeek | primary:<site>)."
+    },
+    "jurisdiction": {
+      "type": "string",
+      "enum": ["US", "CN", "RU", "EU", "independent", "institutional", "unknown"],
+      "description": "Regulatory regime / index jurisdiction. Divergence across jurisdictions is signal, not noise."
+    },
+    "rank": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Position in the engine's own result set."
+    },
+    "evidence_tier": {
+      "type": "string",
+      "enum": ["snippet", "content"],
+      "description": "snippet = engine title+snippet (a lead, NOT citable under verbatim-or-abstain). content = fetched operative text (citable). A summarized/answer field is always 'snippet'."
+    },
+    "title": {
+      "type": "string",
+      "description": "Result title, for display and for resolving a snippet lead to its source."
+    }
+  }
+}

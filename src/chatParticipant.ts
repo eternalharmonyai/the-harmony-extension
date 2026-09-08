@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { setActiveModelMaxInputTokens } from './toolResultCap';
 import * as fs from 'fs/promises';
 import * as cp from 'child_process';
 import * as os from 'os';
-import { appendChatHistory } from './chatHistory';
+import { appendChatHistory, appendChatResponse } from './chatHistory';
 import { appendMemory, recallMemory, formatRecallForPrompt, memoryStats } from './memory';
 import { saveSession, loadSession, listSessions, formatSessionPreamble, SessionTurn } from './sessions';
 import { recordUsage, summarize as summarizeUsage, totalTokens } from './costTracker';
@@ -3777,6 +3778,7 @@ async function runOcrPrecheck(images: ComposeImage[]): Promise<{ text: string; c
 export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
     const handler: vscode.ChatRequestHandler = async (request, chatContext, stream, token) => {
         const profile = getCurrentProfile(context);
+        setActiveModelMaxInputTokens(request.model?.maxInputTokens);
 
         if (await handleSlashCommand(request, stream, context, token)) {
             return;
@@ -4166,6 +4168,11 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
                 prompt: request.prompt,
                 response: turnOutcome.finalText
             });
+
+            // Full-turn chat ledger: record the assistant response beside the prompt
+            // so .harmony/history/chat_ledger.jsonl is a complete verbatim transcript.
+            const draftId = draftUri ? (draftUri.path.match(/\/(\d+)\.md$/)?.[1]) : undefined;
+            appendChatResponse(draftId, turnOutcome.finalText).catch(() => {});
 
             // Auto-continuity: silently capture what Harmony did after every real agent turn.
             // Only fires for non-trivial responses and non-slash-command turns.

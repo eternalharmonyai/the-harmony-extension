@@ -55,18 +55,20 @@ logs/
 *.log.*
 
 # Harmony local tool state
+.carebloom/
 .harmony/
 .harmony-archive/
 .harmony-staging/
 .harmony-recipes/
 .harmony-repair/
-.carebloom/
 .fastembed_cache/
-.harmonyhub-test/
+
+# Python
+__pycache__/
+*.pyc
 
 # Local package/build artifacts
-bin/harmonyhub.exe
-_askView_*.js
+bin/*.exe
 _backups/
 _backups_vsix/
 _comparison/
@@ -83,6 +85,6 @@ generated/
 *.mp4
 *.mov
 
-# Test documents (may contain draft research)
+# Test documents
 *.pdf
 jest.config.js

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { clipResult } from './toolResultCap';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
@@ -10,7 +11,6 @@ import { withOperationLock } from './operationLocks';
 import { concertSpeak, concertCheck, formatConcertCheck } from './concertHall';
 import { createDeliberationRecord, gateAllFindings, postFindingToDeliberation, checkDeliberationRoom, formatDeliberationSummary, requiresHumanEscalation, getUnresolvedEscalations } from './deliberation';
 
-const MAX_RESULT_CHARS = 60000;
 const SWARM_DIR = '.harmony/swarm';
 const CUSTOM_ROLES_PATH = '.harmony/swarm/custom-roles.json';
 const PRIVATE_PLANNING_EXT = `.${'fa'}${'mily'}.md`;
@@ -513,8 +513,7 @@ const ROLE_LIBRARY: Record<SwarmRoleId, SwarmRole> = {
 };
 
 function clip(text: string): string {
-    if (text.length <= MAX_RESULT_CHARS) return text;
-    return text.slice(0, MAX_RESULT_CHARS) + `\n...[truncated, ${text.length - MAX_RESULT_CHARS} more chars]`;
+    return clipResult(text);
 }
 
 function textResult(text: string): vscode.LanguageModelToolResult {

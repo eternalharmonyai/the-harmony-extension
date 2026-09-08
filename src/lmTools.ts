@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
+import { effectiveToolResultMaxChars } from './toolResultCap';
 import * as fsSync from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as cp from 'child_process';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import * as dns from 'dns';
 import { recordEffect } from './effectLedger';
 import { createRequiredPreActionSnapshot as createPreActionSnapshot, formatSnapshotNote, normalizeSnapshotPath } from './snapshotUtils';
 import { consult, confirmHeavyTier, ProviderId, resolveCollabModel, Tier, modelFor } from './providers';
@@ -98,11 +100,14 @@ function trackToolInvocation<T>(
  * and rejected if it escapes via "..".
  */
 
-const MAX_RESULT_CHARS = 16000;
+function toolResultMaxChars(): number {
+    return effectiveToolResultMaxChars();
+}
 
 function clip(s: string): string {
-    if (s.length <= MAX_RESULT_CHARS) return s;
-    return s.slice(0, MAX_RESULT_CHARS) + `\n…[truncated, ${s.length - MAX_RESULT_CHARS} more chars]`;
+    const max = toolResultMaxChars();
+    if (s.length <= max) return s;
+    return s.slice(0, max) + `\n…[truncated, ${s.length - max} more chars]`;
 }
 
 function workspaceRoot(): string | undefined {
@@ -442,8 +447,9 @@ class GrepTool implements vscode.LanguageModelTool<GrepInput> {
             for (const uri of uris) {
                 if (out.length >= max) break;
                 try {
-                    const buf = await fs.readFile(uri.fsPath, 'utf8');
-                    const lines = buf.split(/\r?\n/);
+                    const raw = await fs.readFile(uri.fsPath);
+                    if (raw.subarray(0, 8000).includes(0)) continue; // skip binary files
+                    const lines = raw.toString('utf8').split(/\r?\n/);
                     for (let i = 0; i < lines.length; i++) {
                         if (regex.test(lines[i])) {
                             const rel = vscode.workspace.asRelativePath(uri, false);
@@ -2089,6 +2095,32 @@ function formatAskQuestionText(input: Pick<AskQuestionInput, 'header' | 'message
 // ─── fetch_url ──────────────────────────────────────────────────────────────
 interface FetchUrlInput { url: string; max_chars?: number; headers?: Record<string, string>; }
 
+/** True for loopback, private, link-local, and reserved IP literals (SSRF guard). */
+function isPrivateIpLiteral(ip: string): boolean {
+    const v4 = ip.split('.').map(n => Number(n));
+    if (v4.length === 4 && v4.every(n => Number.isInteger(n) && n >= 0 && n <= 255)) {
+        const [a, b] = v4;
+        if (a === 0 || a === 10 || a === 127) return true;          // this-net / private / loopback
+        if (a === 169 && b === 254) return true;                     // link-local
+        if (a === 172 && b >= 16 && b <= 31) return true;            // private
+        if (a === 192 && b === 168) return true;                     // private
+        if (a >= 224) return true;                                   // multicast + reserved
+        return false;
+    }
+    const lower = ip.toLowerCase();
+    if (lower === '::' || lower === '::1') return true;              // unspecified / loopback
+    if (/^fe[89ab]/.test(lower)) return true;                        // link-local fe80::/10
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique-local fc00::/7
+    return false;
+}
+
+/** True for hostnames that map to the local machine / private network (SSRF guard). */
+function isPrivateHostname(hostname: string): boolean {
+    const h = hostname.toLowerCase();
+    return h === 'localhost' || h === '0.0.0.0'
+        || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal');
+}
+
 class FetchUrlTool implements vscode.LanguageModelTool<FetchUrlInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<FetchUrlInput>, token: vscode.CancellationToken) {
         const { url, max_chars, headers } = options.input;
@@ -2097,6 +2129,19 @@ class FetchUrlTool implements vscode.LanguageModelTool<FetchUrlInput> {
         try { parsed = new URL(url); } catch { return textResult(`error: invalid URL: ${url}`); }
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
             return textResult(`error: only http(s) URLs are allowed (got ${parsed.protocol})`);
+        }
+        // SSRF guard: refuse private/loopback/link-local targets (direct or via DNS).
+        const hostname = parsed.hostname;
+        if (isPrivateHostname(hostname) || isPrivateIpLiteral(hostname)) {
+            return textResult(`error: blocked private/internal host: ${hostname}`);
+        }
+        try {
+            const resolved = await dns.promises.lookup(hostname, { all: true, verbatim: true });
+            if (resolved.some(a => isPrivateIpLiteral(a.address))) {
+                return textResult(`error: blocked private/internal address for ${hostname}`);
+            }
+        } catch {
+            // Unresolvable host — let fetch surface the real network error below.
         }
         const cap = Math.min(Math.max(Number(max_chars) || 8000, 500), 60000);
         const controller = new AbortController();
@@ -2281,7 +2326,7 @@ function workerRoleTier(role: WorkerRole | undefined, fallback: Tier): Tier {
 }
 
 function workerRoleSystem(role: WorkerRole | undefined): string {
-    const base = 'You are a focused sub-agent for a coding assistant. Answer the task concisely and concretely. Cite specific lines or names from the provided context. Do not ask clarifying questions; make your best inference from context and state assumptions explicitly.';
+    const base = 'You are a focused sub-agent for a coding collaborator. Answer the task concisely and concretely. Cite specific lines or names from the provided context. Do not ask clarifying questions; make your best inference from context and state assumptions explicitly.';
     switch (role) {
         case 'scout': return `${base} Your role is scout: quickly locate relevant files, symbols, facts, and risks without proposing broad changes.`;
         case 'researcher': return `${base} Your role is researcher: gather evidence, compare options, and separate verified facts from assumptions.`;
@@ -2445,7 +2490,7 @@ class RecallAcrossProjectsTool implements vscode.LanguageModelTool<RecallAcrossP
             }
             const hits = await res.json() as Array<{ path: string; score: number; snippet: string; line_start: number; line_end: number }>;
             if (!hits.length) {
-                return textResult(`No matches. Hub may be empty — try again with index_path set to a folder you want indexed (e.g. "C:\\\\Coding").`);
+                return textResult(`No matches. Hub may be empty — try again with index_path set to a folder you want indexed (e.g. "C:/Projects").`);
             }
             const lines: string[] = [`Found ${hits.length} matches across your indexed projects:\n`];
             for (const h of hits) {

@@ -237,7 +237,7 @@ export function formatRecallForPrompt(entries: MemoryEntry[]): string {
         }
         const promptText = e.prompt.trim().slice(0, 900);
         const responseText = e.response.trim().slice(0, 1400);
-        return `${i + 1}. [${date}]\nUser:\n${promptText}\n\nAssistant:\n${responseText}`;
+        return `${i + 1}. [${date}]\nUser:\n${promptText}\n\nCollaborator:\n${responseText}`;
     }).join('\n');
     let result = `\n\nPERSISTED HARMONY CONTINUITY FOR THIS WORKSPACE (oldest first, newest last):\n${items}\n\nUse this as real continuity when the user references earlier work, reloads VS Code, or moves to a new thread. Do not recite it back unless asked; quietly use it to stay oriented.`;
     // Hard output cap: prevent oversized recall from bloating the system message
@@ -277,7 +277,7 @@ export async function createHandoffPacket(notes = ''): Promise<string> {
         '',
         recent.length === 0 ? '_No persisted memory yet._' : recent.map((entry, i) => {
             const summary = entry.summary ?? summarizeEntry(entry.prompt, entry.response);
-            return `### ${i + 1}. ${entry.ts}\n\n${summary}\n\nUser:\n${entry.prompt.trim().slice(0, 1200)}\n\nAssistant:\n${entry.response.trim().slice(0, 1800)}`;
+            return `### ${i + 1}. ${entry.ts}\n\n${summary}\n\nUser:\n${entry.prompt.trim().slice(0, 1200)}\n\nCollaborator:\n${entry.response.trim().slice(0, 1800)}`;
         }).join('\n\n'),
         '',
         '## How To Resume',

@@ -15,11 +15,14 @@ export interface CleanupReport {
 const MAX_HANDOFF_AGE_DAYS = 30;
 const MAX_SNAPSHOT_AGE_DAYS = 7;
 const MAX_PREEDIT_AGE_DAYS = 7;
-const MAX_LEDGER_BYTES = 500_000;
 const MAX_SUPERVISOR_BYTES = 500_000;
-const MAX_HISTORY_BYTES = 500_000;
+const MAX_CONTINUITY_BYTES = 100_000;
 const MAX_RECENT_SNAPSHOTS = 10;
 const MAX_ARCHIVE_AGE_DAYS = 7;
+
+// Idempotency guard state for self-cleanup (see harmonySelfCleanup below).
+let lastCleanupAt = 0;
+const MIN_CLEANUP_INTERVAL_MS = 60_000; // 1 minute
 
 async function getHarmonyDir(workspaceRoot?: string): Promise<string | undefined> {
     const root = workspaceRoot || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -85,6 +88,21 @@ export async function harmonySelfCleanup(workspaceRoot?: string): Promise<Cleanu
     const dir = await getHarmonyDir(workspaceRoot);
     if (!dir) return { beforeBytes: 0, afterBytes: 0, contextHealthBytes: 0, actions: ['No .harmony folder found.'] };
 
+    // Idempotency guard: prevents rapid-fire cleanup (and the resulting
+    // compaction flood) when the command is triggered repeatedly in a short
+    // window (e.g. a re-render loop or repeated clicks).
+    const now = Date.now();
+    if (now - lastCleanupAt < MIN_CLEANUP_INTERVAL_MS) {
+        const contextHealthBytes = await dirSizeExcluding(dir, SAFETY_DIRS);
+        return {
+            beforeBytes: 0,
+            afterBytes: 0,
+            contextHealthBytes,
+            actions: [`Cleanup skipped — ran less than ${Math.round(MIN_CLEANUP_INTERVAL_MS / 1000)}s ago (nothing was altered).`],
+        };
+    }
+    lastCleanupAt = now;
+
     const beforeBytes = await dirSize(dir);
 
     // 1. Trim old handoffs (>30 days)
@@ -107,10 +125,17 @@ export async function harmonySelfCleanup(workspaceRoot?: string): Promise<Cleanu
         if (removedHandoffs > 0) actions.push(`Removed ${removedHandoffs} handoff(s) older than ${MAX_HANDOFF_AGE_DAYS} days.`);
     } catch { /* handoffs dir may not exist */ }
 
-    // 2. Compact continuity (replaces many entries with one compact entry)
+    // 2. Compact continuity only when the ledger is actually large — repeated
+    // cleanup presses must not stack pointless "compact" entries.
     try {
-        const compacted = await compactContinuity('Auto-compacted by self-cleanup');
-        actions.push(`Compacted continuity into entry ${compacted.id}.`);
+        const continuityLedger = path.join(dir, 'continuity', 'ledger.jsonl');
+        const stat = await fs.stat(continuityLedger).catch(() => null);
+        if (stat && stat.size > MAX_CONTINUITY_BYTES) {
+            const compacted = await compactContinuity('Auto-compacted by self-cleanup');
+            actions.push(`Compacted continuity into entry ${compacted.id}.`);
+        } else {
+            actions.push('Continuity compact skipped — ledger within healthy size.');
+        }
     } catch (e: any) {
         actions.push(`Continuity compact skipped: ${e?.message || 'unknown error'}`);
     }
@@ -129,19 +154,9 @@ export async function harmonySelfCleanup(workspaceRoot?: string): Promise<Cleanu
         }
     } catch { /* skip */ }
 
-    // 4. Truncate large chat history ledger
-    try {
-        const historyPath = path.join(dir, 'history', 'chat_ledger.jsonl');
-        const stat = await fs.stat(historyPath).catch(() => null);
-        if (stat && stat.size > MAX_HISTORY_BYTES) {
-            const buf = await fs.readFile(historyPath, 'utf8');
-            const lines = buf.split(/\r?\n/).filter(Boolean);
-            const keepLines = Math.max(100, Math.floor(lines.length * (MAX_HISTORY_BYTES / stat.size)));
-            const trimmed = lines.slice(-keepLines).join('\n') + '\n';
-            await fs.writeFile(historyPath, trimmed, 'utf8');
-            actions.push(`Trimmed chat history from ${lines.length} to ${keepLines} lines.`);
-        }
-    } catch { /* skip */ }
+    // 4. The chat ledger is now sharded by month (chat_ledger-YYYY-MM.jsonl) by
+    // the writer, so there is no single growing file to rotate. History is never
+    // deleted — the resolver scans shards + legacy + archive.
 
     // 5. Clean old Central Self-Healing Harness snapshots (>7 days)
     try {

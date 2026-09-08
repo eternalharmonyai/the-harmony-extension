@@ -7,12 +7,9 @@ exts.txt
 .harmony-staging/**
 .harmony-repair/**
 .fastembed_cache/**
-.harmonyhub-test/**
-.carebloom/**
-*_AI/**
-*.md
+**/*.md
 !README.md
-# docs/: ship the generic repair guide + the runtime-read discovery guide
+# docs/: ship the repair guide and provider-model discovery guide
 docs/*.md
 !docs/LIFELINE.md
 !docs/LIFELINE.zh-CN.md
@@ -34,6 +31,19 @@ _temp_extract_*/**
 .env
 .env.*
 *.env
+*.key
+*.pem
+*.pfx
+*.p12
+*.crt
+*.cer
+
+# Local development folders.
+.carebloom/
+.harmonyhub-test/
+round-protocol/
+extension/
+.github/
 
 # Generated dependencies/build outputs.
 companion-extensions/**
@@ -53,21 +63,8 @@ node_modules/better-sqlite3/deps/**
 node_modules/duckdb/src/**
 
 # Backups should never ship.
-_askView_*.js
+_*.js
 *.backup*
 **/*.backup*
-# TLS proxy artifacts (deprecated - replaced by LM provider).  
-harmony-copilot-cert.pem  
-harmony-copilot-key.pem  
-tls_proxy.py  
-simple_proxy.py  
-check_proxy.py  
-check_proxy_tls.py  
-setup_tls_proxy.bat  
-start_proxy.bat  
-start_proxy.py  
-_gen_cert.py  
-_fix_settings.py  
-_fix_settings2.py  
 __pycache__/**  
 *.pyc  
