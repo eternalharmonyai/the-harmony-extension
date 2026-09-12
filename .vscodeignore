@@ -41,7 +41,6 @@ _temp_extract_*/**
 # Local development folders.
 .carebloom/
 .harmonyhub-test/
-round-protocol/
 extension/
 .github/
 
