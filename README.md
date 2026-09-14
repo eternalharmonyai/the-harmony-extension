@@ -31,7 +31,7 @@ Harmony ships capabilities no other AI coding collaborator offers today. Each on
 | 🌐 [Translation Hub](#translation-hub) | Multi-model consensus EN↔ZH translation that guards against single-model errors — built for technical standards docs. |
 | 🌸 [CareBloom](#carebloom) | Self-improving tool usage, learned locally with zero extra API calls *(default off)*. |
 | 🎨 [Creative Tools](#creative-tools) | Image generation, canvas editing, and video generation through a local creative backend. |
-| 🔤 [EN↔ZH Localization](#zh-localization) | Full bilingual UI, 150+ translated strings, and a Chinese README — toggle instantly from the sidebar. |
+| 🔤 [EN↔ZH Localization](#zh-localization) | Full bilingual UI, 650+ translated strings, and a Chinese README — toggle instantly from the sidebar. |
 
 ## Architecture
 
@@ -39,7 +39,7 @@ Harmony ships capabilities no other AI coding collaborator offers today. Each on
 ┌─────────────────────────────────────────────────┐
 │  VS Code / Cursor                               │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │ @harmony │  │ Sidebar  │  │ 185+ Tools   │  │
+│  │ @harmony │  │ Sidebar  │  │ 191+ Tools   │  │
 │  │   Chat   │  │ Controls │  │ (primitives, │  │
 │  │Participant│  │ & Board  │  │ swarm, git,  │  │
 │  │          │  │          │  │ browser, ...) │  │
@@ -69,7 +69,7 @@ Harmony ships capabilities no other AI coding collaborator offers today. Each on
 └─────────────────────────────────────────────────┘
 ```
 
-The chat interface, sidebar, and 185+ workspace tools run inside VS Code. The 15 swarm primitives (convergence, memory, reasoning, planning, skills) form the cognitive foundation. AI model calls are routed through Harmony's own provider layer to external APIs via your API keys.
+The chat interface, sidebar, 191+ tools and 64 commands run inside VS Code. The 15 swarm primitives (convergence, memory, reasoning, planning, skills) form the cognitive foundation. AI model calls are routed through Harmony's own provider layer to external APIs via your API keys.
 
 ### Provider access — what makes Harmony different
 
@@ -99,13 +99,126 @@ The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each pro
 
 **Legacy key migration:** If you previously configured a single API key for a provider, Harmony automatically migrates it to slot 0 (Chat) on first launch. No manual reconfiguration is needed — your existing keys continue to work.
 
+## What's New in v0.4.15
+
+*v0.4.15 makes the Hub's index store survive reinstalls (with automatic, recorded relocation and a versioned, idempotent migration ledger), adds a provenance and citation layer (signed, verifiable citation records, keyless scholarly discovery, and access diagnostics), plus DeepSeek Flash (V4.1) as the default direct route, a DeepSeek vision bundle, DeepSeek limits, a new `premium` cost tier, and refreshed OpenAI/Claude model lineups.*
+
+### 🧾 Verifiable citations
+
+Sources are captured with their retrieval time and content hash into signed, hash-chained records, so a citation carries checkable evidence rather than a bare assertion. A liveness check re-visits a cited URL later and reports whether it still says the same thing — unchanged, altered, moved, removed, blocked, or a transient error.
+
+### 🔍 Scholarly discovery
+
+DOI-first, keyless resolution finds primary sources without any single provider owning the query.
+
+### 🛡️ Agent identity
+
+Cryptographic agent identity (RFC 9421 / Ed25519) lets the institutional harvester prove who it is instead of impersonating a browser — ordinary browsing stays unsigned.
+
+### 🔎 Access diagnostics
+
+When a fetch fails, Harmony reports why — and who could fix it — instead of a bare error.
+
+### ⚡ DeepSeek Flash (V4.1)
+
+DeepSeek's newest fast model is now the default direct route for the coding tier and appears in the native model picker as **DeepSeek Flash (V4.1)**. The earlier `deepseek-v4-flash` name resolves to V4.1 Flash, and the `.env` aliases `flash`, `v4-flash`, `flash-4.1`, `v4.1-flash` all map to it.
+
+### 🧠 DeepSeek vision bundle
+
+DeepSeek V4 Flash Vision (experimental multimodal) is registered as a native model and wired into the vision router — `describeImagesViaDeepSeek()` powers image analysis when DeepSeek is your vision provider. The `DEEPSEEK_VISION_API_KEY` slot imports from `.env` exactly like every other provider's vision key. DeepSeek vision is a **full participant**: selectable directly, and included in the vision fallback chain — whose order you configure yourself via `harmony.vision.fallbackOrder`.
+
+### 🪪 Chat-image mode + prompt-injection guard
+
+When images enter DeepSeek chat, the message content type widens to carry image parts alongside text, with walker guards at every string-assuming site. Retrieved image content is wrapped in an explicit **data-boundary marker** (retrieved content is data, not instruction) before it reaches the model — hardening against prompt-injection through pasted images.
+
+### 🏷️ New `premium` tier + OpenAI/Claude refresh
+
+A new **premium** cost tier sits above heavy for the most expensive models, gated by the same cost guard as premium names. OpenAI and Claude registries are refreshed to their current lineups:
+
+| Provider | premium | heavy | mid | light | coding |
+|:--|:--|:--|:--|:--|:--|
+| OpenAI | `gpt-6-astra` | `gpt-5.6-sol` | `gpt-5.6-terra` | `gpt-5.6-luna` | `gpt-5.6-sol` |
+| Claude | `claude-fable-5-1` | `claude-opus-5` | `claude-sonnet-5` | `claude-haiku-4-5-20251001` | `claude-opus-5` |
+
+Claude requests also gained per-model thinking/temperature handling (Fable omits the thinking param; the 5-family uses adaptive; Haiku uses budget tokens; temperature is omitted entirely, matching Moonshot/Kimi).
+
+### 🚦 Provenance liveness no longer red-Xes
+
+The `integration` tier of the provenance workflow now logs its "world changed" liveness check as a warning instead of failing the job — real failures (compile, dependencies) still show red, but a transient external change no longer paints a red X.
+
+### 🛡️ Index durability — the saved index is explained, never silently discarded
+
+The Hub's saved index is now described by a sidecar manifest (`index-manifest.json`), written atomically next to `snapshot.bincode`, recording the model, dimension, metric, chunker version, generation, root/vector counts, and a SHA-256 of the snapshot bytes.
+
+Loading is explicit and non-destructive. `/status` reports one of five states, each with a reason:
+
+| State | Meaning |
+|:--|:--|
+| `loaded` | the saved index matched its manifest and was loaded — no rebuild |
+| `adopted` | a pre-manifest snapshot was checksummed and adopted **without re-indexing** |
+| `empty` | nothing has been saved yet |
+| `incompatible` | the snapshot was built with a different model / dimension / schema — **the file is kept, and the reason is reported** |
+| `corrupt` | the bytes failed to deserialize, or the checksum did not match — **the file is kept for forensics** |
+
+Nothing is deleted on a mismatch, one previous generation (`snapshot.prev.bincode`) is always retained, and the sidebar now says plainly when a saved index could not be used.
+
+### ♻️ Resumable indexing — an interruption is now a pause, not a restart
+
+An interrupted rebuild no longer costs the whole build. Staged chunks are **checkpointed to disk** (`staging.bincode`, written atomically every 192 chunks), and a restart **resumes** from the checkpoint instead of starting over:
+
+- `/status` reports `staging_root` + `staging_chunks`, so a pending checkpoint is never a mystery.
+- The next index of the same root **embeds only the remainder** (resume is content-keyed, so a changed file-walk order cannot misalign it).
+- A **completed** rebuild clears the checkpoint; a **failed** one deliberately keeps it.
+- A corrupt or incompatible checkpoint is **discarded loudly**, never trusted blindly.
+
+Because a resume path can corrupt an index *silently*, this ships only with the crash-test harness that proves **`resume == full rebuild`**:
+
+```
+npm run check:durability              # durability invariants (nothing deleted, everything explained)
+npm run check:durability:resume       # crash + resume: force-stop mid-rebuild -> restart -> resume == full rebuild
+npm run check:durability:commit       # two-phase commit: an interrupted commit recovers; real damage is still caught
+npm run check:durability:incremental  # incremental == full rebuild; a no-change re-index embeds ZERO chunks
+npm run check:migrations              # the versioned store migration: idempotent, verified, rolled back on doubt
+```
+
+### ⚙️ Choose your embedder
+
+`harmony.hub.embedModel` selects the local embedding model:
+
+| Value | Dimensions | Trade-off |
+|:--|:--|:--|
+| `jina-code` *(default)* | 768 | best code-search quality |
+| `fast` | 384 | several times faster build, weaker code recall |
+
+Changing it makes the existing index `incompatible` — **kept, never deleted** — and needs one Re-index. It applies on the next Hub start.
+
+Indexing also skips generated/bundled artifacts by default (lockfiles, `gen/`, `bin/`, minified files), removing hundreds of near-duplicate chunks. Site-specific exclusions stay in a **local overlay** (`policy.local.json` or `HARMONY_EXCLUDES`) — private names never ship in the binary.
+
+**Still deferred.** Richer telemetry states beyond the state/freshness/failure axes below remain future work.
+
+### 🔒 One writer, an interrupted commit that heals, and an index that survives reinstall
+
+**Single-writer lock.** The daemon takes an advisory exclusive lock on `<data_dir>/.harmonyhub.lock` *before* it loads the model or binds the port, and holds it for its lifetime. A second daemon on the same data dir **refuses to start** (one clear line, non-zero exit) instead of corrupting the index. There is no pidfile and no staleness heuristic — the OS releases the lock, so a crash never leaves a stale one. `/status` reports `writer_lock`.
+
+**Two-phase commit.** The manifest is written as `pending` *before* the snapshot is published and `complete` after it. An interrupted commit is therefore *recoverable* on the next boot — the previous complete generation is verified against its retained manifest and adopted — instead of being reported as `corrupt`, which used to force a full rebuild of a healthy index.
+
+**Incremental re-index.** An explicit Re-index no longer re-walks everything. Per-file fingerprints (size, mtime, content hash) live in the manifest, so unchanged files are carried over, only changed files are re-embedded, and the HNSW graph is rebuilt from the surviving vectors. A re-index with nothing changed embeds **zero** chunks, and the result is proven identical to a full rebuild. A file that merely looked absent — locked, unreadable, half-written — is never treated as deleted.
+
+**Content is the authority, metadata is an optimisation.** `fresh` is only claimed when it rests on content, so an edit that preserves both size and mtime is still detected.
+
+### 📦 The index survives a reinstall
+
+The store used to live inside the extension's `globalStorage`, which VS Code **deletes when the extension is uninstalled** — so every reinstall silently destroyed the index and forced a full rebuild. The default is now a stable, per-editor folder beside the auth token (`~/.harmony/hub-data/<editor>`), and an existing store is moved there **once** by a versioned migration that records what it did in `~/.harmony/migrations.json`. Every step is idempotent, coordinated with the running daemon (a store is never renamed out from under a live process), verified before the new home is accepted, and rolled back on any doubt.
+
+**Freshness is a separate axis from state.** `/status` reports `index_freshness` (`fresh` / `unknown` / `stale`) *beside* `index_state`, and a failed refresh is reported as `last_attempt` beside a still-searchable index rather than replacing it. A manifest written before change-tracking reports `loaded` + `freshness: unknown` — never a false claim, and never a forced rebuild.
+
 ## What's New in v0.4.14
 
 *v0.4.14 adds web search with jurisdiction-aware corroboration, a unified tool-result cap with per-model auto-cap, chat recall, and grows the tool set to 185+.*
 
 ### 🔍 Web search — sovereign by default
 
-`harmony_web_search` runs three modes — **resolve** (single-engine cascade), **corroborate** (cross-index agreement/divergence; honestly reports when fewer than two indexes are available), and **federate** (free, keyless open endpoints: arXiv, Crossref, Wikipedia, Wayback). A keyless **institutional-index harness** (on-demand OAI-PMH / sitemap harvest of repositories you configure) powers primary-source retrieval, and every engine carries a **uniform provenance label** (index, operator, jurisdiction, retrieval class).
+`harmony_web_search` runs three modes — **resolve** (single-engine cascade), **corroborate** (cross-index agreement/divergence; reports when fewer than two indexes are available), and **federate** (free, keyless open endpoints: arXiv, Crossref, Wikipedia, Wayback). A keyless **institutional-index harness** (on-demand OAI-PMH / sitemap harvest of repositories you configure) powers primary-source retrieval, and every engine carries a **uniform provenance label** (index, operator, jurisdiction, retrieval class).
 
 ### 🎚️ Unified tool-result cap + per-model auto-cap
 
@@ -165,7 +278,7 @@ All mutating operations — file writes, terminal commands, background processes
 
 ### 🦾 Exoskeleton v2.0
 
-Six new subsystem modules (Phase 0–5) form the Exoskeleton v2.0 skeleton, exposed as four native tools — `harmony_spine`, `harmony_oracle`, `harmony_guard`, and `harmony_dispatch` — giving the orchestration layer planning, verification, and dispatch in one pass.
+Six new subsystem modules form the Exoskeleton v2.0 skeleton, exposed as four native tools — `harmony_spine`, `harmony_oracle`, `harmony_guard`, and `harmony_dispatch` — giving the orchestration layer planning, verification, and dispatch in one pass.
 
 ### 🌏 BytePlus / Doubao / StepFun — correct model IDs
 
@@ -189,7 +302,7 @@ DeepSeek requests are ordered for stable prefix caching — system message first
 
 ### 🤖 DeepSeek in the native model picker
 
-Harmony registers **DeepSeek V4 Flash** and **DeepSeek V4 Pro** as native VS Code language models, so they appear in Copilot Chat's model picker for anyone who installs the extension — each user only needs their own DeepSeek API key. **Note:** these picker entries are plain DeepSeek chat completions. The full `harmony_*` tool loop is available through `@harmony` via the sidebar / direct-provider route, not the native picker.
+Harmony registers **DeepSeek V4 Flash**, **DeepSeek V4 Pro**, and **DeepSeek V4 Flash Vision** (experimental multimodal) as native VS Code language models, so they appear in Copilot Chat's model picker for anyone who installs the extension — each user only needs their own DeepSeek API key. **Note:** these picker entries are plain DeepSeek chat completions. The full `harmony_*` tool loop is available through `@harmony` via the sidebar / direct-provider route, not the native picker.
 
 ### 🩺 Harmony: LM Check
 
@@ -302,11 +415,27 @@ That starts or reuses the localhost backend at `http://127.0.0.1:8788` and opens
 
 ## HarmonyHub — Local Sovereign Memory
 
-HarmonyHub is a local daemon (default `http://127.0.0.1:7878`) that powers cross-project semantic search across every project you've indexed. It runs alongside Harmony's backend on your machine, keeping your project knowledge private and local. HarmonyHub starts automatically with Harmony — no separate install needed.
+HarmonyHub is a local daemon (default `http://127.0.0.1:7878`) that powers cross-project semantic search across every project you've indexed. It runs alongside Harmony's backend on your machine, keeping your project knowledge private and local. On Windows, HarmonyHub ships with Harmony — no separate install needed. On macOS and Linux, build HarmonyHub yourself, then point the `harmony.hub.exePath` setting at it or put the `harmonyhub` executable on your PATH. Either way, it starts only when you allow it (see **Hub controls** below).
 
 To index a project folder for cross-project recall, use the **"Harmony: Index Project"** command in VS Code. After indexing, search across projects by asking Harmony to recall past work.
 
-### ⚠️ Windows Firewall — First-Run Prompts
+### Hub controls (sidebar)
+
+The Harmony sidebar's HarmonyHub section gives you two explicit, independent controls — plus a live summary of their combined effect, so Hub behavior is never a mystery:
+
+| Control | What it does |
+|:---|:---|
+| **Hub auto-start:** Never / When needed / When workspace opens | *When* the Hub may start itself. **Never** = paused; you start it manually. **When needed** = starts on the first Hub action that needs it (recommended). **When workspace opens** = starts whenever a workspace opens (uses memory on every window open). |
+| **On message (Hub off): …** | Cycles **Ask first → Auto-start → Never** — what happens when a normal `@harmony` message arrives while the Hub is offline. |
+| **Effective: …** | Shows the real combined behavior, e.g. `Effective: auto-start ON · messages: Ask first`. |
+
+- Opening a workspace never starts the Hub; it only allow-lists the folder.
+- If auto-start is set to **Never** (paused), a message will **not** prompt or start the Hub — the status bar shows **Hub paused**, and one line explains it in chat.
+- When the Hub comes online with an empty index, Harmony starts **one** background index automatically (equivalent to clicking Re-index). Turn this off with `harmony.hub.indexOnStart`.
+
+### ⚠️ Windows Firewall — Approve ALL 5–7 Prompts (Required for HarmonyHub)
+
+> **❗ Expect this prompt 5–7 times on first run — approve every one.** HarmonyHub will not work if it is blocked, and Windows remembers a "Block".
 
 The first time HarmonyHub runs, Windows Defender Firewall may show **5–7** approval dialogs. This is normal — Windows prompts for any application that opens a local network port, even one bound strictly to `127.0.0.1` (loopback). No traffic leaves your machine.
 
@@ -502,15 +631,16 @@ When OCR doesn't extract usable text, Harmony sends images to a vision model for
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `harmony.vision.provider` | `auto` | `auto` = tries configured providers in order. `gemini`, `alibaba`, or `auto-qwen-first` forces a specific provider or order. |
+| `harmony.vision.provider` | `auto` | `auto` = tries configured providers in order. `gemini`, `zhipu`, `alibaba`, or `deepseek` forces a specific single provider (single-provider modes skip fallback). |
 | `harmony.vision.geminiModel` | Gemini Flash (current) | Gemini vision model ID — defaults to Google's current Flash model. Set any Gemini model ID to override (when Gemini is available). |
 | `harmony.vision.qwenModel` | Qwen vision (current) | Alibaba Qwen vision model ID — defaults to Alibaba's current Qwen 3.x model. Set any Qwen vision ID to override (when Alibaba is available). |
 | `harmony.vision.zhipuModel` | GLM-V (current) | Zhipu GLM vision model ID — defaults to Zhipu's current GLM vision model. Set any GLM vision ID to override (when Zhipu is available). |
+| `harmony.vision.deepseekModel` | `deepseek-v4-flash-vision-exp` | DeepSeek vision model ID — the experimental multimodal Flash model. Selectable directly, and part of the auto fallback chain. |
 | `harmony.gemini.useFreeQuota` | `false` | When ON, uses Gemini free tier where applicable |
 
 All vision providers require API keys stored in VS Code Secret Storage. Set them via the Harmony sidebar or Command Palette. Provider availability depends on which keys you have configured — there is no primary/secondary hierarchy; routing is determined by your `harmony.vision.provider` setting and which keys are present.
 
-**Vision fallback order:** When a vision request is made, Harmony tries providers in this sequence: `Gemini` → `Qwen` → `Zhipu`. Each step requires that provider's Vision slot (index 3) to have a configured key. If a provider has no Vision key, it is silently skipped and the next provider in the chain is tried.
+**Vision fallback order — yours to configure:** With `harmony.vision.provider` set to `auto`, Harmony tries providers in the order you define in **Settings → `harmony.vision.fallbackOrder`**. Reorder, add, or remove providers freely — nothing is fixed. Each step requires that provider's Vision slot (index 3) to have a configured key; providers without a key are silently skipped, and the next provider in your order is tried. An empty list disables backfill entirely.
 
 ## DeepSwarm — Multi-Provider Analysis Pipelines
 
@@ -581,7 +711,7 @@ Actual costs depend on your configured providers, model tiers, prompt sizes, and
 
 Harmony's orchestration, DeepSwarm, and Concert Board are built on 15 enterprise-grade primitives that handle convergence, memory, reasoning, planning, and skill extraction. These tools work together as a cognitive architecture for multi-model collaboration.
 
-### Wave 1 — Governance & Memory
+### Governance & Memory
 
 | # | Primitive | Purpose |
 |:--|:---|:---|
@@ -590,7 +720,7 @@ Harmony's orchestration, DeepSwarm, and Concert Board are built on 15 enterprise
 | 3 | `harmony_episodic_memory` | Temporal graph memory with BFS traversal, time-range queries, typed relationships, and atomic JSONL persistence |
 | 4 | `harmony_decision_log` | Atomic JSONL decision logging with structured entries, rotation, and audit trail |
 
-### Wave 2 — Coordination & Values
+### Coordination & Values
 
 | # | Primitive | Purpose |
 |:--|:---|:---|
@@ -598,7 +728,7 @@ Harmony's orchestration, DeepSwarm, and Concert Board are built on 15 enterprise
 | 6 | `harmony_task_auction` | Capability-gated task bidding with fallback chains, timeout handling, and below-threshold abort |
 | 7 | `harmony_value_resolver` | Value conflict detection and resolution with priority ordering and trade-off documentation |
 
-### Wave 3 — Topology & Safety
+### Topology & Safety
 
 | # | Primitive | Purpose |
 |:--|:---|:---|
@@ -606,14 +736,14 @@ Harmony's orchestration, DeepSwarm, and Concert Board are built on 15 enterprise
 | 9 | `harmony_execution_sandbox` | Safe code verification sandbox wired to `harmony_sandbox` for compile/lint/test validation — no runtime code execution |
 | 10 | `harmony_cognitive_branches` | Git-backed (isomorphic-git) branching for cognitive exploration with create, switch, merge, and conflict handling |
 
-### Wave 4 — Reasoning & Planning
+### Reasoning & Planning
 
 | # | Primitive | Purpose |
 |:--|:---|:---|
 | 11 | `harmony_thought_graph` | Executable reasoning DAG with cycle-safe path traversal (visited Set + max depth), node/edge CRUD |
 | 12 | `harmony_horizon_planner` | Next-step alignment with retry-bounded requeue (max 3 retries), priority ordering, and plan comparison |
 
-### Wave 5 — Skills & Testing
+### Skills & Testing
 
 | # | Primitive | Purpose |
 |:--|:---|:---|
@@ -717,6 +847,8 @@ Harmony preserves context across different AI chat surfaces — VS Code Copilot,
 
 Harmony Creative provides image generation, canvas editing, and video generation through a local creative backend (port 8896).
 
+**Local-first:** Local canvas tools — crop, resize, background removal, text overlay, and compositing — run entirely on your machine and need no API key. The bundled service ships generation tools as stubs: they only check for an API key and return setup text — they never call a provider and never transmit anything. Full image, layer-set, and video generation requires pointing `harmony.creativeServicePath` at your own service. **For Harmony:** No telemetry or analytics are collected or sent to any third party.
+
 | Tool | Capability |
 |:---|:---|
 | **Image Generation** | Text-to-image with quality tiers (draft → premium), aspect ratio control, reference images |
@@ -758,7 +890,7 @@ See [Optional: Python & Self-Healing Harness](#optional-python--self-healing-har
 Harmony speaks Chinese. Full i18n with `locales/zh.json`, `package.nls.zh-cn.json`, and a language toggle at the top of the sidebar.
 
 - **EN ↔ ZH toggle** — switch languages instantly from the sidebar
-- **150+ translated strings** — sidebar labels, tool descriptions, settings, system prompts
+- **650+ translated strings** — sidebar labels, tool descriptions, settings, system prompts
 - **Chinese README** — [README.zh-CN.md](README.zh-CN.md) with full 简体中文 documentation
 - **Compose OCR ZH** — OCR pipeline handles Chinese text natively
 - **Translation Hub EN↔ZH** — multi-model consensus translation for technical standards
@@ -767,9 +899,11 @@ Harmony speaks Chinese. Full i18n with `locales/zh.json`, `package.nls.zh-cn.jso
 
 **API Costs:** Harmony can call paid AI provider APIs (DeepSeek, Alibaba/Qwen, Gemini, OpenAI, Claude, OpenRouter, Moonshot/Kimi, Tencent, and Zhipu/Zhipu Coding) when configured with your API keys. You are solely responsible for all API charges incurred. Harmony includes cost guards, provider policies, and per-session quotas to help manage spend, but no automated cap is foolproof. Review your provider billing dashboards regularly.
 
+**Provider Policies Change:** Model names, availability, pricing, rate limits, and acceptable-use terms are set by each provider and can change at any time, at their sole discretion. Always check each provider's most up-to-date documentation — usually linked from their official website — before relying on any model, price, or capability described in this README. Do not treat this document as the source of truth for any provider's policies.
+
 **No Warranty:** This software is provided "AS IS", without warranty of any kind, express or implied. See the [LICENSE](LICENSE) file for the full Hippocratic License terms.
 
-**Privacy:** Harmony stores API keys in VS Code Secret Storage. Chat history, continuity handoffs, and tool-call metadata are stored locally under `.harmony/`. No telemetry, analytics, or usage data is sent to Harmony developers or any third party. Provider API calls are subject to each provider's respective privacy policy.
+**Privacy:** Harmony stores API keys in VS Code Secret Storage. Chat history, continuity handoffs, and tool-call metadata are stored locally under `.harmony/`. Harmony sends no telemetry, analytics, or usage data to any third party. Provider API calls are subject to each provider's respective privacy policy.
 
 **Bad Actors:** Harmony is an open-source developer tool. It is not designed to circumvent provider rate limits, terms of service, or local security boundaries. If you use Harmony in ways that violate a provider's acceptable use policy, you assume full responsibility.
 

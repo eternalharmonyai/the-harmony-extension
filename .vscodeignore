@@ -1,6 +1,9 @@
-# Local state, private notes, generated archives, and package artifacts.
+# Local state, generated archives, and package artifacts.
 .gitignore
+# Console-redirect artifacts some tooling leaves in the workspace root
+# (e.g. "code --list-extensions > exts.txt", or "> $null" under cmd.exe).
 exts.txt
+$null
 .harmony/**
 .harmony-archive/**
 .harmony.bak/**
@@ -9,6 +12,7 @@ exts.txt
 .fastembed_cache/**
 **/*.md
 !README.md
+!README.zh-CN.md
 # docs/: ship the repair guide and provider-model discovery guide
 docs/*.md
 !docs/LIFELINE.md
@@ -19,10 +23,10 @@ docs/test.pdf
 test/*.pdf
 out/*.md
 _*/**
+*_000/
 *.zip
 *.vsix
 *.vsix.bak
-$null
 _test_extract*/**
 _extract_*/**
 _temp_extract_*/**
@@ -39,11 +43,12 @@ _temp_extract_*/**
 *.cer
 
 # Local development folders.
-.carebloom/
-.harmonyhub-test/
-REDACTED/
 extension/
 .github/
+
+# Dev/test scripts and specs (not shipped in the extension).
+scripts/**
+spec/**
 
 # Generated dependencies/build outputs.
 companion-extensions/**
@@ -66,5 +71,8 @@ node_modules/duckdb/src/**
 _*.js
 *.backup*
 **/*.backup*
+
+# Editor workspace files can embed absolute local paths.
+*.code-workspace
 __pycache__/**  
 *.pyc  

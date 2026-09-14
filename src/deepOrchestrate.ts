@@ -19,6 +19,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as cp from 'child_process';
 import { secretKeyFor } from './providers';
+import { LanguageManager } from './languageManager';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -682,7 +683,7 @@ export function registerDeepOrchestrate(context: vscode.ExtensionContext): void 
 export async function deepOrchestrateApproveCommand(context: vscode.ExtensionContext): Promise<void> {
     const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!workspaceUri) {
-        vscode.window.showErrorMessage('No workspace open.');
+        vscode.window.showErrorMessage(LanguageManager.getInstance().getString('notify.noWorkspaceOpen'));
         return;
     }
 
@@ -698,7 +699,7 @@ export async function deepOrchestrateApproveCommand(context: vscode.ExtensionCon
         .reverse();
 
     if (sessionDirs.length === 0) {
-        vscode.window.showInformationMessage('No pending DeepOrchestrate drafts to approve.');
+        vscode.window.showInformationMessage(LanguageManager.getInstance().getString('notify.noPendingDrafts'));
         return;
     }
 

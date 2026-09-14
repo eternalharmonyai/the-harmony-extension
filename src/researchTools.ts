@@ -1,5 +1,5 @@
 /**
- * Phase 3-7: Research upgrade tools — pdf_ingest, conflict_detector,
+ * Research tools — pdf_ingest, conflict_detector,
  * citation_influence, code_theory_bridge, research state machine.
  */
 

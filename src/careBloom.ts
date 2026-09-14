@@ -145,7 +145,7 @@ function normalizePath(p: string): string {
  */
 function sanitizeOutcome(raw: string): string {
     let sanitized = raw;
-    // Redact Windows home dir: C:\Users\Name\ → <home>\
+    // Redact Windows home dir: C:\Users\<name>\ → <home>\
     sanitized = sanitized.replace(/[Cc]:\\Users\\[^\\]+/gi, '<home>');
     // Redact Unix home dir: /home/name/ → <home>/
     sanitized = sanitized.replace(/\/home\/[^/]+/gi, '<home>');

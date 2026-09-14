@@ -23,6 +23,7 @@ import {
     estimateTokens,
     isProtectedPath,
     redactSecrets,
+    looksBinaryContent,
 } from './utils';
 
 export interface ScanResult {
@@ -40,6 +41,7 @@ export function scanForSecrets(stagedContents: { path: string; content: string }
     const redactedFiles: string[] = [];
 
     for (const file of stagedContents) {
+        if (looksBinaryContent(file.content)) continue;
         for (const pattern of SECRET_PATTERNS) {
             // Reset regex lastIndex for global patterns
             pattern.lastIndex = 0;
@@ -134,7 +136,9 @@ try {
 // 1. Secret scan
 for (const file of stagedFiles) {
     if (!fs.existsSync(file)) continue;
-    const content = fs.readFileSync(file, 'utf-8');
+    const buf = fs.readFileSync(file);
+    if (buf.includes(0)) continue; // skip binary files
+    const content = buf.toString('utf-8');
     for (const pattern of SECRET_PATTERNS) {
         pattern.lastIndex = 0;
         const match = pattern.exec(content);

@@ -2,7 +2,7 @@
   "name": "harmony-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "publisher": "harmony",
   "private": true,
   "license": "UNLICENSED",
@@ -458,6 +458,171 @@
               "description": "Semantic Scholar paper ID."
             }
           }
+        }
+      },
+      {
+        "name": "harmony_scholarly_discovery",
+        "displayName": "Scholarly discovery",
+        "modelDescription": "Find scholarly works and lawful open-access copies. Search by query, or resolve a DOI to a landing page and an open copy when one exists. Keyless: uses open scholarly indexes, no API key required.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyScholarlyDiscovery",
+        "tags": [
+          "research",
+          "provenance",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search text. Provide this or a DOI."
+            },
+            "doi": {
+              "type": "string",
+              "description": "DOI to resolve to an open-access route."
+            },
+            "mailto": {
+              "type": "string",
+              "description": "Optional contact address for polite API pools."
+            },
+            "maxResults": {
+              "type": "number",
+              "description": "Maximum works to return (default 8)."
+            }
+          }
+        }
+      },
+      {
+        "name": "harmony_source_discovery",
+        "displayName": "Source discovery",
+        "modelDescription": "Probe a domain for harvestable primary-source endpoints (OAI-PMH, sitemap) and produce a harvest preflight plan with record estimates. Refuses private and local hosts.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonySourceDiscovery",
+        "tags": [
+          "research",
+          "provenance",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string",
+              "description": "Domain to probe, e.g. arxiv.org. Private and local hosts are refused."
+            },
+            "maxRecords": {
+              "type": "number",
+              "description": "Record cap for the harvest plan (default 500)."
+            }
+          },
+          "required": [
+            "domain"
+          ]
+        }
+      },
+      {
+        "name": "harmony_access_diagnostic",
+        "displayName": "Access diagnostic",
+        "modelDescription": "Explain why fetching a URL failed - DNS, TLS, robots, block, removal, or a transient error - and state who can fix it. Uses a control probe to separate network trouble from site trouble. Refuses private and local hosts.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyAccessDiagnostic",
+        "tags": [
+          "research",
+          "provenance",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "URL that failed. Private and local hosts are refused."
+            },
+            "useControlProbe": {
+              "type": "boolean",
+              "description": "Compare against a healthy control host to distinguish network from site failure (default true)."
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      },
+      {
+        "name": "harmony_endpoint_config",
+        "displayName": "Endpoint configuration",
+        "modelDescription": "Validate an endpoint configuration for search engines and institutional sources; reports problems and lists the resolved institutional sources with their harvest strategies.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyEndpointConfig",
+        "tags": [
+          "research",
+          "provenance",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "config": {
+              "type": "string",
+              "description": "Configuration text to validate (engines and institutional sources)."
+            }
+          },
+          "required": [
+            "config"
+          ]
+        }
+      },
+      {
+        "name": "harmony_web_search",
+        "displayName": "Web search",
+        "modelDescription": "Search the web in one of three modes: resolve (single-engine cascade), corroborate (cross-index agreement and divergence, reporting when fewer than two indexes are available), or federate (free keyless open endpoints such as arXiv, Crossref, Wikipedia and the Wayback Machine). Each engine reports a uniform provenance label.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyWebSearch",
+        "tags": [
+          "research",
+          "search",
+          "provenance",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query."
+            },
+            "mode": {
+              "type": "string",
+              "description": "One of: resolve, corroborate, federate."
+            },
+            "depth": {
+              "type": "string",
+              "description": "One of: basic, advanced."
+            },
+            "freshness": {
+              "type": "string",
+              "description": "One of: any, day, week, month."
+            },
+            "max_results": {
+              "type": "number",
+              "description": "Maximum results to return."
+            },
+            "site": {
+              "type": "string",
+              "description": "Restrict to a single institutional domain, or 'primary' to fan out across the configured primary-source list."
+            },
+            "engines": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Restrict to specific engines."
+            }
+          },
+          "required": [
+            "query"
+          ]
         }
       },
       {
@@ -1896,7 +2061,8 @@
                 "light",
                 "mid",
                 "heavy",
-                "coding"
+                "coding",
+                "premium"
               ],
               "description": "Default 'mid'."
             },
@@ -1916,6 +2082,108 @@
           "required": [
             "provider",
             "question"
+          ]
+        }
+      },
+      {
+        "name": "harmony_consensus_round",
+        "displayName": "Consensus round (multi-model)",
+        "modelDescription": "Run a declarative, hash-bound multi-model deliberation. Reads a protocol file (default .harmony/protocols/consensus-round.json); seats marked 'provider' are auto-dispatched, seats marked 'manual' return the exact prompt for a human to carry to a model Harmony cannot reach. Verdicts are bound to artifact hashes (edit an artifact -> verdict auto-invalidates -> recheck) and every disagreement is classified as 'facts' (settleable by evidence) or 'values' (may persist). Actions: template | plan | dispatch | ingest | report | status. The seats, providers and tiers come from the protocol file.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyConsensus",
+        "tags": [
+          "orchestration",
+          "cognition",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "template",
+                "plan",
+                "dispatch",
+                "ingest",
+                "report",
+                "status"
+              ],
+              "description": "template: emit a generic protocol skeleton. plan: write the ledger + emit round-1 prompts. dispatch: auto-run provider seats. ingest: record a manual seat's answer. report: verdict + staleness + disagreements. status: quick ledger state."
+            },
+            "protocol": {
+              "type": "string",
+              "description": "Protocol file path (workspace-relative or absolute). Defaults to harmony.consensus.protocolPath."
+            },
+            "ledger_id": {
+              "type": "string",
+              "description": "Ledger id to act on. Defaults to the most recent."
+            },
+            "round": {
+              "type": "number",
+              "description": "Round number (1 = independent; 2+ = peer review with a restatement of peers' positions)."
+            },
+            "seat": {
+              "type": "string",
+              "description": "Seat id (for ingest)."
+            },
+            "answer": {
+              "type": "string",
+              "description": "The seat's answer text (for ingest)."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional model label for an ingested manual answer."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "facts",
+                "values",
+                "unknown"
+              ],
+              "description": "Optional explicit classification override for a disagreement."
+            },
+            "agreement": {
+              "type": "string",
+              "description": "report-only: record an explicit agreement."
+            },
+            "disagreement": {
+              "type": "object",
+              "description": "report-only: record a disagreement to classify and keep.",
+              "properties": {
+                "topic": {
+                  "type": "string"
+                },
+                "seats": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "facts",
+                    "values",
+                    "unknown"
+                  ]
+                },
+                "evidence": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "topic"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "description": "Optional free-form note."
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       },
@@ -1971,7 +2239,8 @@
                 "light",
                 "mid",
                 "heavy",
-                "coding"
+                "coding",
+                "premium"
               ],
               "description": "Optional explicit tier. If omitted, uses role-aware tier defaults or the selected Agents tier."
             },
@@ -2122,7 +2391,8 @@
                 "light",
                 "mid",
                 "heavy",
-                "coding"
+                "coding",
+                "premium"
               ],
               "description": "Default coding."
             },
@@ -3059,7 +3329,7 @@
       {
         "name": "harmony_vision_read",
         "displayName": "Read local image visually",
-        "modelDescription": "Analyze a local workspace image file with Gemini Flash vision and return a detailed text description. Use when the user provides screenshots, mockups, photos, diagrams, generated assets, or visual references that need actual visual interpretation, not just metadata.",
+        "modelDescription": "Analyze a local workspace image file with the configured vision provider (Gemini, Qwen, Zhipu, or DeepSeek — per harmony.vision.fallbackOrder) and return a detailed text description. Use when the user provides screenshots, mockups, photos, diagrams, generated assets, or visual references that need actual visual interpretation, not just metadata.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonyVisionRead",
         "tags": [
@@ -4216,7 +4486,8 @@
                 "light",
                 "mid",
                 "heavy",
-                "coding"
+                "coding",
+                "premium"
               ],
               "description": "Tier for optional provider fan-out. Default light."
             },
@@ -4385,7 +4656,8 @@
                 "light",
                 "mid",
                 "heavy",
-                "coding"
+                "coding",
+                "premium"
               ],
               "description": "Provider tier for provider_call proposals. Default light."
             },
@@ -4481,7 +4753,8 @@
                       "light",
                       "mid",
                       "heavy",
-                      "coding"
+                      "coding",
+                      "premium"
                     ]
                   },
                   "question": {
@@ -5509,7 +5782,7 @@
       {
         "name": "harmony_supervisor_state",
         "displayName": "Supervisor state",
-        "modelDescription": "Wave 12 Phase 1 local coordination core. Read shared .harmony supervisor state, active locks, managed process records, and operation ledger entries; write VS Code/terminal/floating surface heartbeats or supervisor events under .harmony/supervisor. Useful for coordinating VS Code Harmony, future terminal CLI, and future floating UI without racing shared files.",
+        "modelDescription": "Local coordination core. Read shared .harmony supervisor state, active locks, managed process records, and operation ledger entries; write VS Code/terminal/floating surface heartbeats or supervisor events under .harmony/supervisor. Useful for coordinating VS Code Harmony, future terminal CLI, and future floating UI without racing shared files.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonySupervisorState",
         "tags": [
@@ -8074,7 +8347,8 @@
                 "light",
                 "mid",
                 "heavy",
-                "coding"
+                "coding",
+                "premium"
               ]
             },
             "orchestration_id": {
@@ -9055,7 +9329,7 @@
         {
           "id": "harmony-sidebar",
           "title": "%viewsContainers.harmony%",
-          "icon": "media/harmony-icon.svg"
+          "icon": "media/harmony-icon.png"
         }
       ]
     },
@@ -9085,12 +9359,12 @@
         "harmony.backendUrl": {
           "type": "string",
           "default": "http://127.0.0.1:8889",
-          "description": "URL of the optional local backend HTTP endpoint."
+          "description": "%config.harmony.backendUrl.description%"
         },
         "harmony.defaultProfile": {
           "type": "string",
           "default": "default",
-          "description": "Default Harmony profile (default | coder | reviewer)."
+          "description": "%config.harmony.defaultProfile.description%"
         },
         "harmony.language": {
           "type": "string",
@@ -9099,7 +9373,7 @@
             "zh"
           ],
           "default": "en",
-          "description": "Language for Harmony chat responses and sidebar UI. 'zh' for Chinese (中文)."
+          "description": "%config.harmony.language.description%"
         },
         "harmony.modelProvider": {
           "type": "string",
@@ -9119,7 +9393,7 @@
             "stepfun"
           ],
           "default": "vscode-lm",
-          "description": "Model source for the native @harmony participant. 'vscode-lm' uses the model selected in VS Code Chat. 'deepseek', 'alibaba', 'tencent', 'zhipu', 'zhipu-coding', and 'moonshot' call their OpenAI-compatible direct APIs using stored provider keys. Provider primary models use their coding-tier setting."
+          "description": "%config.harmony.modelProvider.description%"
         },
         "harmony.collabProvider": {
           "type": "string",
@@ -9129,12 +9403,12 @@
             "mix"
           ],
           "enumDescriptions": [
-            "Harmony — sub-agents always call Harmony's own provider (e.g. DeepSeek direct API). VS Code LM is never used.",
-            "VS Code — sub-agents always use the model VS Code chat resolves.",
-            "Mix — prefer VS Code LM; fall back to Harmony's provider when VS Code LM is unavailable."
+            "%config.harmony.collabProvider.enum.0%",
+            "%config.harmony.collabProvider.enum.1%",
+            "%config.harmony.collabProvider.enum.2%"
           ],
           "default": "mix",
-          "description": "Routing mode for collaborative sub-agents and the local agent loop."
+          "description": "%config.harmony.collabProvider.description%"
         },
         "harmony.collabModelPreset": {
           "type": "string",
@@ -9146,14 +9420,14 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Auto / Balanced — recommended default. Uses a coding-tier direct provider when Route needs Harmony. Prefers Gemini only when Gemini free-quota mode is enabled.",
-            "Economy / Fast — use light-tier models for routine collaborative scouts and lower-intensity sessions.",
-            "Balanced — explicit balanced profile, currently equivalent to coding tier for collaborative agents.",
-            "Power / Hard Sessions — use heavy-tier models with premium/cost guards.",
-            "Custom — use harmony.collabDirectProvider and harmony.collabDirectTier exactly."
+            "%config.harmony.collabModelPreset.enum.0%",
+            "%config.harmony.collabModelPreset.enum.1%",
+            "%config.harmony.collabModelPreset.enum.2%",
+            "%config.harmony.collabModelPreset.enum.3%",
+            "%config.harmony.collabModelPreset.enum.4%"
           ],
           "default": "auto",
-          "description": "Model profile for Harmony direct collaborative agents. This is separate from harmony.modelProvider and harmony.collabProvider."
+          "description": "%config.harmony.collabModelPreset.description%"
         },
         "harmony.collabDirectProvider": {
           "type": "string",
@@ -9175,7 +9449,7 @@
             "stepfun"
           ],
           "default": "auto",
-          "description": "Direct provider used by collaborative agents when harmony.collabModelPreset is custom, or as an explicit provider preference for direct Agents routing. Gemini uses the AI Studio / Google Generative Language API key stored as harmony.geminiApiKey; Vertex AI is not wired here."
+          "description": "%config.harmony.collabDirectProvider.description%"
         },
         "harmony.collabDirectTier": {
           "type": "string",
@@ -9183,15 +9457,16 @@
             "light",
             "mid",
             "coding",
-            "heavy"
+            "heavy",
+            "premium"
           ],
           "default": "coding",
-          "description": "Direct provider tier used by collaborative agents when harmony.collabModelPreset is custom. Heavy/premium routes still respect Harmony cost guards."
+          "description": "%config.harmony.collabDirectTier.description%"
         },
         "harmony.deepseekBaseUrl": {
           "type": "string",
           "default": "https://api.deepseek.com/v1",
-          "description": "DeepSeek OpenAI-compatible API base URL."
+          "description": "%config.harmony.deepseekBaseUrl.description%"
         },
         "harmony.deepseek.endpointProfile": {
           "type": "string",
@@ -9200,109 +9475,111 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Use the standard DeepSeek OpenAI-compatible endpoint.",
-            "Use harmony.deepseekBaseUrl exactly."
+            "%config.harmony.deepseek.endpointProfile.enum.0%",
+            "%config.harmony.deepseek.endpointProfile.enum.1%"
           ],
           "default": "default",
-          "description": "DeepSeek endpoint profile. Use custom only if DeepSeek issues a different regional or proxy base URL."
+          "description": "%config.harmony.deepseek.endpointProfile.description%"
         },
         "harmony.deepseekModel": {
           "type": "string",
           "enum": [
+            "deepseek-flash",
             "deepseek-v4-flash",
             "deepseek-v4-pro"
           ],
           "enumDescriptions": [
-            "DeepSeek V4 Flash — fast, cost-effective, thinking ON by default.",
-            "DeepSeek V4 Pro — most capable, currently 75% off until May 2026."
+            "%config.harmony.deepseekModel.enum.0%",
+            "%config.harmony.deepseekModel.enum.1%",
+            "%config.harmony.deepseekModel.enum.2%"
           ],
-          "default": "deepseek-v4-flash",
-          "description": "DeepSeek model to use when harmony.modelProvider is 'deepseek'."
+          "default": "deepseek-flash",
+          "description": "%config.harmony.deepseekModel.description%"
         },
         "harmony.deepseekThinking": {
           "type": "boolean",
           "default": true,
-          "description": "Enable DeepSeek extended thinking at the API level. Harmony preserves the reasoning content internally when tool loops continue."
+          "description": "%config.harmony.deepseekThinking.description%"
         },
         "harmony.deepseekShowThinking": {
           "type": "boolean",
           "default": false,
-          "description": "Show DeepSeek reasoning as a full Markdown thinking block before each response/tool step. Harmony strips the visible block from replayed assistant history and preserves reasoning internally as DeepSeek reasoning_content."
+          "description": "%config.harmony.deepseekShowThinking.description%"
         },
         "harmony.deepseekMaxHistoryMessages": {
           "type": "number",
           "default": 40,
           "minimum": 0,
           "maximum": 400,
-          "description": "Maximum prior chat request/response messages to replay into DeepSeek direct API calls. Keeps long or failed chats from contaminating new tool routing. Set 0 to disable history replay."
+          "description": "%config.harmony.deepseekMaxHistoryMessages.description%"
         },
         "harmony.deepseekMaxHistoryChars": {
           "type": "number",
           "default": 60000,
           "minimum": 0,
           "maximum": 300000,
-          "description": "Maximum characters of prior chat history to replay into DeepSeek direct API calls after sanitizing assistant output. Set 0 to disable history replay."
+          "description": "%config.harmony.deepseekMaxHistoryChars.description%"
         },
         "harmony.streamIdleTimeoutSec": {
           "type": "number",
           "default": 120,
           "minimum": 0,
           "maximum": 900,
-          "description": "Seconds without receiving any stream data before a provider request is aborted with a clear timeout error instead of hanging. 0 disables the idle timeout."
+          "description": "%config.harmony.streamIdleTimeoutSec.description%"
         },
         "harmony.lmDirectFallback": {
           "type": "boolean",
           "default": true,
-          "description": "When the VS Code Chat model route fails mid-turn, automatically reroute the turn to the first Harmony direct provider with a saved API key (coding-plan providers first). Disable to let vscode-lm turns fail without an auto-rescue attempt."
+          "description": "%config.harmony.lmDirectFallback.description%"
         },
         "harmony.parallelToolBatching": {
           "type": "boolean",
           "default": true,
-          "description": "Run independent read-only tool calls (file reads, git reads) concurrently within a single turn to reduce latency. Disable if you observe any tool-ordering issues."
+          "description": "%config.harmony.parallelToolBatching.description%"
         },
         "harmony.logRawStream": {
           "type": "boolean",
           "default": false,
-          "description": "Log raw DeepSeek API streaming chunks to the Harmony Debug output channel. Use temporarily for debugging."
+          "description": "%config.harmony.logRawStream.description%"
         },
         "harmony.enableDebugLogging": {
           "type": "boolean",
           "default": true,
-          "description": "Log Harmony tool registry, routing, parser, and invocation diagnostics to the Harmony Debug output channel. Does not include API keys."
+          "description": "%config.harmony.enableDebugLogging.description%"
         },
         "harmony.showDiagnosticsOnError": {
           "type": "boolean",
           "default": true,
-          "description": "Show a concise expandable diagnostic block when a Harmony turn fails. This never includes API keys or hidden reasoning."
+          "description": "%config.harmony.showDiagnosticsOnError.description%"
         },
         "harmony.agentMaxSteps": {
           "type": "number",
           "default": 12,
           "minimum": -1,
           "maximum": 5000,
-          "description": "Maximum number of agent steps (tool/reasoning loops) per user message. Default 12 prevents runaway cost; set a larger number for long autonomous sessions or -1 for unlimited."
+          "description": "%config.harmony.agentMaxSteps.description%"
         },
         "harmony.autoApproveTools": {
           "type": "boolean",
           "default": false,
-          "description": "Skip confirmation dialogs for write_file and run_terminal tool calls. Turn on for uninterrupted agent sessions."
+          "description": "%config.harmony.autoApproveTools.description%"
         },
         "harmony.careBloom.threshold": {
           "type": "number",
           "default": 3,
           "minimum": 2,
           "maximum": 10,
-          "description": "Number of engagements with the same tool+file before a Wisdom Sprout blooms. Lower = more frequent reflections."
+          "description": "%config.harmony.careBloom.threshold.description%"
         },
         "harmony.errorLearning.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "When enabled, CareBloom learns from resolved error patterns and proactively advises when similar failures are detected."
+          "description": "%config.harmony.errorLearning.enabled.description%"
         },
         "harmony.orchestrateMode.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "When enabled, read-only orchestration tools (parallel dispatch, model consulting, swarm dispatch) are pre-approved. File writes and terminal commands still require confirmation."
+          "description": "%config.harmony.orchestrateMode.enabled.description%"
         },
         "harmony.orchestrateMode.preApprovedTools": {
           "type": "array",
@@ -9316,52 +9593,52 @@
             "harmony_spawn_worker",
             "harmony_swarm_dispatch"
           ],
-          "description": "Tool names that are automatically approved when Orchestrate Mode is active."
+          "description": "%config.harmony.orchestrateMode.preApprovedTools.description%"
         },
         "harmony.orchestrateMode.maxCallsPerSession": {
           "type": "number",
           "default": 0,
           "minimum": 0,
           "maximum": 1000,
-          "description": "Maximum orchestration calls allowed per session when Orchestrate Mode is active (0 = unlimited). When exceeded, mode auto-disables."
+          "description": "%config.harmony.orchestrateMode.maxCallsPerSession.description%"
         },
         "harmony.orchestrateMode.sessionTimeoutMinutes": {
           "type": "number",
           "default": 0,
           "minimum": 0,
           "maximum": 480,
-          "description": "Auto-disable Orchestrate Mode after N minutes of inactivity (0 = never)."
+          "description": "%config.harmony.orchestrateMode.sessionTimeoutMinutes.description%"
         },
         "harmony.deepOrchestrate.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable the DeepOrchestrate safe copy-edit-review pipeline. When ON, all file edits go through .harmony/orchestrate-drafts/ with multi-model review before atomic application."
+          "description": "%config.harmony.deepOrchestrate.enabled.description%"
         },
         "harmony.deepOrchestrate.autoReview": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically run multi-model review after drafting (instead of requiring human gate approval first). Humans still confirm before final application."
+          "description": "%config.harmony.deepOrchestrate.autoReview.description%"
         },
         "harmony.deepOrchestrate.reviewDepth": {
           "type": "number",
           "default": 2,
           "minimum": 1,
           "maximum": 3,
-          "description": "Number of AI models reviewing DeepOrchestrate diffs (1-3). More reviewers = safer but slower and costlier."
+          "description": "%config.harmony.deepOrchestrate.reviewDepth.description%"
         },
         "harmony.deepOrchestrate.maxCostPerOperation": {
           "type": "number",
           "default": 0.5,
           "minimum": 0.01,
           "maximum": 10,
-          "description": "Maximum estimated cost per DeepOrchestrate operation in USD. Operations exceeding this are blocked."
+          "description": "%config.harmony.deepOrchestrate.maxCostPerOperation.description%"
         },
         "harmony.whisper.retentionDays": {
           "type": "number",
           "default": 7,
           "minimum": 1,
           "maximum": 365,
-          "description": "Number of days to retain whisper files before cleanup. Archived whispers older than this are permanently deleted."
+          "description": "%config.harmony.whisper.retentionDays.description%"
         },
         "harmony.concert.allowedFromNames": {
           "type": "array",
@@ -9384,52 +9661,52 @@
             "designer",
             "harmony"
           ],
-          "description": "Allowed from names for concert hall posts. Names not in this list are remapped to ensemble. Add custom names here to personalize your concert hall."
+          "description": "%config.harmony.concert.allowedFromNames.description%"
         },
         "harmony.whisper.disabled": {
           "type": "boolean",
           "default": false,
-          "description": "Disable the whisper inbox entirely. When disabled, whispers return a message and cannot bypass the block."
+          "description": "%config.harmony.whisper.disabled.description%"
         },
         "harmony.workerOutputs.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Save complete worker/spawn outputs to .harmony/worker-outputs/ to prevent truncation."
+          "description": "%config.harmony.workerOutputs.enabled.description%"
         },
         "harmony.centralHubPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the private Central Hub folder containing scripts/self_healing_harness.py. Leave blank in shared builds; set locally or via HARMONY_CENTRAL_HUB/EHAI_CENTRAL_PATH."
+          "description": "%config.harmony.centralHubPath.description%"
         },
         "harmony.extensionSourcePath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the HarmonyExtension source folder. Used by self-inspection, compile/package/install, and repair restore tools. Leave blank to auto-detect common local paths."
+          "description": "%config.harmony.extensionSourcePath.description%"
         },
         "harmony.centralPythonPath": {
           "type": "string",
           "default": "",
-          "description": "Optional absolute path to the Python executable for the Central Hub harness. If blank, Harmony tries the Central Hub .venv and then python on PATH."
+          "description": "%config.harmony.centralPythonPath.description%"
         },
         "harmony.creativeServicePath": {
           "type": "string",
           "default": "",
-          "description": "Optional absolute path to the Harmony Creative REST service folder containing rest_api.py, or to a workspace/root containing harmony-creative or mcp-servers/harmony-creative. If blank, Harmony checks the current workspace, then Central."
+          "description": "%config.harmony.creativeServicePath.description%"
         },
         "harmony.creativePythonPath": {
           "type": "string",
           "default": "",
-          "description": "Optional absolute path to the Python executable for Harmony Creative. If blank, Harmony tries the Creative .venv, the owning workspace/Central .venv, then python on PATH."
+          "description": "%config.harmony.creativePythonPath.description%"
         },
         "harmony.enableMemoryHub": {
           "type": "boolean",
           "default": false,
-          "description": "If true, the Harmony participant will POST each (prompt, response) pair to the optional local memory hub at hub.url/ext/v1/memory/store (default http://127.0.0.1:7878). Failures are silent."
+          "description": "%config.harmony.enableMemoryHub.description%"
         },
         "harmony.planOnlyMode": {
           "type": "boolean",
           "default": false,
-          "description": "When true, Harmony cannot call write/edit/patch/run-terminal tools — she can only read, list, grep, open, and ask questions. Useful for planning-before-doing sessions."
+          "description": "%config.harmony.planOnlyMode.description%"
         },
         "harmony.bigGunsMode": {
           "type": "string",
@@ -9439,163 +9716,163 @@
             "all"
           ],
           "default": "off",
-          "description": "Cost guard. 'off' = ask before any expensive model. 'deepseek-only' = allow DeepSeek Pro automatically (cheap), but ask for Gemini Pro / Opus. 'all' = auto-allow all."
+          "description": "%config.harmony.bigGunsMode.description%"
         },
         "harmony.contextPersistence.preActionChecklist": {
           "type": "boolean",
           "default": true,
-          "description": "Approach A: Before every edit/compile tool, re-read the active todo items and confirm which are planned vs completed."
+          "description": "%config.harmony.contextPersistence.preActionChecklist.description%"
         },
         "harmony.contextPersistence.swarmVerifier": {
           "type": "boolean",
           "default": false,
-          "description": "Approach C: Dispatch a verifier agent after each turn to cross-check planned todos against actual file/directory state."
+          "description": "%config.harmony.contextPersistence.swarmVerifier.description%"
         },
         "harmony.contextPersistence.activeBatchSize": {
           "type": "integer",
           "default": 5,
           "minimum": 1,
           "maximum": 50,
-          "description": "Approach D: Maximum number of todo items to keep active at once. Completed items auto-archive."
+          "description": "%config.harmony.contextPersistence.activeBatchSize.description%"
         },
         "harmony.contextPersistence.checkpointActionInterval": {
           "type": "integer",
           "default": 3,
           "minimum": 1,
           "maximum": 20,
-          "description": "Approach B: Number of tool calls after which Harmony injects a [CHECKPOINT] message requiring todo progress review."
+          "description": "%config.harmony.contextPersistence.checkpointActionInterval.description%"
         },
         "harmony.plannerEnforced": {
           "type": "boolean",
           "default": false,
-          "description": "When true, Harmony MUST call harmony_todo to lay out a plan before executing any 3+ step request."
+          "description": "%config.harmony.plannerEnforced.description%"
         },
         "harmony.checkpointMode": {
           "type": "boolean",
           "default": false,
-          "description": "When true, Harmony pauses and asks the user before each major step (file write, multi-line edit, terminal command)."
+          "description": "%config.harmony.checkpointMode.description%"
         },
         "harmony.continuity.autoInjectLatest": {
           "type": "boolean",
           "default": true,
-          "description": "When true, Harmony injects the latest explicit continuity/handoff entry into new model turns so work can resume across Harmony, Copilot, Gemini, terminal, and future seats."
+          "description": "%config.harmony.continuity.autoInjectLatest.description%"
         },
         "harmony.continuity.maxPromptChars": {
           "type": "number",
           "default": 6000,
           "minimum": 1000,
           "maximum": 40000,
-          "description": "Maximum detail characters from the latest continuity entry to inject into a model prompt."
+          "description": "%config.harmony.continuity.maxPromptChars.description%"
         },
         "harmony.rules.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Load project rule anchors such as AGENTS.md, GEMINI.md, HARMONY.md, and .harmony/rules/*.md into Harmony model prompts."
+          "description": "%config.harmony.rules.enabled.description%"
         },
         "harmony.rules.includePrivateFiles": {
           "type": "boolean",
           "default": false,
-          "description": "Include private rule/planning files in Harmony model prompts. Default false to avoid sending private notes to cloud models accidentally."
+          "description": "%config.harmony.rules.includePrivateFiles.description%"
         },
         "harmony.rules.maxPromptChars": {
           "type": "number",
           "default": 20000,
           "minimum": 1000,
           "maximum": 120000,
-          "description": "Maximum total characters of rule anchor content to inject into Harmony prompts."
+          "description": "%config.harmony.rules.maxPromptChars.description%"
         },
         "harmony.orchestrator.maxFiles": {
           "type": "number",
           "default": 80,
           "minimum": 1,
           "maximum": 500,
-          "description": "Default maximum files included in harmony_orchestrate_codebase repo packs."
+          "description": "%config.harmony.orchestrator.maxFiles.description%"
         },
         "harmony.orchestrator.maxContextChars": {
           "type": "number",
           "default": 120000,
           "minimum": 5000,
           "maximum": 1500000,
-          "description": "Default maximum characters included in harmony_orchestrate_codebase repo packs. Raise for large-context models after checking cost."
+          "description": "%config.harmony.orchestrator.maxContextChars.description%"
         },
         "harmony.orchestrator.includePrivateFiles": {
           "type": "boolean",
           "default": false,
-          "description": "Include private planning files in codebase orchestrator packs. Default false for privacy."
+          "description": "%config.harmony.orchestrator.includePrivateFiles.description%"
         },
         "harmony.verification.command": {
           "type": "string",
           "default": "npm run compile",
-          "description": "Default command for harmony_run_fail_fix and @harmony /verify."
+          "description": "%config.harmony.verification.command.description%"
         },
         "harmony.verification.timeoutSec": {
           "type": "number",
           "default": 180,
           "minimum": 5,
           "maximum": 1800,
-          "description": "Default timeout in seconds for verification commands."
+          "description": "%config.harmony.verification.timeoutSec.description%"
         },
         "harmony.mcp.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable Harmony's MCP manager layer. The current version reports configured servers and permissions; runtime spawning is intentionally deferred."
+          "description": "%config.harmony.mcp.enabled.description%"
         },
         "harmony.mcp.servers": {
           "type": "object",
           "default": {},
-          "description": "Configured MCP servers keyed by name. Each server may include enabled, transport ('stdio'|'http'), command, args, url, trust ('ask'|'allow'|'deny'), permissions, and timeoutSec."
+          "description": "%config.harmony.mcp.servers.description%"
         },
         "harmony.claude.enableThinking": {
           "type": "boolean",
           "default": false,
-          "description": "Enable extended thinking on Anthropic Claude model calls. DISABLED by default because thinking tokens are billed separately and can cause High impact on a single Opus call. Only enable intentionally for specialized deep-reasoning tasks, and pair it with harmony.claude.thinkingBudgetTokens to cap spend."
+          "description": "%config.harmony.claude.enableThinking.description%"
         },
         "harmony.claude.thinkingBudgetTokens": {
           "type": "number",
           "default": 4000,
           "minimum": 1000,
           "maximum": 32000,
-          "description": "Maximum thinking tokens per Anthropic Claude model call when harmony.claude.enableThinking is true. 4000 tokens: Medium on Sonnet, High on Opus. A hard cap so accidental thinking spikes cannot exceed this."
+          "description": "%config.harmony.claude.thinkingBudgetTokens.description%"
         },
         "harmony.gemini.useFreeQuota": {
           "type": "boolean",
           "default": false,
-          "description": "When true, Harmony makes Gemini calls without asserting billing requirements. The API enforces its own free-tier limits (15 req/min for Flash). Quota errors are surfaced clearly rather than silently burning credits. Your AI Studio key works on both free and paid paths — this setting just controls which path Harmony expects."
+          "description": "%config.harmony.gemini.useFreeQuota.description%"
         },
         "harmony.providers.selfHealFromEnv": {
           "type": "boolean",
           "default": false,
-          "description": "When true, Harmony may silently write a provider key recovered from a workspace .env (or process environment) back into VS Code Secret Storage so other readers see it. When enabled, a forgotten manual Import isn't necessary — simply sending a message recovers the key from .env automatically. Off by default because it promotes a plaintext secret into encrypted storage without an explicit Import. Slot-saved keys always self-heal regardless of this setting."
+          "description": "%config.harmony.providers.selfHealFromEnv.description%"
         },
         "harmony.providerAccounting.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Write a secret-free local audit ledger for provider calls and provider-policy blocks under .harmony/provider-usage/ledger.jsonl. Prompts, responses, and API keys are not stored."
+          "description": "%config.harmony.providerAccounting.enabled.description%"
         },
         "harmony.providerPolicy.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable local allow/deny/quota checks before Harmony direct-provider API calls. Disable only when intentionally bypassing provider policy."
+          "description": "%config.harmony.providerPolicy.enabled.description%"
         },
         "harmony.swarm.mutationExecution.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable real swarm mutation execution from escrow proposals. Disabled by default so swarm can plan, escrow, read, and dry-run but cannot apply patches, run commands, or call providers unless intentionally enabled."
+          "description": "%config.harmony.swarm.mutationExecution.enabled.description%"
         },
         "harmony.swarm.patchExecution.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable real swarm patch execution through git apply. Requires harmony.swarm.mutationExecution.enabled, execution_guarded receipts, escrow, preflight, confirmation, and operation locks."
+          "description": "%config.harmony.swarm.patchExecution.enabled.description%"
         },
         "harmony.swarm.terminalExecution.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable real terminal-command execution from swarm proposals and required swarm validation commands. Requires harmony.swarm.mutationExecution.enabled for proposal execution, execution_guarded receipts, escrow, preflight, confirmation, and operation locks."
+          "description": "%config.harmony.swarm.terminalExecution.enabled.description%"
         },
         "harmony.swarm.providerCalls.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable direct provider calls from swarm dispatch fan-out or swarm provider-call proposals. Disabled by default to prevent unexpected spend or data sharing; provider policy still applies when enabled."
+          "description": "%config.harmony.swarm.providerCalls.enabled.description%"
         },
         "harmony.swarm.defaultProvider": {
           "type": "string",
@@ -9610,7 +9887,7 @@
             "tencent"
           ],
           "default": "deepseek",
-          "description": "Default provider preference used by Harmony swarm launchers/direct controls when a provider choice is needed. DeepSeek resolves to DeepSeek V4 Flash by default. Provider calls remain disabled unless harmony.swarm.providerCalls.enabled is explicitly enabled."
+          "description": "%config.harmony.swarm.defaultProvider.description%"
         },
         "harmony.swarm.defaultTier": {
           "type": "string",
@@ -9618,20 +9895,21 @@
             "light",
             "mid",
             "coding",
-            "heavy"
+            "heavy",
+            "premium"
           ],
           "default": "coding",
-          "description": "Default provider tier used by Harmony swarm launchers/direct controls. With the default DeepSeek provider, coding resolves to deepseek-v4-flash."
+          "description": "%config.harmony.swarm.defaultTier.description%"
         },
         "harmony.swarm.autonomyExecution.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable bounded swarm autonomy execute mode. Disabled by default; plan and dry-run modes remain available. Real execution still requires confirm_execute, validation, budgets, locks, and the relevant patch/terminal/provider switches. Validation commands also require harmony.swarm.terminalExecution.enabled."
+          "description": "%config.harmony.swarm.autonomyExecution.enabled.description%"
         },
         "harmony.swarm.commitExecution.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable guarded in-swarm git commit execution. Disabled by default; commit dry-run remains available. Real commits still require a ready dry-run receipt, snapshot receipt evidence, validation, clean checks, manifest-only staging, final confirmation, and harmony.swarm.terminalExecution.enabled for validation commands."
+          "description": "%config.harmony.swarm.commitExecution.enabled.description%"
         },
         "harmony.providerPolicy.allowedProviders": {
           "type": "array",
@@ -9649,7 +9927,7 @@
             ]
           },
           "default": [],
-          "description": "Optional allow-list for direct provider calls. Empty means any configured provider is allowed unless denied."
+          "description": "%config.harmony.providerPolicy.allowedProviders.description%"
         },
         "harmony.providerPolicy.deniedProviders": {
           "type": "array",
@@ -9667,7 +9945,7 @@
             ]
           },
           "default": [],
-          "description": "Providers that Harmony direct-provider calls must block before HTTP."
+          "description": "%config.harmony.providerPolicy.deniedProviders.description%"
         },
         "harmony.providerPolicy.allowedModelsByProvider": {
           "type": "object",
@@ -9678,7 +9956,7 @@
               "type": "string"
             }
           },
-          "description": "Optional per-provider model allow-list for direct provider calls. Values are exact model IDs or * wildcards, e.g. { \"openrouter\": [\"*:free\", \"tencent/*\"] }. Empty provider list means any model not denied is allowed."
+          "description": "%config.harmony.providerPolicy.allowedModelsByProvider.description%"
         },
         "harmony.providerPolicy.deniedModelsByProvider": {
           "type": "object",
@@ -9689,29 +9967,29 @@
               "type": "string"
             }
           },
-          "description": "Optional per-provider model deny-list for direct provider calls. Values are exact model IDs or * wildcards, e.g. { \"openrouter\": [\"anthropic/*\", \"openai/*\"] }. Deny rules are checked before HTTP and are also applied to OpenRouter fallbacks."
+          "description": "%config.harmony.providerPolicy.deniedModelsByProvider.description%"
         },
         "harmony.providerPolicy.maxSessionCalls": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "description": "Maximum direct provider calls allowed in the current extension session. 0 disables this quota."
+          "description": "%config.harmony.providerPolicy.maxSessionCalls.description%"
         },
         "harmony.providerPolicy.maxSessionEstimatedCostUsd": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "description": "Maximum known estimated direct-provider cost allowed in the current extension session. 0 disables this quota. Unknown-cost providers are still shown as partly unknown."
+          "description": "%config.harmony.providerPolicy.maxSessionEstimatedCostUsd.description%"
         },
         "harmony.providerPolicy.maxCallsByProvider": {
           "type": "object",
           "default": {},
-          "description": "Optional per-provider direct-call quotas for the current extension session, e.g. { \"gemini\": 10, \"openai\": 2 }."
+          "description": "%config.harmony.providerPolicy.maxCallsByProvider.description%"
         },
         "harmony.providerPolicy.maxEstimatedCostUsdByProvider": {
           "type": "object",
           "default": {},
-          "description": "Optional per-provider known estimated-cost quotas for the current extension session, e.g. { \"openai\": 1.00, \"claude\": 0.50 }."
+          "description": "%config.harmony.providerPolicy.maxEstimatedCostUsdByProvider.description%"
         },
         "harmony.orchestrator.defaultTier": {
           "type": "string",
@@ -9719,20 +9997,21 @@
             "light",
             "mid",
             "heavy",
-            "coding"
+            "coding",
+            "premium"
           ],
           "default": "coding",
-          "description": "Default model tier for harmony_orchestrate_codebase. 'coding' maps to DeepSeek Flash by default — cheap, transparent billing, strong code reasoning. Change to 'heavy' only for questions that truly need the full model."
+          "description": "%config.harmony.orchestrator.defaultTier.description%"
         },
         "harmony.hub.url": {
           "type": "string",
           "default": "http://127.0.0.1:7878",
-          "description": "Base URL for HarmonyHub, the local sovereign cross-project insight daemon. Default localhost:7878."
+          "description": "%config.harmony.hub.url.description%"
         },
         "harmony.hub.autoStart": {
           "type": "boolean",
           "default": true,
-          "description": "Allow explicit Hub-dependent actions to start HarmonyHub on demand. This does not start Hub at VS Code launch; turn off to require a prompt before starting the local index daemon."
+          "description": "%config.harmony.hub.autoStart.description%"
         },
         "harmony.hub.startOnMessage": {
           "type": "string",
@@ -9742,12 +10021,133 @@
             "auto"
           ],
           "enumDescriptions": [
-            "Do not start HarmonyHub from normal @harmony messages.",
-            "Ask before starting HarmonyHub for a normal @harmony message when Hub is offline.",
-            "Start HarmonyHub automatically for normal @harmony messages when Hub is offline."
+            "%config.harmony.hub.startOnMessage.enum.0%",
+            "%config.harmony.hub.startOnMessage.enum.1%",
+            "%config.harmony.hub.startOnMessage.enum.2%"
           ],
           "default": "prompt",
-          "description": "What Harmony should do when a normal @harmony message begins and HarmonyHub is offline. Prompt is recommended because first startup/indexing can use noticeable memory."
+          "description": "%config.harmony.hub.startOnMessage.description%"
+        },
+        "harmony.hub.indexOnStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.harmony.hub.indexOnStart.description%"
+        },
+        "harmony.hub.idleStopMinutes": {
+          "type": "number",
+          "minimum": 0,
+          "default": 40,
+          "description": "%config.harmony.hub.idleStopMinutes.description%"
+        },
+        "harmony.hub.idleUnloadMinutes": {
+          "type": "number",
+          "minimum": 0,
+          "default": 10,
+          "description": "%config.harmony.hub.idleUnloadMinutes.description%"
+        },
+        "harmony.hub.embedModel": {
+          "type": "string",
+          "enum": [
+            "jina-code",
+            "fast"
+          ],
+          "enumDescriptions": [
+            "%config.harmony.hub.embedModel.enum.0%",
+            "%config.harmony.hub.embedModel.enum.1%"
+          ],
+          "default": "jina-code",
+          "description": "%config.harmony.hub.embedModel.description%"
+        },
+        "harmony.hub.startPolicy": {
+          "type": "string",
+          "enum": [
+            "never",
+            "onDemand",
+            "onWorkspaceOpen"
+          ],
+          "enumDescriptions": [
+            "%config.harmony.hub.startPolicy.enum.0%",
+            "%config.harmony.hub.startPolicy.enum.1%",
+            "%config.harmony.hub.startPolicy.enum.2%"
+          ],
+          "default": "onDemand",
+          "description": "%config.harmony.hub.startPolicy.description%"
+        },
+        "harmony.hub.restartPolicy": {
+          "type": "string",
+          "enum": [
+            "stayDown",
+            "promptOnce"
+          ],
+          "enumDescriptions": [
+            "%config.harmony.hub.restartPolicy.enum.0%",
+            "%config.harmony.hub.restartPolicy.enum.1%"
+          ],
+          "default": "stayDown",
+          "description": "%config.harmony.hub.restartPolicy.description%"
+        },
+        "harmony.consensus.protocolPath": {
+          "type": "string",
+          "default": ".harmony/protocols/consensus-round.json",
+          "description": "%config.harmony.consensus.protocolPath.description%"
+        },
+        "harmony.consensus.ledgerDir": {
+          "type": "string",
+          "default": ".harmony/consensus",
+          "description": "%config.harmony.consensus.ledgerDir.description%"
+        },
+        "harmony.consensus.maxRounds": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 7,
+          "description": "%config.harmony.consensus.maxRounds.description%"
+        },
+        "harmony.consensus.convergence": {
+          "type": "string",
+          "enum": [
+            "unanimity",
+            "supermajority",
+            "rationale"
+          ],
+          "default": "unanimity",
+          "description": "%config.harmony.consensus.convergence.description%"
+        },
+        "harmony.consensus.requireRestate": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.harmony.consensus.requireRestate.description%"
+        },
+        "harmony.consensus.requireRationaleForChange": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.harmony.consensus.requireRationaleForChange.description%"
+        },
+        "harmony.consensus.dissentPolicy": {
+          "type": "string",
+          "enum": [
+            "record",
+            "block"
+          ],
+          "default": "record",
+          "description": "%config.harmony.consensus.dissentPolicy.description%"
+        },
+        "harmony.consensus.classifyDisagreements": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.harmony.consensus.classifyDisagreements.description%"
+        },
+        "harmony.consensus.maxProviderCallsPerRound": {
+          "type": "number",
+          "default": 6,
+          "minimum": 0,
+          "maximum": 20,
+          "description": "%config.harmony.consensus.maxProviderCallsPerRound.description%"
+        },
+        "harmony.hub.indexTimeoutMs": {
+          "type": "number",
+          "default": 900000,
+          "description": "%config.harmony.hub.indexTimeoutMs.description%"
         },
         "harmony.hub.allowedRoots": {
           "type": "array",
@@ -9755,7 +10155,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Absolute folder paths HarmonyHub is allowed to index. Set once — the extension syncs them to the daemon automatically on startup and whenever the list changes."
+          "description": "%config.harmony.hub.allowedRoots.description%"
         },
         "harmony.sidebar.mode": {
           "type": "string",
@@ -9765,170 +10165,170 @@
             "isolated"
           ],
           "enumDescriptions": [
-            "Show the full Harmony sidebar status surface with bounded lists and capped payloads.",
-            "Show a lower-memory sidebar state that keeps controls visible but hides heavier detail lists until switched back to full.",
-            "Show only minimal chat/diagnostic/restore controls and avoid live sidebar state fetches while isolating renderer OOMs."
+            "%config.harmony.sidebar.mode.enum.0%",
+            "%config.harmony.sidebar.mode.enum.1%",
+            "%config.harmony.sidebar.mode.enum.2%"
           ],
           "default": "isolated",
-          "description": "Controls how much detail the Harmony sidebar renders. Isolated is the default renderer-OOM posture; compact keeps controls plus bounded summaries; full shows all capped details. You can also change this from Command Palette with Harmony: Configure Sidebar Display Mode."
+          "description": "%config.harmony.sidebar.mode.description%"
         },
         "harmony.hub.exePath": {
           "type": "string",
           "default": "",
-          "description": "Optional absolute path to the HarmonyHub executable. If blank, Harmony uses the bundled binary first and then harmonyhub on PATH."
+          "description": "%config.harmony.hub.exePath.description%"
         },
         "harmony.hub.dataDir": {
           "type": "string",
           "default": "",
-          "description": "Data directory HarmonyHub stores its index snapshots in. Leave blank to use the default (sibling of the executable)."
+          "description": "%config.harmony.hub.dataDir.description%"
         },
         "harmony.providers.openai.light": {
           "type": "string",
           "default": "",
-          "description": "Override OpenAI light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.openai.light.description%"
         },
         "harmony.providers.openai.mid": {
           "type": "string",
           "default": "",
-          "description": "Override OpenAI mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.openai.mid.description%"
         },
         "harmony.providers.openai.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override OpenAI heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.openai.heavy.description%"
         },
         "harmony.providers.openai.coding": {
           "type": "string",
           "default": "",
-          "description": "Override OpenAI coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.openai.coding.description%"
         },
         "harmony.providers.gemini.light": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.gemini.light.description%"
         },
         "harmony.providers.gemini.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.gemini.mid.description%"
         },
         "harmony.providers.gemini.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.gemini.heavy.description%"
         },
         "harmony.providers.gemini.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Gemini coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.gemini.coding.description%"
         },
         "harmony.gemini.api": {
           "type": "string",
           "enum": ["auto", "generateContent", "openai-compat"],
           "default": "auto",
-          "description": "Gemini API dialect. auto uses native generateContent for thinking models. generateContent forces native. openai-compat forces compat."
+          "description": "%config.harmony.gemini.api.description%"
         },
         "harmony.gemini.thinking.level": {
           "type": "string",
           "enum": ["minimal", "low", "medium", "high"],
           "default": "medium",
-          "description": "Gemini thinking level for native generateContent API."
+          "description": "%config.harmony.gemini.thinking.level.description%"
         },
         "harmony.gemini.safety.preset": {
           "type": "string",
           "enum": ["default", "permissive"],
           "default": "permissive",
-          "description": "Gemini safety settings. permissive sets BLOCK_NONE (recommended for agent loops)."
+          "description": "%config.harmony.gemini.safety.preset.description%"
         },
         "harmony.providers.claude.light": {
           "type": "string",
           "default": "",
-          "description": "Override Anthropic Claude light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.claude.light.description%"
         },
         "harmony.providers.claude.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Anthropic Claude mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.claude.mid.description%"
         },
         "harmony.providers.claude.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Anthropic Claude heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.claude.heavy.description%"
         },
         "harmony.providers.claude.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Anthropic Claude coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.claude.coding.description%"
         },
         "harmony.providers.deepseek.light": {
           "type": "string",
           "default": "",
-          "description": "Override DeepSeek light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.deepseek.light.description%"
         },
         "harmony.providers.deepseek.mid": {
           "type": "string",
           "default": "",
-          "description": "Override DeepSeek mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.deepseek.mid.description%"
         },
         "harmony.providers.deepseek.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override DeepSeek heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.deepseek.heavy.description%"
         },
         "harmony.providers.deepseek.coding": {
           "type": "string",
           "default": "",
-          "description": "Override DeepSeek coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.deepseek.coding.description%"
         },
         "harmony.providers.openrouter.light": {
           "type": "string",
           "default": "",
-          "description": "Override OpenRouter light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.openrouter.light.description%"
         },
         "harmony.providers.openrouter.mid": {
           "type": "string",
           "default": "",
-          "description": "Override OpenRouter mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.openrouter.mid.description%"
         },
         "harmony.providers.openrouter.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override OpenRouter heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.openrouter.heavy.description%"
         },
         "harmony.providers.openrouter.coding": {
           "type": "string",
           "default": "",
-          "description": "Override OpenRouter coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.openrouter.coding.description%"
         },
         "harmony.openrouter.baseUrl": {
           "type": "string",
           "default": "https://openrouter.ai/api/v1",
-          "description": "OpenRouter OpenAI-compatible API base URL."
+          "description": "%config.harmony.openrouter.baseUrl.description%"
         },
         "harmony.providers.moonshot.light": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.moonshot.light.description%"
         },
         "harmony.providers.moonshot.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.moonshot.mid.description%"
         },
         "harmony.providers.moonshot.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.moonshot.heavy.description%"
         },
         "harmony.providers.moonshot.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Moonshot/Kimi coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.moonshot.coding.description%"
         },
         "harmony.moonshot.baseUrl": {
           "type": "string",
           "default": "https://api.moonshot.ai/v1",
-          "description": "Moonshot/Kimi OpenAI-compatible API base URL."
+          "description": "%config.harmony.moonshot.baseUrl.description%"
         },
         "harmony.moonshot.endpointProfile": {
           "type": "string",
@@ -9937,41 +10337,41 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Use the standard Moonshot/Kimi OpenAI-compatible endpoint.",
-            "Use harmony.moonshot.baseUrl exactly."
+            "%config.harmony.moonshot.endpointProfile.enum.0%",
+            "%config.harmony.moonshot.endpointProfile.enum.1%"
           ],
           "default": "default",
-          "description": "Moonshot/Kimi endpoint profile. Use custom only if Moonshot issues a different regional or proxy base URL."
+          "description": "%config.harmony.moonshot.endpointProfile.description%"
         },
         "harmony.kimiCode.contextWindow": {
           "type": "number",
           "default": 262144,
-          "description": "KimiCode context window in tokens. Default 262144 (256k) for Moderato plan. Set to 1048576 (1M) for Allegretto+ plan."
+          "description": "%config.harmony.kimiCode.contextWindow.description%"
         },
         "harmony.providers.alibaba.light": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.alibaba.light.description%"
         },
         "harmony.providers.alibaba.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.alibaba.mid.description%"
         },
         "harmony.providers.alibaba.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.alibaba.heavy.description%"
         },
         "harmony.providers.alibaba.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Alibaba/Qwen coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.alibaba.coding.description%"
         },
         "harmony.alibaba.baseUrl": {
           "type": "string",
           "default": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-          "description": "Alibaba DashScope/Model Studio OpenAI-compatible API base URL. Change to a regional endpoint if your account requires it."
+          "description": "%config.harmony.alibaba.baseUrl.description%"
         },
         "harmony.alibaba.endpointProfile": {
           "type": "string",
@@ -9982,18 +10382,18 @@
             "custom"
           ],
           "enumDescriptions": [
-            "International/Singapore/global DashScope endpoint. Use this for international keys.",
-            "Mainland China/Beijing DashScope endpoint. Use this for mainland China keys; international keys commonly return 401 here.",
-            "US/Virginia issued keys use the shared international OpenAI-compatible endpoint unless Alibaba issues a different account-specific URL.",
-            "Use harmony.alibaba.baseUrl exactly for any provider-issued regional endpoint."
+            "%config.harmony.alibaba.endpointProfile.enum.0%",
+            "%config.harmony.alibaba.endpointProfile.enum.1%",
+            "%config.harmony.alibaba.endpointProfile.enum.2%",
+            "%config.harmony.alibaba.endpointProfile.enum.3%"
           ],
           "default": "international",
-          "description": "Alibaba/Qwen endpoint profile. International is the Singapore/global route; US/Virginia uses that shared international route unless overridden; mainland is the China/Beijing route; custom uses the exact provider-issued base URL."
+          "description": "%config.harmony.alibaba.endpointProfile.description%"
         },
         "harmony.vision.geminiModel": {
           "type": "string",
           "default": "gemini-3.8-flash",
-          "description": "Gemini model used for image analysis when you attach screenshots in the Harmony Compose panel."
+          "description": "%config.harmony.vision.geminiModel.description%"
         },
         "harmony.vision.provider": {
           "type": "string",
@@ -10001,10 +10401,11 @@
             "auto",
             "gemini",
             "zhipu",
-            "alibaba"
+            "alibaba",
+            "deepseek"
           ],
           "default": "auto",
-          "description": "Vision provider. auto=configurable fallback order. Single-provider modes skip fallback."
+          "description": "%config.harmony.vision.provider.description%"
         },
         "harmony.vision.qwenModel": {
           "type": "string",
@@ -10015,17 +10416,22 @@
             "qwen-vl-plus"
           ],
           "default": "qwen3.8-max",
-          "description": "Alibaba Qwen vision model for image analysis. qwen3.8-max and qwen3.7-plus are the current generation; qwen-vl-* are legacy."
+          "description": "%config.harmony.vision.qwenModel.description%"
+        },
+        "harmony.vision.deepseekModel": {
+          "type": "string",
+          "default": "deepseek-v4-flash-vision-exp",
+          "description": "%config.harmony.vision.deepseekModel.description%"
         },
         "harmony.vision.ocrOnly": {
           "type": "boolean",
           "default": false,
-          "description": "When ON, Compose images are processed with local Windows OCR only — no API call. If OCR finds no text, the image is skipped (no fallback to paid vision). Turn ON to guarantee zero-cost, zero-cloud image processing."
+          "description": "%config.harmony.vision.ocrOnly.description%"
         },
         "harmony.vision.localFirst": {
           "type": "boolean",
           "default": false,
-          "description": "When ON, images are analyzed locally first using CPU-only algorithms (dominant colors, blur detection, composition analysis) before falling back to cloud vision. Zero API cost, zero data sent off-device. Falls through to your chosen provider if local analysis fails."
+          "description": "%config.harmony.vision.localFirst.description%"
         },
         "harmony.vision.autoGeminiModel": {
           "type": "string",
@@ -10038,7 +10444,7 @@
             "gemini-3.1-pro-preview"
           ],
           "default": "gemini-3.8-flash",
-          "description": "Gemini model used when the vision provider is set to Auto (Gemini-first or Qwen-first fallback mode)."
+          "description": "%config.harmony.vision.autoGeminiModel.description%"
         },
         "harmony.vision.autoQwenModel": {
           "type": "string",
@@ -10049,7 +10455,7 @@
             "qwen-vl-plus"
           ],
           "default": "qwen3.8-max",
-          "description": "Alibaba Qwen vision model used when the vision provider is set to Auto (Gemini-first or Qwen-first fallback mode)."
+          "description": "%config.harmony.vision.autoQwenModel.description%"
         },
         "harmony.imageGen.provider": {
           "type": "string",
@@ -10059,32 +10465,32 @@
             "alibaba"
           ],
           "default": "gemini",
-          "description": "Default provider for harmony_image_gen. Gemini is preferred by default; switch to OpenAI for DALL-E/gpt-image generation or Alibaba for Tongyi Wanxiang."
+          "description": "%config.harmony.imageGen.provider.description%"
         },
         "harmony.imageGen.geminiModel": {
           "type": "string",
           "default": "gemini-3.1-flash-image-preview",
-          "description": "Gemini image-generation model used by harmony_image_gen when provider is gemini. Legacy preview names are retried with gemini-2.5-flash-image after a 404."
+          "description": "%config.harmony.imageGen.geminiModel.description%"
         },
         "harmony.imageGen.openaiModel": {
           "type": "string",
           "default": "dall-e-3",
-          "description": "OpenAI image-generation model used by harmony_image_gen when provider is openai."
+          "description": "%config.harmony.imageGen.openaiModel.description%"
         },
         "harmony.imageGen.alibabaModel": {
           "type": "string",
           "default": "wanx-v1",
-          "description": "Alibaba Tongyi Wanxiang image-generation model used by harmony_image_gen when provider is alibaba."
+          "description": "%config.harmony.imageGen.alibabaModel.description%"
         },
         "harmony.imageGen.autoApprove": {
           "type": "boolean",
           "default": false,
-          "description": "When true, Harmony can call paid image-generation APIs without asking each time. Leave OFF as a cost guard."
+          "description": "%config.harmony.imageGen.autoApprove.description%"
         },
         "harmony.localEngine.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "When ON, Harmony may probe and route private requests to local engines (Sovereign / Ollama). Default OFF so Harmony never spins up local processes mid-coding without explicit opt-in."
+          "description": "%config.harmony.localEngine.enabled.description%"
         },
         "harmony.privacyRouting": {
           "type": "string",
@@ -10094,39 +10500,39 @@
             "local-only"
           ],
           "default": "enterprise-only",
-          "description": "Where private local content is allowed to go. 'enterprise-only' (default): enterprise provider only. 'share-private': enterprise OR local (if enabled). 'local-only': must go local; fails closed if local disabled."
+          "description": "%config.harmony.privacyRouting.description%"
         },
         "harmony.creativeServiceUrl": {
           "type": "string",
           "default": "http://127.0.0.1:8896",
-          "description": "Base URL of the local Harmony Creative service. Used by creative canvas and image-generation tools. Default port 8896."
+          "description": "%config.harmony.creativeServiceUrl.description%"
         },
         "harmony.visual.allowNpxInstall": {
           "type": "boolean",
           "default": true,
-          "description": "Allow Harmony browser/screenshot tools to download Playwright/Chromium through npm when missing. Disable for offline-only or metered-network sessions."
+          "description": "%config.harmony.visual.allowNpxInstall.description%"
         },
         "harmony.toolRoutingGuard": {
           "type": "boolean",
           "default": true,
-          "description": "When ON (default), Harmony detects when a model describes tool work but forgets to call tools, and automatically retries with a stricter tool-routing reminder. This adds one extra API call per failure but prevents silent stalls. Turn OFF if you prefer manual recovery or want to minimize API costs."
+          "description": "%config.harmony.toolRoutingGuard.description%"
         },
         "harmony.toolResultMaxChars": {
           "type": "number",
           "default": 160000,
           "minimum": 1000,
           "maximum": 2000000,
-          "description": "Maximum characters a tool result may return before Harmony truncates it (applies to read_file, grep, and other tool output). Read fresh on every tool call, so changes apply mid-session. Lower it for smaller context-window models; raise it to return fuller files."
+          "description": "%config.harmony.toolResultMaxChars.description%"
         },
         "harmony.toolResultAutoCap": {
           "type": "boolean",
           "default": true,
-          "description": "When ON (default), Harmony automatically lowers the tool-result cap so a single tool result never exceeds about 40% of the active model's context window. This protects small-context models from overflow while your manual toolResultMaxChars value still wins whenever the model has room to spare. Turn OFF to always use your exact toolResultMaxChars value."
+          "description": "%config.harmony.toolResultAutoCap.description%"
         },
         "harmony.autoRetry": {
           "type": "boolean",
           "default": true,
-          "description": "When ON (default), Harmony automatically retries once when an API provider connection drops mid-response. Turn OFF for full manual control."
+          "description": "%config.harmony.autoRetry.description%"
         },
         "harmony.tencent.endpointProfile": {
           "type": "string",
@@ -10136,224 +10542,224 @@
             "custom"
           ],
           "enumDescriptions": [
-            "International Hunyuan endpoint (api.hunyuan.cloud.tencent.com).",
-            "Mainland China Hunyuan endpoint.",
-            "Use harmony.tencent.baseUrl exactly."
+            "%config.harmony.tencent.endpointProfile.enum.0%",
+            "%config.harmony.tencent.endpointProfile.enum.1%",
+            "%config.harmony.tencent.endpointProfile.enum.2%"
           ],
           "default": "international",
-          "description": "Tencent Hunyuan endpoint profile."
+          "description": "%config.harmony.tencent.endpointProfile.description%"
         },
         "harmony.tencent.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "Tencent Hunyuan OpenAI-compatible API base URL."
+          "description": "%config.harmony.tencent.baseUrl.description%"
         },
         "harmony.providers.tencent.light": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.tencent.light.description%"
         },
         "harmony.providers.tencent.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.tencent.mid.description%"
         },
         "harmony.providers.tencent.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.tencent.heavy.description%"
         },
         "harmony.providers.tencent.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Tencent Hunyuan coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.tencent.coding.description%"
         },
         "harmony.providers.zhipu-coding.light": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu Coding Plan light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.tencent.coding.description%"
         },
         "harmony.providers.zhipu-coding.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu Coding Plan mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.tencent.coding.description%"
         },
         "harmony.providers.zhipu-coding.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu Coding Plan heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.tencent.coding.description%"
         },
         "harmony.providers.zhipu-coding.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu Coding Plan coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.tencent.coding.description%"
         },
         "harmony.providers.zhipu.light": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu / GLM (Z.AI) light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.zhipu.light.description%"
         },
         "harmony.providers.zhipu.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu / GLM (Z.AI) mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.zhipu.mid.description%"
         },
         "harmony.providers.zhipu.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu / GLM (Z.AI) heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.zhipu.heavy.description%"
         },
         "harmony.providers.zhipu.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Zhipu / GLM (Z.AI) coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.zhipu.coding.description%"
         },
         "harmony.providers.kimiCode.light": {
           "type": "string",
           "default": "",
-          "description": "Override KimiCode light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.kimiCode.light.description%"
         },
         "harmony.providers.kimiCode.mid": {
           "type": "string",
           "default": "",
-          "description": "Override KimiCode mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.kimiCode.mid.description%"
         },
         "harmony.providers.kimiCode.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override KimiCode heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.kimiCode.heavy.description%"
         },
         "harmony.providers.kimiCode.coding": {
           "type": "string",
           "default": "",
-          "description": "Override KimiCode coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.kimiCode.coding.description%"
         },
         "harmony.providers.doubao.light": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao (Volcengine) light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.light.description%"
         },
         "harmony.providers.doubao.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao (Volcengine) mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.mid.description%"
         },
         "harmony.providers.doubao.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao (Volcengine) heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.heavy.description%"
         },
         "harmony.providers.doubao.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao (Volcengine) coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.coding.description%"
         },
         "harmony.providers.doubao-coding.light": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao Coding Plan light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.coding.description%"
         },
         "harmony.providers.doubao-coding.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao Coding Plan mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.coding.description%"
         },
         "harmony.providers.doubao-coding.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao Coding Plan heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.coding.description%"
         },
         "harmony.providers.doubao-coding.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao Coding Plan coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.coding.description%"
         },
         "harmony.providers.doubao-rewards.light": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao Rewards light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.coding.description%"
         },
         "harmony.providers.doubao-rewards.mid": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao Rewards mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.coding.description%"
         },
         "harmony.providers.doubao-rewards.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao Rewards heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.coding.description%"
         },
         "harmony.providers.doubao-rewards.coding": {
           "type": "string",
           "default": "",
-          "description": "Override Doubao Rewards coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.doubao.coding.description%"
         },
         "harmony.providers.byteplus.light": {
           "type": "string",
           "default": "",
-          "description": "Override BytePlus / Doubao (International) light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.byteplus.light.description%"
         },
         "harmony.providers.byteplus.mid": {
           "type": "string",
           "default": "",
-          "description": "Override BytePlus / Doubao (International) mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.byteplus.mid.description%"
         },
         "harmony.providers.byteplus.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override BytePlus / Doubao (International) heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.byteplus.heavy.description%"
         },
         "harmony.providers.byteplus.coding": {
           "type": "string",
           "default": "",
-          "description": "Override BytePlus / Doubao (International) coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.byteplus.coding.description%"
         },
         "harmony.providers.byteplus-coding.light": {
           "type": "string",
           "default": "",
-          "description": "Override ByteDance Coding Plan (Intl) light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.byteplus.coding.description%"
         },
         "harmony.providers.byteplus-coding.mid": {
           "type": "string",
           "default": "",
-          "description": "Override ByteDance Coding Plan (Intl) mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.byteplus.coding.description%"
         },
         "harmony.providers.byteplus-coding.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override ByteDance Coding Plan (Intl) heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.byteplus.coding.description%"
         },
         "harmony.providers.byteplus-coding.coding": {
           "type": "string",
           "default": "",
-          "description": "Override ByteDance Coding Plan (Intl) coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.byteplus.coding.description%"
         },
         "harmony.providers.stepfun.light": {
           "type": "string",
           "default": "",
-          "description": "Override StepFun light-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.stepfun.light.description%"
         },
         "harmony.providers.stepfun.mid": {
           "type": "string",
           "default": "",
-          "description": "Override StepFun mid-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.stepfun.mid.description%"
         },
         "harmony.providers.stepfun.heavy": {
           "type": "string",
           "default": "",
-          "description": "Override StepFun heavy-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.stepfun.heavy.description%"
         },
         "harmony.providers.stepfun.coding": {
           "type": "string",
           "default": "",
-          "description": "Override StepFun coding-tier model (leave empty for the built-in default)."
+          "description": "%config.harmony.providers.stepfun.coding.description%"
         },
         "harmony.tokenBudget": {
           "type": "number",
           "default": 32768,
           "minimum": 4096,
           "maximum": 65536,
-          "description": "Maximum output tokens per AI call. Higher = longer responses. Model caps respected."
+          "description": "%config.harmony.tokenBudget.description%"
         },
         "harmony.translation.fallbackOrder": {
           "type": "array",
@@ -10375,48 +10781,48 @@
               "tencent"
             ]
           },
-          "description": "Provider fallback order for translation backfill. When a model in the translation pipeline fails, Harmony tries the next provider in this list that has a configured API key. Remove providers you don't want as fallback (e.g. remove claude to avoid costly fallback). Providers without keys are silently skipped."
+          "description": "%config.harmony.translation.fallbackOrder.description%"
         },
         "harmony.tripleCheck.autoReminder": {
           "type": "boolean",
           "default": false,
-          "description": "When ON, Harmony automatically runs a lightweight safety audit on code changes after every chat turn. Uses API calls -- review all provider settings and cost expectations before enabling."
+          "description": "%config.harmony.tripleCheck.autoReminder.description%"
         },
         "harmony.snapshotMaxBytes": {
           "type": "number",
           "default": 2097152,
-          "description": "Maximum file size (in bytes) for pre-action snapshots. Files exceeding this are edited without a backup snapshot. Default 2MB."
+          "description": "%config.harmony.snapshotMaxBytes.description%"
         },
         "harmony.vision.skipOcr": {
           "type": "boolean",
           "default": false,
-          "description": "When ON, attached images bypass Windows OCR entirely and go directly to your chosen vision provider. Use this to check layout, alignment, colors, or any visual detail without OCR text-extraction race conditions."
+          "description": "%config.harmony.vision.skipOcr.description%"
         },
         "harmony.flowState": {
           "type": "boolean",
           "default": false,
-          "description": "When ON, Harmony injects continuous-flow instructions into every turn: auto ask_question, active session pacing, whisper-inbox readiness, and neurodivergent-friendly session design."
+          "description": "%config.harmony.flowState.description%"
         },
         "harmony.primitives.kairos.convergenceThreshold": {
           "type": "number",
           "default": 0.3,
           "minimum": 0.05,
           "maximum": 0.95,
-          "description": "Kairos convergence threshold."
+          "description": "%config.harmony.primitives.kairos.convergenceThreshold.description%"
         },
         "harmony.primitives.aletheia.escalateThreshold": {
           "type": "number",
           "default": 0.2,
           "minimum": 0.05,
           "maximum": 0.5,
-          "description": "Aletheia escalation threshold."
+          "description": "%config.harmony.primitives.aletheia.escalateThreshold.description%"
         },
         "harmony.primitives.agora.minBid": {
           "type": "number",
           "default": 3,
           "minimum": 1,
           "maximum": 10,
-          "description": "Agora minimum adjusted bid."
+          "description": "%config.harmony.primitives.agora.minBid.description%"
         },
         "harmony.primitives.furies.severityThreshold": {
           "type": "string",
@@ -10428,7 +10834,7 @@
             "observation"
           ],
           "default": "low",
-          "description": "Furies minimum severity to report."
+          "description": "%config.harmony.primitives.furies.severityThreshold.description%"
         },
         "harmony.vision.zhipuModel": {
           "type": "string",
@@ -10441,25 +10847,34 @@
             "enum": [
               "gemini",
               "zhipu",
-              "alibaba"
+              "alibaba",
+              "deepseek"
             ]
           },
           "default": [
             "gemini",
             "zhipu",
-            "alibaba"
+            "alibaba",
+            "deepseek"
           ],
-          "description": "Fallback order for vision auto mode. Reorder in sidebar or settings.json."
+          "description": "%config.harmony.vision.fallbackOrder.description%"
         }
       }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile && npm run bundle-hub",
+    "vscode:prepublish": "npm run compile && npm run check:hub-auth && npm run check:webview && npm run check:migrations && npm run bundle-hub",
     "compile": "tsc -p ./",
+    "check:hub-auth": "node scripts/check-hub-auth.js",
+    "check:webview": "node scripts/check-webview-js.js",
+    "check:durability": "node scripts/run-durability-harness.js",
+    "check:durability:resume": "node scripts/run-durability-resume.js",
+    "check:durability:commit": "node scripts/run-durability-commit.js",
+    "check:durability:incremental": "node scripts/run-durability-incremental.js",
+    "check:migrations": "node scripts/run-migration-tests.js",
     "watch": "tsc -watch -p ./",
-    "bundle-hub": "node -e \"const fs=require('fs'),p=require('path');const exe=process.platform==='win32'?'harmonyhub.exe':'harmonyhub';const src=process.env.HARMONY_HUB_EXE||p.resolve(__dirname,'..','HarmonyHub','target','release',exe);const dest=p.join(__dirname,'bin',exe);if(!fs.existsSync('bin'))fs.mkdirSync('bin');if(fs.existsSync(src)){fs.copyFileSync(src,dest);console.log('Bundled '+exe)}else{console.log('HarmonyHub binary not found at '+src+', skipping')}\"",
-    "package": "npm run compile && npm run bundle-hub && npx --yes @vscode/vsce package --allow-missing-repository",
+    "bundle-hub": "node scripts/bundle-hub.js",
+    "package": "npm run compile && npm run check:hub-auth && npm run check:webview && npm run check:migrations && npm run bundle-hub && npx --yes @vscode/vsce package --allow-missing-repository",
     "harmony": "node bin/harmony-cli.js",
     "harmony:status": "node bin/harmony-cli.js status",
     "harmony:health": "node bin/harmony-cli.js health",
@@ -10470,10 +10885,11 @@
     "smoke:vscode-swarm-fixture": "node scripts/run-vscode-swarm-fixture.js",
     "smoke:vscode-swarm-deepseek-live": "node scripts/run-vscode-swarm-deepseek-live-fixture.js",
     "smoke:vscode-provider-key-import": "node scripts/run-vscode-provider-key-import-fixture.js",
-    "smoke:git-privacy-guard": "node scripts/run-git-privacy-guard.js --self-test",
+    "smoke:check-staged": "node scripts/check-staged.js --self-test",
     "smoke:model-routing": "node scripts/run-model-routing-smoke.js",
     "smoke:browser-tooling": "node scripts/run-browser-tooling-smoke.js",
-    "git:privacy-guard": "node scripts/run-git-privacy-guard.js --staged",
+    "check:staged": "node scripts/check-staged.js --staged",
+    "check:repo": "node scripts/check-repo.js --all",
     "smoke:live-operator": "node scripts/run-live-operator-workflow.js",
     "smoke:native-ui-visual": "node scripts/run-native-ui-visual-smoke.js",
     "smoke:sidebar-provider": "node scripts/run-sidebar-provider-smoke.js",

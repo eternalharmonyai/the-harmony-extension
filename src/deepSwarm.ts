@@ -678,7 +678,7 @@ Format as a structured glossary table. Group by category. This glossary will be 
                 },
                 promptTemplate: `You are translating a formal business/technical document from English to Chinese (简体中文). This is a PROFESSIONAL, HIGH-STAKES translation.
 
-Glossary and context from Phase 1:
+Glossary and context from the earlier stage:
 {findings}
 
 Source text to translate:

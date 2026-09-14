@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://harmony.local/schema/citation.schema.json",
   "title": "Search Citation Candidate",
-  "description": "A single search result shaped for verbatim-or-abstain citation. A citation with evidence_tier 'content' may be used as an authority directly; 'snippet' is a lead that must be resolved to operative text before it can be cited.",
+  "description": "A single search result shaped so it can satisfy the verbatim-or-abstain rule. Wire-compatible with the citation verdict schema: the authority-conditional requirement there (verbatim + source + retrieved) maps 1:1 onto these fields. A citation with evidence_tier 'content' may be used as an authority directly; 'snippet' is a lead that must be resolved to operative text before it can be cited.",
   "type": "object",
   "required": ["verbatim", "source", "retrieved", "engine", "jurisdiction", "evidence_tier"],
   "properties": {
@@ -14,7 +14,7 @@
     "source": {
       "type": "string",
       "format": "uri",
-      "description": "URL of the cited authority."
+      "description": "URL of the cited authority. Maps to the citation schema 'source'."
     },
     "retrieved": {
       "type": "string",

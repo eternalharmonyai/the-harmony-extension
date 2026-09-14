@@ -50,9 +50,9 @@ export class LanguageManager {
   }
 
   getLanguageInstruction(): string {
-    return this.currentLang === 'zh'
-      ? this.getString('lang.instruction')
-      : this.getString('lang.instruction');
+    // getString() already resolves the EN/ZH map from currentLang, so both
+    // branches would return the same value — no branch is needed here.
+    return this.getString('lang.instruction');
   }
 
   onDidChangeLanguage(callback: () => void): vscode.Disposable {

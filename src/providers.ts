@@ -5,8 +5,10 @@ import { recordHealth, rankProviders, isHealthy } from './providerHealth';
 
 /** Per-model maximum output tokens. Used to clamp user-configured token budget. */
 const MODEL_MAX_TOKENS: Record<string, number> = {
-    'deepseek-v4-pro': 384000,
-    'deepseek-v4-flash': 32768,
+    'deepseek-flash': 393216,
+    'deepseek-v4-pro': 393216,
+    'deepseek-v4-flash': 393216,
+    'deepseek-v4-flash-vision-exp': 393216,
     'deepseek-chat': 32768,
     'deepseek-reasoner': 32768,
     'gpt-4o': 16384,
@@ -16,6 +18,14 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'claude-3.5-sonnet': 8192,
     'claude-3-opus': 4096,
     'claude-3-haiku': 4096,
+    'claude-fable-5-1': 131072,
+    'claude-opus-5': 131072,
+    'claude-sonnet-5': 131072,
+    'claude-haiku-4-5-20251001': 65536,
+    'gpt-6-astra': 131072,
+    'gpt-5.6-sol': 131072,
+    'gpt-5.6-terra': 131072,
+    'gpt-5.6-luna': 131072,
     'gemini-2.5-pro': 65536,
     'gemini-2.5-flash': 65536,
     'gemini-2.0-flash': 8192,
@@ -29,6 +39,7 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'glm-5.1': 131072,
     'glm-5.2': 131072,
     'glm-5.3': 131072,
+    'glm-5.3-flash': 1048576,
     'glm-4-flash': 131072,
     'glm-4-plus': 131072,
     'glm-4-0520': 131072,
@@ -94,7 +105,7 @@ const OPENROUTER_FREE_FALLBACKS: string[] = [
  */
 
 export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'openrouter' | 'openai' | 'claude' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'doubao' | 'doubao-coding' | 'doubao-rewards' | 'byteplus' | 'byteplus-coding' | 'stepfun';
-export type Tier = 'light' | 'mid' | 'heavy' | 'coding';
+export type Tier = 'light' | 'mid' | 'heavy' | 'coding' | 'premium';
 export type CollabModelPreset = 'auto' | 'economy' | 'balanced' | 'power' | 'custom';
 export type CollabDirectProvider = ProviderId | 'auto';
 export type ProviderEndpointProfile = 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'asia' | 'europe' | 'custom';
@@ -127,6 +138,7 @@ export interface ProviderTierMap {
     mid: string;
     heavy: string;
     coding: string;
+    premium?: string;
 }
 
 /** Default model names per provider/tier. User can override via settings. */
@@ -135,7 +147,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         light: 'deepseek-v4-flash',
         mid: 'deepseek-v4-flash',
         heavy: 'deepseek-v4-pro',
-        coding: 'deepseek-v4-flash'
+        coding: 'deepseek-flash'
     },
     alibaba: {
         light: 'qwen3.7-flash',
@@ -174,16 +186,18 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         coding: 'tencent/hy3-preview'
     },
     openai: {
-        light: 'gpt-5-mini',
-        mid: 'gpt-5.5',
-        heavy: 'gpt-5.6',
-        coding: 'gpt-5-mini'
+        light: 'gpt-5.6-luna',
+        mid: 'gpt-5.6-terra',
+        heavy: 'gpt-5.6-sol',
+        premium: 'gpt-6-astra',
+        coding: 'gpt-5.6-sol'
     },
     claude: {
-        light: 'claude-haiku-4',
-        mid: 'claude-sonnet-4',
-        heavy: 'claude-opus-4',
-        coding: 'claude-sonnet-4'
+        light: 'claude-haiku-4-5-20251001',
+        mid: 'claude-sonnet-5',
+        heavy: 'claude-opus-5',
+        premium: 'claude-fable-5-1',
+        coding: 'claude-opus-5'
     },
     zhipu: {
         light: 'glm-5.1',
@@ -606,7 +620,7 @@ export function collabTierForPreset(preset: CollabModelPreset): Tier {
         case 'power': return 'heavy';
         case 'custom': {
             const raw = vscode.workspace.getConfiguration('harmony').get<string>('collabDirectTier');
-            return raw === 'light' || raw === 'mid' || raw === 'heavy' || raw === 'coding' ? raw : 'coding';
+            return raw === 'light' || raw === 'mid' || raw === 'heavy' || raw === 'coding' || raw === 'premium' ? raw : 'coding';
         }
         case 'balanced':
         case 'auto':
@@ -654,7 +668,7 @@ export function modelFor(provider: ProviderId, tier: Tier): string {
     const cfg = vscode.workspace.getConfiguration('harmony');
     const override = cfg.get<string>(`providers.${provider}.${tier}`);
     if (override && override.trim()) return override.trim();
-    return PROVIDER_DEFAULTS[provider][tier];
+    return PROVIDER_DEFAULTS[provider][tier] ?? PROVIDER_DEFAULTS[provider].heavy;
 }
 
 // ── Multi-Key Slot Architecture ──────────────────────────────────────────
@@ -715,7 +729,7 @@ export type ProviderKeySource = 'slot' | 'legacy' | 'process-env' | 'dotenv' | '
 // Ordered per provider: the HARMONY_ override, then the conventional name,
 // then the slot variants.
 const PROVIDER_ENV_NAMES: Record<ProviderId, string[]> = {
-    deepseek: ['HARMONY_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY', 'DEEPSEEK_AGENT_API_KEY', 'DEEPSEEK_EXTERNAL_API_KEY', 'EXTERNAL_UI_DEEPSEEK_API_KEY'],
+    deepseek: ['HARMONY_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY', 'DEEPSEEK_AGENT_API_KEY', 'DEEPSEEK_EXTERNAL_API_KEY', 'EXTERNAL_UI_DEEPSEEK_API_KEY', 'DEEPSEEK_VISION_API_KEY'],
     alibaba: ['HARMONY_ALIBABA_API_KEY', 'ALIBABA_API_KEY', 'DASHSCOPE_API_KEY', 'ALIBABA_AGENT_API_KEY', 'ALIBABA_EXTERNAL_API_KEY', 'ALIBABA_VISION_API_KEY'],
     moonshot: ['HARMONY_MOONSHOT_API_KEY', 'MOONSHOT_API_KEY', 'MOONSHOT_AGENT_API_KEY', 'MOONSHOT_EXTERNAL_API_KEY'],
     kimiCode: ['HARMONY_KIMICODE_API_KEY', 'KIMICODE_API_KEY', 'KIMICODE_AGENT_API_KEY', 'KIMICODE_EXTERNAL_API_KEY'],
@@ -1262,13 +1276,31 @@ async function anthropicCall(
     const thinkingEnabled = cfg.get<boolean>('claude.enableThinking') ?? false;
     const thinkingBudget = Math.max(1000, Math.min(32000, cfg.get<number>('claude.thinkingBudgetTokens') ?? 4000));
 
-    // Build thinking param: always explicit so Anthropic never auto-enables it.
-    const thinkingParam = thinkingEnabled
-        ? { type: 'enabled' as const, budget_tokens: thinkingBudget }
-        : { type: 'disabled' as const };
+    // Thinking config is model-specific (Claude Models reference):
+    //   - Fable 5.1: adaptive thinking is ALWAYS on — reject any explicit `thinking`.
+    //   - Opus 5 / Sonnet 5: adaptive — `{type:'disabled'}` accepted, but
+    //     `budget_tokens` is removed/rejected; enable via `{type:'adaptive'}`.
+    //   - Haiku 4.5 + legacy: extended thinking via `budget_tokens`, or explicit disabled.
+    const modelLower = model.toLowerCase();
+    const isFable = modelLower.includes('fable-5-1');
+    const isClaude5Family = modelLower.includes('opus-5') || modelLower.includes('sonnet-5') || isFable;
+    const usesBudgetThinking = !isClaude5Family; // Haiku 4.5 + legacy models
 
-    // When thinking is enabled the min max_tokens must exceed budget_tokens.
-    const effectiveMaxTokens = thinkingEnabled ? Math.max(maxTokens, thinkingBudget + 1024) : maxTokens;
+    let thinkingParam: { type: string; budget_tokens?: number } | undefined;
+    if (isFable) {
+        thinkingParam = undefined; // always-on adaptive — no explicit config
+    } else if (isClaude5Family) {
+        thinkingParam = thinkingEnabled ? { type: 'adaptive' } : { type: 'disabled' };
+    } else {
+        thinkingParam = thinkingEnabled
+            ? { type: 'enabled', budget_tokens: thinkingBudget }
+            : { type: 'disabled' };
+    }
+
+    // budget_tokens only applies to the extended-thinking (Haiku/legacy) branch.
+    const effectiveMaxTokens = (thinkingEnabled && usesBudgetThinking)
+        ? Math.max(maxTokens, thinkingBudget + 1024)
+        : maxTokens;
 
     const controller = new AbortController();
     const sub = token.onCancellationRequested(() => controller.abort());
@@ -1279,9 +1311,11 @@ async function anthropicCall(
         const body: any = {
             model,
             max_tokens: effectiveMaxTokens,
-            thinking: thinkingParam,
             messages: [{ role: 'user', content: question }]
         };
+        if (thinkingParam !== undefined) {
+            body.thinking = thinkingParam;
+        }
         if (claudeSystem !== undefined) {
             body.system = claudeSystem;
         }
@@ -1374,11 +1408,11 @@ async function geminiCall(
 }
 
 function isPremiumModelName(model: string): boolean {
-    return /(^|[-_.])pro($|[-_.])|(^|[-_.])opus($|[-_.])|(^|[-_.])o4($|[-_.])/i.test(model);
+    return /(^|[-_.])pro($|[-_.])|(^|[-_.])opus($|[-_.])|(^|[-_.])o4($|[-_.])|(^|[-_.])astra($|[-_.])|(^|[-_.])fable($|[-_.])/i.test(model);
 }
 
 export async function confirmPremiumModel(provider: ProviderId, tier: Tier, model: string, purpose = 'helper model call'): Promise<boolean> {
-    const guarded = tier === 'heavy' || isPremiumModelName(model);
+    const guarded = tier === 'heavy' || tier === 'premium' || isPremiumModelName(model);
     if (!guarded) return true;
     const cfg = vscode.workspace.getConfiguration('harmony');
     
@@ -1391,7 +1425,7 @@ export async function confirmPremiumModel(provider: ProviderId, tier: Tier, mode
     if (mode === 'all') return true;
     if (mode === 'deepseek-only' && provider === 'deepseek') return true;
 
-    const kind = tier === 'heavy' ? 'the heavy tier' : 'a premium model';
+    const kind = tier === 'premium' ? 'the premium tier (very expensive)' : tier === 'heavy' ? 'the heavy tier' : 'a premium model';
     const choice = await vscode.window.showWarningMessage(
         `Harmony wants to call ${kind} for ${purpose} on ${provider} (${model}, tier: ${tier}). This may cost more. Allow?`,
         { modal: false },

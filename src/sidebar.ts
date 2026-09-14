@@ -16,6 +16,8 @@ import { getScore, getStatusLabel } from './providerHealth';
 import { buildSidebarModelOptions, getDeepSeekModel, modelDisplayNameAny, setDeepSeekModel } from './providerModels';
 import { globalMemoryStats, clearGlobalMemory } from './globalMemory';
 import { LanguageManager } from './languageManager';
+import { hubStartPolicy } from './hubPolicy';
+import { hubFetch } from './hubClient';
 import { ProfileRegistry } from './profileRegistry';
 const VIEW_ID = 'harmony.controlPanel';
 const SIDEBAR_REFRESH_DELAY_MS = 150;
@@ -388,6 +390,14 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                       } else if (v === 'alibaba') {
                         await vscode.workspace.getConfiguration('harmony')
                           .update('vision.provider', 'alibaba', true);
+                      } else if (v === 'deepseek') {
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.provider', 'deepseek', true);
+                      } else if (v.startsWith('deepseek')) {
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.provider', 'deepseek', true);
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('vision.deepseekModel', v, true);
                       } else if (v.startsWith('qwen')) {
                         await vscode.workspace.getConfiguration('harmony')
                           .update('vision.provider', 'alibaba', true);
@@ -409,7 +419,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                     case 'visionFallbackReorder': {
                       const { id, direction } = msg as any;
                       const cfg = vscode.workspace.getConfiguration('harmony');
-                      const order: string[] = [...(cfg.get<string[]>('vision.fallbackOrder') ?? ['gemini', 'zhipu', 'alibaba'])];
+                      const order: string[] = [...(cfg.get<string[]>('vision.fallbackOrder') ?? ['gemini', 'zhipu', 'alibaba', 'deepseek'])];
                       const idx = order.indexOf(id);
                       if (direction === 'up' && idx > 0) {
                         [order[idx - 1], order[idx]] = [order[idx], order[idx - 1]];
@@ -534,6 +544,12 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                     case 'toggleHubAutoStart':
                       await vscode.commands.executeCommand('harmony.toggleHubAutoStart');
                       break;
+                    case 'setHubStartPolicy':
+                      await vscode.commands.executeCommand('harmony.setHubStartPolicy', msg.policy);
+                      break;
+                    case 'toggleHubMessageMode':
+                      await vscode.commands.executeCommand('harmony.toggleHubMessageMode');
+                      break;
                     case 'indexWorkspace':
                         await vscode.commands.executeCommand('harmony.indexWorkspace');
                         break;
@@ -601,6 +617,12 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         this.refreshTimer = undefined;
         void this.refresh();
       }, Math.max(0, delayMs));
+    }
+
+    /** Push a light Hub-progress update (counts only) without a full re-render. */
+    postHubStatus(value: unknown): void {
+      if (!this.view) return;
+      void this.view.webview.postMessage({ type: 'hubStatus', value });
     }
 
     private async updateDeepSwarmHints(mode: string): Promise<void> {
@@ -711,7 +733,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         const rawSwarmProvider = cfg.get<string>('swarm.defaultProvider');
         const swarmProvider: ProviderId = PROVIDER_IDS.includes(rawSwarmProvider as ProviderId) ? rawSwarmProvider as ProviderId : 'deepseek';
         const rawSwarmTier = cfg.get<string>('swarm.defaultTier');
-        const swarmTier: Tier = rawSwarmTier === 'light' || rawSwarmTier === 'mid' || rawSwarmTier === 'heavy' || rawSwarmTier === 'coding' ? rawSwarmTier : 'coding';
+        const swarmTier: Tier = rawSwarmTier === 'light' || rawSwarmTier === 'mid' || rawSwarmTier === 'heavy' || rawSwarmTier === 'coding' || rawSwarmTier === 'premium' ? rawSwarmTier : 'coding';
         const collabPreset = getCollabModelPreset();
         const collabProvider = getCollabDirectProvider();
         const collabTier = collabTierForPreset(collabPreset);
@@ -779,11 +801,12 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
               if (provider === 'auto') return 'auto';
               if (provider === 'zhipu') return cfg.get<string>('vision.zhipuModel') || 'glm-5v-turbo';
               if (provider === 'alibaba') return cfg.get<string>('vision.qwenModel') || 'qwen3.8-max';
+              if (provider === 'deepseek') return cfg.get<string>('vision.deepseekModel') || 'deepseek-v4-flash-vision-exp';
               return cfg.get<string>('vision.geminiModel') || 'gemini-3.8-flash';
             })(),
             autoGeminiModel: cfg.get<string>('vision.autoGeminiModel') ?? 'gemini-3.8-flash',
             autoQwenModel: cfg.get<string>('vision.autoQwenModel') ?? 'qwen3.8-max',
-            visionFallbackOrder: cfg.get<string[]>('vision.fallbackOrder') ?? ['gemini', 'zhipu', 'alibaba'],
+            visionFallbackOrder: cfg.get<string[]>('vision.fallbackOrder') ?? ['gemini', 'zhipu', 'alibaba', 'deepseek'],
             contextHealth: { harmonyBytes: 0, healthStatus: 'ok' },
             imageGenProvider: cfg.get<string>('imageGen.provider') ?? 'gemini',
             imageGenAutoApprove: !!cfg.get<boolean>('imageGen.autoApprove'),
@@ -838,7 +861,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             customRoles: [],
             profiles: ProfileRegistry.getInstance().list().map(p => ({ id: p.id, name: p.name, role: p.role, capsules: p.knowledge_capsules?.length ?? 0 })),
             globalMemory: { totalPatterns: 0, uniqueWorkspaces: 0, topTags: [] },
-            hubAutoStart: cfg.get<boolean>('hub.autoStart') ?? true,
+            hubAutoStart: hubStartPolicy(cfg) !== 'never',
+            hubStartPolicy: hubStartPolicy(cfg),
             hubStartOnMessage: cfg.get<string>('hub.startOnMessage') ?? 'prompt',
             usage: { calls: totalCalls(), total: totalTokens(), rows: usage.slice(0, SIDEBAR_MAX_USAGE_ROWS), accounting },
             fallbackEvents: getFallbackEvents().slice(-SIDEBAR_MAX_FALLBACK_EVENTS).map(f => ({
@@ -896,17 +920,34 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                 compactSidebar ? { totalPatterns: 0, uniqueWorkspaces: 0, topTags: [] as {tag: string; count: number}[] } : (async () => {
                     try { return globalMemoryStats(this.context); } catch { return { totalPatterns: 0, uniqueWorkspaces: 0, topTags: [] as {tag: string; count: number}[] }; }
                 })(),
-                (async (): Promise<{ online: boolean; model?: string; vectors?: number; indexedPathCount?: number }> => {
+                (async (): Promise<{ online: boolean; model?: string; vectors?: number; indexedPathCount?: number; indexing?: any; allowedRoots?: number; indexState?: string; indexNote?: string }> => {
                     try {
                         const u = (cfg.get<string>('hub.url') ?? 'http://127.0.0.1:7878') + '/status';
                         const ctl = new AbortController();
-                        const t = setTimeout(() => ctl.abort(), 800);
-                        const res = await fetch(u, { signal: ctl.signal });
+                        // 2.5s (not 800ms): a busy-but-alive daemon must not be misread as
+                        // offline. The Hub stays responsive during indexing (measured max ~95ms),
+                        // so this only guards genuinely slow moments.
+                        const t = setTimeout(() => ctl.abort(), 2500);
+                        const res = await hubFetch(u, { signal: ctl.signal });
                         clearTimeout(t);
                         if (res.ok) {
                             const j: any = await res.json();
                             const ip = Array.isArray(j.indexed_paths) ? j.indexed_paths : [];
-                            return { online: true, model: j.model, vectors: j.vectors, indexedPathCount: ip.length };
+                            return {
+                                online: true,
+                                model: j.model,
+                                vectors: j.vectors,
+                                indexedPathCount: ip.length,
+                                // Live in-flight job + authorized-root count, so the panel can
+                                // report live progress instead of a bare "0 vectors".
+                                indexing: j.indexing ?? undefined,
+                                allowedRoots: typeof j.allowed_roots === 'number' ? j.allowed_roots : undefined,
+                                // Durability state (loaded | adopted | empty | incompatible | corrupt)
+                                // plus the daemon's reason, so the panel can explain an unusable
+                                // saved index instead of showing a bare "0 vectors".
+                                indexState: typeof j.index_state === 'string' ? j.index_state : undefined,
+                                indexNote: typeof j.index_note === 'string' ? j.index_note : undefined,
+                            };
                         }
                     } catch { /* daemon offline */ }
                     return { online: false };
@@ -1131,6 +1172,20 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     text-align: left; padding: 4px 6px; font-size: 11px; line-height: 1.3;
   }
   button.subtle:hover { background: var(--vscode-list-hoverBackground); }
+  /* Compact 3-option start-policy selector (radiogroup; explicit, never lossy) */
+  .seg-label { font-size: 10px; opacity: 0.75; margin-top: 6px; }
+  .seg { display: flex; gap: 2px; align-items: stretch; }
+  button.seg-opt {
+    flex: 1 1 0; width: auto; padding: 3px 4px; font-size: 10px; line-height: 1.2;
+    border-radius: 3px; background: transparent; color: var(--vscode-foreground);
+    border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+    white-space: normal; overflow-wrap: break-word; text-align: center;
+  }
+  button.seg-opt:hover { background: var(--vscode-list-hoverBackground); }
+  button.seg-opt[aria-checked="true"] {
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+    border-color: var(--vscode-button-background); font-weight: 600;
+  }
   select {
     width: 100%; padding: 4px; background: var(--vscode-dropdown-background);
     color: var(--vscode-dropdown-foreground);
@@ -1213,7 +1268,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   <h3>🎯 ${lm.getString('token.title')}</h3>
   <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
     <input type="range" id="token-budget" min="4096" max="65536" step="4096" value="32768" style="flex:1;">
-    <span id="token-budget-label" style="font-size:11px;white-space:nowrap;">32,768 tokens</span>
+    <span id="token-budget-label" style="font-size:11px;white-space:nowrap;">32,768 ${lm.getString('token.unit')}</span>
   </div>
   <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;">
     <button class="subtle token-preset" data-value="4096" style="font-size:10px;padding:2px 6px;">💬4K</button>
@@ -1224,12 +1279,12 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   </div>
   <div class="hint" id="token-budget-hint" style="margin-top:2px;">${lm.getString('token.desc')}</div>
 
-  <h3>📏 Tool result cap</h3>
+  <h3>📏 ${lm.getString('toolCap.title')}</h3>
   <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
     <input type="number" id="tool-result-max-chars" min="1000" max="2000000" step="1000" style="flex:1;width:100%;">
-    <span id="tool-result-max-chars-label" style="font-size:11px;white-space:nowrap;">160,000 chars</span>
+    <span id="tool-result-max-chars-label" style="font-size:11px;white-space:nowrap;">160,000 ${lm.getString('toolCap.unit')}</span>
   </div>
-  <div class="hint" style="margin-top:2px;">Max chars per tool result before truncation (1000–2,000,000).</div>
+  <div class="hint" style="margin-top:2px;">${lm.getString('toolCap.desc')}</div>
 
   <h3>${lm.getString('swarm.title')}</h3>
   <button class="subtle" id="open-swarm-launcher" style="margin-top:4px;">${lm.getString('swarm.openLauncher')}</button>
@@ -1265,11 +1320,11 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
       <option value="tencent">🔷 Hunyuan (Tencent)</option>
     </select>
     <select id="deepswarm-tier" style="width:90px;">
-      <option value="auto">Auto tier</option>
-      <option value="light">Light</option>
-      <option value="mid">Mid</option>
-      <option value="heavy">Heavy</option>
-      <option value="coding">Coding</option>
+      <option value="auto">${lm.getString('deepswarm.tierAuto')}</option>
+      <option value="light">${lm.getString('deepswarm.tierLight')}</option>
+      <option value="mid">${lm.getString('deepswarm.tierMid')}</option>
+      <option value="heavy">${lm.getString('deepswarm.tierHeavy')}</option>
+      <option value="coding">${lm.getString('deepswarm.tierCoding')}</option>
     </select>
   </div>
   <select id="deepswarm-strategy" style="width:100%;margin-top:4px;">
@@ -1389,26 +1444,31 @@ ${PROVIDER_IDS.map(p => {
     <div style="font-size:11px; margin-bottom:2px;">${lm.getString('visual.visionModel')}</div>
     <select id="vision-model">
       <option value="auto">${lm.getString('visual.autoFallback')}</option>
-      <option value="gemini">🔮 Gemini only</option>
-      <option value="zhipu">🧠 Zhipu / GLM only</option>
-      <option value="alibaba">☁️ Alibaba / Qwen only</option>
+      <option value="gemini">${lm.getString('visual.geminiOnly')}</option>
+      <option value="zhipu">${lm.getString('visual.zhipuOnly')}</option>
+      <option value="alibaba">${lm.getString('visual.alibabaOnly')}</option>
+      <option value="deepseek">${lm.getString('visual.deepseekOnly')}</option>
       <optgroup label="Gemini">
-        <option value="gemini-3.8-flash">gemini-3.8-flash (default, newest Flash)</option>
+        <option value="gemini-3.8-flash">gemini-3.8-flash ${lm.getString('visual.desc.gemini38Flash')}</option>
         <option value="gemini-3.7-flash">gemini-3.7-flash</option>
         <option value="gemini-3.6-flash">gemini-3.6-flash</option>
         <option value="gemini-3.5-flash">gemini-3.5-flash</option>
-        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (cheapest Flash-Lite)</option>
-        <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (heavy, detailed)</option>
+        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite ${lm.getString('visual.desc.gemini31FlashLite')}</option>
+        <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview ${lm.getString('visual.desc.gemini31ProPreview')}</option>
       </optgroup>
       <optgroup label="Zhipu / GLM">
-        <option value="glm-5v-turbo">glm-5v-turbo (fast, capable)</option>
-        <option value="glm-5v">glm-5v (standard)</option>
+        <option value="glm-5v-turbo">glm-5v-turbo ${lm.getString('visual.desc.glm5vTurbo')}</option>
+        <option value="glm-5v">glm-5v ${lm.getString('visual.desc.glm5v')}</option>
+        <option value="glm-5.3-flash">glm-5.3-flash ${lm.getString('visual.desc.glm53Flash')}</option>
       </optgroup>
       <optgroup label="Alibaba / Qwen-VL">
-        <option value="qwen3.8-max">qwen3.8-max (best, multimodal)</option>
-        <option value="qwen3.7-plus">qwen3.7-plus (faster, cheaper)</option>
-        <option value="qwen-vl-max">qwen-vl-max (legacy)</option>
-        <option value="qwen-vl-plus">qwen-vl-plus (legacy)</option>
+        <option value="qwen3.8-max">qwen3.8-max ${lm.getString('visual.desc.qwen38Max')}</option>
+        <option value="qwen3.7-plus">qwen3.7-plus ${lm.getString('visual.desc.qwen37Plus')}</option>
+        <option value="qwen-vl-max">qwen-vl-max ${lm.getString('visual.desc.qwenVlMax')}</option>
+        <option value="qwen-vl-plus">qwen-vl-plus ${lm.getString('visual.desc.qwenVlPlus')}</option>
+      </optgroup>
+      <optgroup label="DeepSeek">
+        <option value="deepseek-v4-flash-vision-exp">deepseek-v4-flash-vision-exp ${lm.getString('visual.desc.deepseekV4FlashVisionExp')}</option>
       </optgroup>
     </select>
     <div id="vision-fallback-order" style="display:none; margin-top:6px;">
@@ -1464,7 +1524,7 @@ ${PROVIDER_IDS.map(p => {
   <h3>${lm.getString('sessions.title')}</h3>
   <div id="sessions" class="stack"><div class="empty">${lm.getString('sessions.none')}</div></div>
   <button class="subtle" id="manage-sessions" style="margin-top:4px;">${lm.getString('sessions.manage')}</button>
-  <button class="subtle" id="view-conversation" style="margin-top:4px;">View conversation</button>
+  <button class="subtle" id="view-conversation" style="margin-top:4px;">${lm.getString('sessions.viewConversation')}</button>
 
   <h3>${lm.getString('whisper.title')}</h3>
   <label class="row" style="margin-bottom:6px;"><input type="checkbox" id="whisper-disabled"> ${lm.getString('whisper.disable')} <span class="hint">${lm.getString('whisper.disableHint')}</span></label>
@@ -1491,7 +1551,14 @@ ${PROVIDER_IDS.map(p => {
   <button class="subtle" id="index-workspace" style="margin-top:4px;">${lm.getString('hub.reindex')}</button>
   <button class="subtle" id="start-hub" style="margin-top:4px;">${lm.getString('hub.start')}</button>
   <button class="subtle" id="stop-hub" style="margin-top:4px;">${lm.getString('hub.stop')}</button>
-  <button class="subtle" id="toggle-hub-autostart" style="margin-top:4px;">Hub auto-restart: ON</button>
+  <div class="seg-label" id="hub-start-policy-label">${lm.getString('hub.startPolicyLabel')}</div>
+  <div id="hub-start-policy" class="seg" role="radiogroup" aria-labelledby="hub-start-policy-label" style="margin-top:2px;">
+    <button class="seg-opt" data-policy="never" role="radio" aria-checked="false">${lm.getString('hub.policyNever')}</button>
+    <button class="seg-opt" data-policy="onDemand" role="radio" aria-checked="false">${lm.getString('hub.policyWhenNeeded')}</button>
+    <button class="seg-opt" data-policy="onWorkspaceOpen" role="radio" aria-checked="false">${lm.getString('hub.policyWorkspaceOpens')}</button>
+  </div>
+  <button class="subtle" id="toggle-hub-message-mode" style="margin-top:4px;">${lm.getString('hub.messageModeLabel')}</button>
+  <div class="hint" id="hub-effective" style="margin-top:2px;"></div>
   <button class="subtle" id="manage-hub-roots" style="margin-top:4px;">${lm.getString('hub.manageFolders')}</button>
 
   <h3>${lm.getString('workspaceMemory.title')}</h3>
@@ -1499,7 +1566,7 @@ ${PROVIDER_IDS.map(p => {
   <div id="memory" class="stack"><div class="empty">${lm.getString('memory.none')}</div></div>
   <button class="subtle" id="toggle-memory-panel" style="margin-top:4px;">${lm.getString('memory.hide')}</button>
 
-  <h3>${lm.getString('status.title')} <span id="status-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#666;vertical-align:middle;margin-left:6px;" title="Script OK"></span></h3>
+  <h3>${lm.getString('status.title')} <span id="status-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#666;vertical-align:middle;margin-left:6px;" title="${lm.getString('status.scriptOk')}"></span></h3>
   <div class="status" id="status"></div>
 
 <script nonce="${nonce}">
@@ -1510,6 +1577,30 @@ ${PROVIDER_IDS.map(p => {
   function escapeHtml(s) {
     if (!s && s !== 0) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  // Counts line for the Hub status block. Shared by the full render and by the light
+  // 'hubStatus' progress message so the two can never drift apart.
+  function hubCountsText(hs) {
+    if (!hs) return '';
+    const indexedPathCount = hs.indexedPathCount ?? ((hs.indexedPaths || []).length);
+    const vectors = hs.vectors ?? 0;
+    const indexing = hs.indexing;
+    if (indexing) {
+      return '⚙ ' + LOC.hub_indexing + ' ' + (indexing.chunks_done ?? 0) + ' / ' + (indexing.chunks_total ?? 0);
+    }
+    if (vectors === 0 && indexedPathCount === 0) {
+      const allowed = hs.allowedRoots ?? 0;
+      return allowed > 0
+        ? '0 ' + LOC.hub_vectors + ' · ' + allowed + ' ' + LOC.hub_authorized + ' · ' + LOC.hub_not_indexed
+        : '0 ' + LOC.hub_vectors + ' · ' + LOC.hub_not_indexed;
+    }
+    return vectors + ' ' + LOC.hub_vectors + ' · ' + indexedPathCount + ' ' + LOC.hub_indexed;
+  }
+  // Text shown when the daemon could NOT use a saved index (incompatible/corrupt).
+  // The exact reason is attached as a tooltip so the visible copy stays localized.
+  function hubIndexNoteText(hs) {
+    if (!hs || (hs.indexState !== 'incompatible' && hs.indexState !== 'corrupt')) return '';
+    return LOC.hub_index_not_loaded + ' ' + LOC.hub_index_reindex;
   }
   const vscode = acquireVsCodeApi();
   const PRIMARY_MODEL_OPTIONS = ${JSON.stringify(PRIMARY_MODEL_OPTIONS)};
@@ -1532,16 +1623,33 @@ ${PROVIDER_IDS.map(p => {
     hub_hidden_compact: lm.getString('hub.hiddenCompact'),
     hub_more_folders: lm.getString('hub.moreFolders'),
     hub_online: lm.getString('hub.online'),
-    hub_offline: lm.getString('hub.offline'),
+    hub_offOnDemand: lm.getString('hub.offOnDemand'),
     hub_paused: lm.getString('hub.paused'),
     hub_click_start: lm.getString('hub.clickStart'),
     hub_on_demand_paused: lm.getString('hub.onDemandPaused'),
     hub_auto_start_on: lm.getString('hub.autoStartOn'),
     hub_auto_start_off: lm.getString('hub.autoStartOff'),
+    hub_start_policy_label: lm.getString('hub.startPolicyLabel'),
+    hub_policy_never: lm.getString('hub.policyNever'),
+    hub_policy_when_needed: lm.getString('hub.policyWhenNeeded'),
+    hub_policy_workspace_opens: lm.getString('hub.policyWorkspaceOpens'),
     hub_indexed: lm.getString('hub.indexed'),
+    hub_indexing: lm.getString('hub.indexing'),
+    hub_authorized: lm.getString('hub.authorized'),
+    hub_not_indexed: lm.getString('hub.notIndexed'),
+    hub_index_not_loaded: lm.getString('hub.indexNotLoaded'),
+    hub_index_reindex: lm.getString('hub.indexReindex'),
     hub_model: lm.getString('hub.model'),
     hub_vectors: lm.getString('hub.vectors'),
     hub_message_start: lm.getString('hub.messageStart'),
+    hub_message_mode_label: lm.getString('hub.messageModeLabel'),
+    hub_mode_prompt: lm.getString('hub.modePrompt'),
+    hub_mode_auto: lm.getString('hub.modeAuto'),
+    hub_mode_off: lm.getString('hub.modeOff'),
+    hub_effective_label: lm.getString('hub.effectiveLabel'),
+    hub_effective_auto_on: lm.getString('hub.effectiveAutoOn'),
+    hub_effective_auto_off: lm.getString('hub.effectiveAutoOff'),
+    hub_effective_messages: lm.getString('hub.effectiveMessages'),
     model_fallback: lm.getString('model.fallback'),
     provider_set_key_short: lm.getString('provider.setKey.short'),
     provider_replace_key: lm.getString('provider.replaceKey'),
@@ -1623,6 +1731,18 @@ ${PROVIDER_IDS.map(p => {
     deepswarm_relative_cost: lm.getString('deepswarm.relativeCost'),
     deepswarm_strategy: lm.getString('deepswarm.strategy'),
     token_unit: lm.getString('token.unit'),
+    toolcap_unit: lm.getString('toolCap.unit'),
+    delete_title: lm.getString('common.delete'),
+    key_set_title: lm.getString('provider.keySetTitle'),
+    no_key_title: lm.getString('provider.noKeyTitle'),
+    tencent_dual_auth: lm.getString('provider.tencentDualAuth'),
+    slot_chat_key: lm.getString('provider.slotChatKey'),
+    slot_agents_key: lm.getString('provider.slotAgentsKey'),
+    slot_external_key: lm.getString('provider.slotExternalKey'),
+    slot_vision_key: lm.getString('provider.slotVisionKey'),
+    slot_suffix_set: lm.getString('provider.slotSuffixSet'),
+    slot_suffix_unset: lm.getString('provider.slotSuffixUnset'),
+    deepswarm_auto: lm.getString('deepswarm.auto'),
     memory_meta: lm.getString('memory.meta'),
     provider_primary_model: lm.getString('provider.primaryModel'),
     provider_key_set_in_vscode: lm.getString('provider.keySetInVscode'),
@@ -1714,10 +1834,10 @@ ${PROVIDER_IDS.map(p => {
     var trcLabel = $('tool-result-max-chars-label');
     if (trcInput && trcLabel) {
       trcInput.value = s.toolResultMaxChars || 160000;
-      trcLabel.textContent = Number(trcInput.value).toLocaleString() + ' chars';
+      trcLabel.textContent = Number(trcInput.value).toLocaleString() + ' ' + LOC.toolcap_unit;
       trcInput.addEventListener('input', function() {
         var v = Number(this.value);
-        if (isFinite(v)) trcLabel.textContent = Number(v).toLocaleString() + ' chars';
+        if (isFinite(v)) trcLabel.textContent = Number(v).toLocaleString() + ' ' + LOC.toolcap_unit;
       });
       trcInput.addEventListener('change', function() {
         var v = Number(this.value);
@@ -1725,7 +1845,7 @@ ${PROVIDER_IDS.map(p => {
         if (v < 1000) v = 1000;
         if (v > 2000000) v = 2000000;
         this.value = v;
-        trcLabel.textContent = Number(v).toLocaleString() + ' chars';
+        trcLabel.textContent = Number(v).toLocaleString() + ' ' + LOC.toolcap_unit;
         vscode.postMessage({ type: 'setToolResultMaxChars', value: v });
       });
     }
@@ -1740,9 +1860,9 @@ ${PROVIDER_IDS.map(p => {
       if (!document.getElementById('deepswarm-provider')) {
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;gap:4px;margin-top:4px;';
-        const dsProviders = ${JSON.stringify(PROVIDER_IDS.map(p => ({ id: p, label: providerDisplayName(p) })))};
-        const dsProviderOpts = '<option value="auto">\uD83E\uDD16 Auto (strategy picks)</option>' + dsProviders.map(p => '<option value="' + p.id + '">' + p.label + '</option>').join('');
-        row.innerHTML = '<select id="deepswarm-provider" style="flex:1;">' + dsProviderOpts + '</select><select id="deepswarm-tier" style="width:90px;"><option value="auto">Auto tier</option><option value="light">Light</option><option value="mid">Mid</option><option value="heavy">Heavy</option><option value="coding">Coding</option></select>';
+        const dsProviders = ${JSON.stringify(PROVIDER_IDS.map(p => ({ id: p, label: lang === 'zh' ? providerDisplayNameZh(p) : providerDisplayName(p) })))};
+        const dsProviderOpts = '<option value="auto">\uD83E\uDD16 ' + LOC.deepswarm_auto + '</option>' + dsProviders.map(p => '<option value="' + p.id + '">' + p.label + '</option>').join('');
+        row.innerHTML = '<select id="deepswarm-provider" style="flex:1;">' + dsProviderOpts + '</select><select id="deepswarm-tier" style="width:90px;"><option value="auto">${lm.getString('deepswarm.tierAuto')}</option><option value="light">${lm.getString('deepswarm.tierLight')}</option><option value="mid">${lm.getString('deepswarm.tierMid')}</option><option value="heavy">${lm.getString('deepswarm.tierHeavy')}</option><option value="coding">${lm.getString('deepswarm.tierCoding')}</option></select>';
         deepswarmHeader.insertAdjacentElement('afterend', row);
         // Wire event listeners
         document.getElementById('deepswarm-provider').addEventListener('change', function(e) { vscode.postMessage({ type: 'selectDeepSwarmProvider', value: e.target.value }); });
@@ -1762,7 +1882,7 @@ ${PROVIDER_IDS.map(p => {
           const tierSel = document.createElement('select');
           tierSel.id = 'deepswarm-tier';
           tierSel.style.cssText = 'width:90px;';
-          tierSel.innerHTML = '<option value="auto">Auto tier</option><option value="light">Light</option><option value="mid">Mid</option><option value="heavy">Heavy</option><option value="coding">Coding</option>';
+          tierSel.innerHTML = '<option value="auto">${lm.getString('deepswarm.tierAuto')}</option><option value="light">${lm.getString('deepswarm.tierLight')}</option><option value="mid">${lm.getString('deepswarm.tierMid')}</option><option value="heavy">${lm.getString('deepswarm.tierHeavy')}</option><option value="coding">${lm.getString('deepswarm.tierCoding')}</option>';
           provSel.parentElement.appendChild(tierSel);
           tierSel.addEventListener('change', function(e) { vscode.postMessage({ type: 'selectDeepSwarmTier', value: e.target.value }); });
         }
@@ -1859,16 +1979,16 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
     (() => {
       const list = $('fallback-list');
       if (!list) return;
-      const order = (s.visionFallbackOrder && s.visionFallbackOrder.length > 0) ? s.visionFallbackOrder : ['gemini', 'zhipu', 'alibaba'];
-      const icons = { gemini: '\uD83D\uDD2E', zhipu: '\uD83E\uDDE0', alibaba: '\u2601\uFE0F' };
-      const names = { gemini: 'Gemini', zhipu: 'Zhipu / GLM', alibaba: 'Alibaba / Qwen' };
+      const order = (s.visionFallbackOrder && s.visionFallbackOrder.length > 0) ? s.visionFallbackOrder : ['gemini', 'zhipu', 'alibaba', 'deepseek'];
+      const icons = { gemini: '\uD83D\uDD2E', zhipu: '\uD83E\uDDE0', alibaba: '\u2601\uFE0F', deepseek: '\uD83D\uDC0B' };
+      const names = { gemini: 'Gemini', zhipu: 'Zhipu / GLM', alibaba: 'Alibaba / Qwen', deepseek: 'DeepSeek' };
       list.innerHTML = order.map((id, i) => {
         const hasKey = !!(s.providers && s.providers[id]);
         return '<div class="fb-item" data-id="' + id + '">' +
           '<span style="width:14px;text-align:center;opacity:0.5;">' + (i + 1) + '.</span>' +
           '<span>' + (icons[id] || '\uD83D\uDD39') + '</span>' +
           '<span style="flex:1;">' + (names[id] || id) + '</span>' +
-          '<span class="dot ' + (hasKey ? 'on' : '') + '" style="margin:0 3px;" title="' + (hasKey ? 'Key set' : 'No key') + '"></span>' +
+          '<span class="dot ' + (hasKey ? 'on' : '') + '" style="margin:0 3px;" title="' + (hasKey ? LOC.key_set_title : LOC.no_key_title) + '"></span>' +
           '<button class="fb-up" data-id="' + id + '" ' + (i === 0 ? 'disabled' : '') + ' style="padding:0 4px;font-size:10px;opacity:' + (i === 0 ? '0.3' : '0.7') + ';">\u25B2</button>' +
           '<button class="fb-down" data-id="' + id + '" ' + (i === order.length - 1 ? 'disabled' : '') + ' style="padding:0 4px;font-size:10px;opacity:' + (i === order.length - 1 ? '0.3' : '0.7') + ';">\u25BC</button>' +
           '</div>';
@@ -1936,7 +2056,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
                 '<span style="flex:1;font-size:11px;"><b>' + escapeHtml(label) + '</b>' +
                 (purpose ? '<br><span style="opacity:0.6;font-size:10px;">' + escapeHtml(purpose.slice(0, 100)) + '</span>' : '') +
                 '</span>' +
-                '<button class="subtle" data-delete-role="' + i + '" style="padding:1px 4px;font-size:10px;" title="Delete">✕</button></div>';
+                '<button class="subtle" data-delete-role="' + i + '" style="padding:1px 4px;font-size:10px;" title="' + LOC.delete_title + '">✕</button></div>';
         }).join('');
         crEl.querySelectorAll('[data-delete-role]').forEach(btn => {
             btn.addEventListener('click', function() {
@@ -2059,7 +2179,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
     if (s.sidebarMode === 'compact') {
       hubEl.innerHTML = '<div class="empty">' + LOC.hub_hidden_compact + '</div>';
     } else if (!s.hubRoots || s.hubRoots.length === 0) {
-      hubEl.innerHTML = '<div class="empty">No folders indexed yet. Open a project or click + Add folder.</div>';
+      hubEl.innerHTML = '<div class="empty">' + LOC.hub_no_folders + '</div>';
     } else {
       const hiddenRootCount = Math.max(0, Number(s.hubRootCount || s.hubRoots.length) - s.hubRoots.length);
       hubEl.innerHTML = s.hubRoots.map(p =>
@@ -2070,26 +2190,42 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
     if (hubStatus) {
       const hs = s.hubStatus || { online: false };
       if (hs.online) {
-        const indexedPathCount = hs.indexedPathCount ?? ((hs.indexedPaths || []).length);
+        // NOTE: plain JS — no type annotation here. A colon-typed declaration
+        // survives tsc (template literals are opaque to the compiler) and crashes
+        // the whole webview script with "SyntaxError: Unexpected token ':'".
+        // Counts text is shared with the light 'hubStatus' progress message.
+        const counts = hubCountsText(hs);
         hubStatus.innerHTML =
           '<div style="color:var(--vscode-charts-green);">' + LOC.hub_online + '</div>' +
           '<div style="opacity:0.75;">' + LOC.hub_model + ' ' + escapeHtml(hs.model || '?') + '</div>' +
-          '<div style="opacity:0.75;">' + (hs.vectors ?? 0) + ' ' + LOC.hub_vectors + ' · ' + indexedPathCount + ' ' + LOC.hub_indexed + '</div>';
+          '<div id="hub-counts" style="opacity:0.75;">' + counts + '</div>' +
+          '<div id="hub-index-note" style="color:var(--vscode-charts-orange);" title="' + escapeHtml(hs.indexNote || '') + '">' + hubIndexNoteText(hs) + '</div>';
       } else {
         hubStatus.innerHTML = s.hubAutoStart
-          ? '<div style="color:var(--vscode-charts-orange);">' + LOC.hub_offline + '</div><div style="opacity:0.75;">' + LOC.hub_click_start + ' ' + LOC.hub_message_start + ' ' + escapeHtml(s.hubStartOnMessage || 'prompt') + '.</div>'
+          ? '<div style="color:var(--vscode-foreground);">' + LOC.hub_offOnDemand + '</div><div style="opacity:0.75;">' + LOC.hub_click_start + ' ' + LOC.hub_message_start + ' ' + escapeHtml(s.hubStartOnMessage || 'prompt') + '.</div>'
           : '<div style="color:var(--vscode-charts-orange);">' + LOC.hub_paused + '</div><div style="opacity:0.75;">' + LOC.hub_on_demand_paused + ' ' + LOC.hub_message_start + ' ' + escapeHtml(s.hubStartOnMessage || 'prompt') + '.</div>';
       }
     }
-    const autoStartBtn = $('toggle-hub-autostart');
-    if (autoStartBtn) autoStartBtn.textContent = s.hubAutoStart ? LOC.hub_auto_start_on : LOC.hub_auto_start_off;
+    const segOpts = document.querySelectorAll('#hub-start-policy .seg-opt');
+    if (segOpts && segOpts.length) {
+      const currentPolicy = s.hubStartPolicy || (s.hubAutoStart ? 'onDemand' : 'never');
+      segOpts.forEach((el) => {
+        el.setAttribute('aria-checked', el.getAttribute('data-policy') === currentPolicy ? 'true' : 'false');
+      });
+    }
+    const msgMode = (s.hubStartOnMessage || 'prompt');
+    const msgModeLabel = msgMode === 'auto' ? LOC.hub_mode_auto : (msgMode === 'off' ? LOC.hub_mode_off : LOC.hub_mode_prompt);
+    const msgModeBtn = $('toggle-hub-message-mode');
+    if (msgModeBtn) msgModeBtn.textContent = LOC.hub_message_mode_label + ' ' + msgModeLabel;
+    const hubEffEl = $('hub-effective');
+    if (hubEffEl) hubEffEl.textContent = LOC.hub_effective_label + ' ' + (s.hubAutoStart ? LOC.hub_effective_auto_on : LOC.hub_effective_auto_off) + ' · ' + LOC.hub_effective_messages + ' ' + msgModeLabel;
 
     const providers = $('providers');
     const provList = s.providerOrder || ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'zhipu', 'gemini', 'openrouter', 'openai', 'claude'];
     const providerLabels = s.providerLabels || {};
     const slotCounts = s.providerSlotCounts || {};
     const slotLabels = ['C', 'A', 'E', 'V']; // Chat, Agents, External, Vision
-    const slotTitles = ['Chat key', 'Agents key', 'External key', 'Vision key'];
+    const slotTitles = [LOC.slot_chat_key, LOC.slot_agents_key, LOC.slot_external_key, LOC.slot_vision_key];
     providers.innerHTML = provList.map(p => {
       const on = !!(s.providers && s.providers[p]);
       const label = providerLabels[p] || p;
@@ -2099,11 +2235,11 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
       const isTencent = p === 'tencent';
       // Generate slot pills: clickable, green=set, blue=fallback, gray=missing
       const slotPills = isTencent
-        ? '<span class="slot-pill tencent" title="Native SecretId+SecretKey dual auth">🔑</span>'
+        ? '<span class="slot-pill tencent" title="' + LOC.tencent_dual_auth + '">🔑</span>'
         : slotLabels.map((letter, i) => {
             const filled = i < count;
             const color = filled ? (i === 0 ? 'var(--vscode-charts-green)' : 'var(--vscode-charts-blue)') : 'var(--vscode-descriptionForeground)';
-            const title = filled ? slotTitles[i] + ' set (click to change)' : slotTitles[i] + ' not set (click to add)';
+            const title = filled ? slotTitles[i] + LOC.slot_suffix_set : slotTitles[i] + LOC.slot_suffix_unset;
             return '<button class="slot-pill-btn" data-provider="' + p + '" data-slot="' + i + '" style="background:' + color + ';color:#fff;font-size:9px;padding:0 3px;border-radius:2px;margin:0 1px;border:none;cursor:pointer;font-family:monospace;" title="' + title + '">' + letter + '</button>';
           }).join('');
       return '<div class="provider-row">' +
@@ -2206,6 +2342,17 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
 
   window.addEventListener('message', (e) => {
     if (e.data?.type === 'state') render(e.data.value);
+    // Light live progress: the host sends this only while a job is running, so the
+    // counts line updates WITHOUT a full re-render (no flicker, no form resets).
+    if (e.data?.type === 'hubStatus' && e.data.value && e.data.value.online) {
+      const el = document.getElementById('hub-counts');
+      if (el) el.textContent = hubCountsText(e.data.value);
+      const note = document.getElementById('hub-index-note');
+      if (note) {
+        note.textContent = hubIndexNoteText(e.data.value);
+        note.title = e.data.value.indexNote || '';
+      }
+    }
     if (e.data?.type === 'loadingState') {
       const el = $('sidebar-loading');
       if (el) el.style.display = e.data.value ? 'flex' : 'none';
@@ -2268,7 +2415,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
                 '<span style="flex:1;font-size:11px;"><b>' + escapeHtml(label) + '</b>' +
                 (purpose ? '<br><span style="opacity:0.6;font-size:10px;">' + escapeHtml(purpose.slice(0, 100)) + '</span>' : '') +
                 '</span>' +
-                '<button class="subtle" data-delete-role="' + i + '" style="padding:1px 4px;font-size:10px;" title="Delete">\u2715</button></div>';
+                '<button class="subtle" data-delete-role="' + i + '" style="padding:1px 4px;font-size:10px;" title="' + LOC.delete_title + '">\u2715</button></div>';
             }).join('');
             crEl.querySelectorAll('[data-delete-role]').forEach(function(btn) {
               btn.addEventListener('click', function() {
@@ -2422,7 +2569,10 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
   $('manage-hub-roots').addEventListener('click', () => vscode.postMessage({ type: 'manageHubRoots' }));
   $('start-hub').addEventListener('click', () => vscode.postMessage({ type: 'startHub' }));
   $('stop-hub').addEventListener('click', () => vscode.postMessage({ type: 'stopHub' }));
-  $('toggle-hub-autostart').addEventListener('click', () => vscode.postMessage({ type: 'toggleHubAutoStart' }));
+  document.querySelectorAll('#hub-start-policy .seg-opt').forEach((el) => {
+    el.addEventListener('click', () => vscode.postMessage({ type: 'setHubStartPolicy', policy: el.getAttribute('data-policy') }));
+  });
+  $('toggle-hub-message-mode').addEventListener('click', () => vscode.postMessage({ type: 'toggleHubMessageMode' }));
   $('index-workspace').addEventListener('click', () => vscode.postMessage({ type: 'indexWorkspace' }));
   $('run-cleanup').addEventListener('click', () => vscode.postMessage({ type: 'runCleanup' }));
 $('view-conversation').addEventListener('click', () => vscode.postMessage({ type: 'viewConversation' }));

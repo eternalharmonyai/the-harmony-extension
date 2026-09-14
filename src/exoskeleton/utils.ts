@@ -163,6 +163,14 @@ export function redactSecrets(text: string): string {
 }
 
 /**
+ * Heuristic for binary content decoded as a UTF-8 string.
+ * Text files never contain NUL bytes; binary data virtually always does.
+ */
+export function looksBinaryContent(content: string): boolean {
+    return content.includes(String.fromCharCode(0));
+}
+
+/**
  * Extract the checklist section from a Markdown spine file and compute its hash.
  * Used by the freshness gate: the checklist MUST change for a phase transition.
  */

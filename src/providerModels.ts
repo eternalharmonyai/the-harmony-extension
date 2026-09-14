@@ -63,8 +63,10 @@ export interface ProviderDisplayMeta {
 // QuickPick, and any other surface that needs a human-readable name.
 
 const DEEPSEEK_MODELS: ModelMeta[] = [
-    { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash (fast, thinking ON)', labelZh: 'deepseek-v4-flash（快速，支持思考）', aliases: ['flash', 'v4-flash'], detail: 'Fast, inexpensive default direct route. Uses your DeepSeek API key.' },
+    { id: 'deepseek-flash', label: 'deepseek-flash (V4.1, fast, thinking ON)', labelZh: 'deepseek-flash（V4.1，快速，支持思考）', aliases: ['flash', 'v4-flash', 'flash-4.1', 'v4.1-flash'], detail: 'DeepSeek V4.1 Flash — newest fast route. Surpasses V4 Pro on performance/cost/speed. Uses your DeepSeek API key.' },
+    { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash (legacy)', labelZh: 'deepseek-v4-flash（旧版）', aliases: ['v4-flash-legacy'], detail: 'Legacy Flash model name. Hidden from the dropdown; still selectable.', featured: false },
     { id: 'deepseek-v4-pro', label: 'deepseek-v4-pro (most capable)', labelZh: 'deepseek-v4-pro（综合最强）', aliases: ['pro', 'v4-pro'], detail: 'Most capable DeepSeek route. Uses your DeepSeek API key, independent of Copilot plan limits.' },
+    { id: 'deepseek-v4-flash-vision-exp', label: 'deepseek-v4-flash-vision-exp (vision, experimental)', labelZh: 'deepseek-v4-flash-vision-exp（视觉，实验）', aliases: ['vision', 'v4-vision'], detail: 'Experimental multimodal flash — image + text + tools. Uses your DeepSeek API key.' },
 ];
 
 const ALIBABA_MODELS: ModelMeta[] = [
@@ -106,27 +108,32 @@ const ZHIPU_MODELS: ModelMeta[] = [
     { id: 'glm-5.1', label: 'glm-5.1 (fast, light)', labelZh: 'glm-5.1（快速轻量）' },
     { id: 'glm-5.2', label: 'glm-5.2 (balanced, capable)', labelZh: 'glm-5.2（均衡强大）', aliases: ['glm', 'zhipu'] },
     { id: 'glm-5.3', label: 'glm-5.3 (flagship, heavy/coding)', labelZh: 'glm-5.3（旗舰，重推理/编程）', aliases: ['glm-5.3', 'glm5.3'], detail: 'GLM 5.3 flagship for heavy reasoning and coding. Uses your Zhipu API key.' },
+    { id: 'glm-5.3-flash', label: 'glm-5.3-flash (fast, 1M context, multimodal)', labelZh: 'glm-5.3-flash（快速，1M 上下文，多模态）', aliases: ['glm-5.3-flash'], detail: 'GLM-5.3-Flash: 1M-token context, native multimodal (images/videos/files), thinking always on. Fast and cost-efficient. Uses your Zhipu API key.' },
     { id: 'glm-4-plus', label: 'glm-4-plus (legacy flagship, heavy)', labelZh: 'glm-4-plus（上一代旗舰）', aliases: ['glm-4', 'zhipu-4'], detail: 'Older GLM flagship. Available in the model selector; hidden from the dropdown.', featured: false },
 ];
 
 const ZHIPU_CODING_MODELS: ModelMeta[] = [
     { id: 'glm-5.3', label: 'glm-5.3 (coding flagship)', labelZh: 'glm-5.3（编程旗舰）' },
+    { id: 'glm-5.3-flash', label: 'glm-5.3-flash (coding plan, 3x quota)', labelZh: 'glm-5.3-flash（编程套餐，3 倍额度）' },
     { id: 'glm-5.2', label: 'glm-5.2 (coding plan, cost-efficient)', labelZh: 'glm-5.2（代码优选，高性价比）' },
     { id: 'glm-5.1', label: 'glm-5.1 (fast, light)', labelZh: 'glm-5.1（快速轻量）' },
 ];
 
 const OPENAI_MODELS: ModelMeta[] = [
-    { id: 'gpt-5-mini', label: 'gpt-5-mini (fast, efficient)', labelZh: 'gpt-5-mini（快速高效）', aliases: ['gpt', 'openai'] },
-    { id: 'gpt-5.5', label: 'gpt-5.5 (balanced mid)', labelZh: 'gpt-5.5（均衡实用）', aliases: ['gpt-5.5'], detail: 'Current OpenAI mid-tier model. Uses your OpenAI API key.' },
-    { id: 'gpt-5.6', label: 'gpt-5.6 (flagship heavy)', labelZh: 'gpt-5.6（旗舰，综合最强）', aliases: ['gpt-5.6'], detail: 'Current OpenAI flagship for the heaviest turns. Uses your OpenAI API key.' },
-    { id: 'gpt-5', label: 'gpt-5 (previous flagship)', labelZh: 'gpt-5（上一代旗舰）', aliases: ['gpt-5'], detail: 'Previous-generation OpenAI flagship. Kept for compatibility; prefer gpt-5.5/5.6.' },
-    { id: 'o4', label: 'o4 (legacy reasoning, heavy)', labelZh: 'o4（上一代推理旗舰）', aliases: ['o4'], detail: 'Legacy GPT-5 reasoning model. Available in the model selector; hidden from the dropdown.', featured: false },
+    { id: 'gpt-6-astra', label: 'gpt-6-astra (frontier, very expensive)', labelZh: 'gpt-6-astra（前沿，超贵）', aliases: ['astra', 'gpt-6'], detail: 'OpenAI frontier flagship for the hardest end-to-end work. $10/$50 per MTok. Uses your OpenAI API key.' },
+    { id: 'gpt-5.6-sol', label: 'gpt-5.6-sol (flagship heavy/coding)', labelZh: 'gpt-5.6-sol（旗舰，重推理/编程）', aliases: ['gpt-5.6', 'sol', 'gpt'], detail: 'OpenAI flagship for complex professional + coding work (alias gpt-5.6). $4/$20 per MTok. Uses your OpenAI API key.' },
+    { id: 'gpt-5.6-terra', label: 'gpt-5.6-terra (balanced mid)', labelZh: 'gpt-5.6-terra（均衡实用）', aliases: ['terra'], detail: 'Balanced intelligence and cost. $2/$12 per MTok. Uses your OpenAI API key.' },
+    { id: 'gpt-5.6-luna', label: 'gpt-5.6-luna (light, cheap)', labelZh: 'gpt-5.6-luna（轻量，便宜）', aliases: ['luna', 'openai'], detail: 'Cost-sensitive lightweight tier. $0.20/$1.20 per MTok. Uses your OpenAI API key.' },
+    { id: 'gpt-5', label: 'gpt-5 (legacy)', labelZh: 'gpt-5（上一代）', aliases: ['gpt-5'], detail: 'Previous-generation OpenAI flagship. Kept for compatibility.', featured: false },
+    { id: 'o4', label: 'o4 (legacy reasoning)', labelZh: 'o4（上一代推理）', aliases: ['o4'], detail: 'Legacy reasoning model. Hidden from the dropdown.', featured: false },
 ];
 
 const CLAUDE_MODELS: ModelMeta[] = [
-    { id: 'claude-opus-4', label: 'claude-opus-4 (most capable)', labelZh: 'claude-opus-4（综合最强）', aliases: ['claude-opus', 'opus'], detail: 'Most capable Anthropic model for hardest reasoning. Uses your Anthropic API key.' },
-    { id: 'claude-sonnet-4', label: 'claude-sonnet-4 (balanced, coding)', labelZh: 'claude-sonnet-4（均衡，编程强）', aliases: ['claude', 'claude-sonnet-4'] },
-    { id: 'claude-haiku-4', label: 'claude-haiku-4 (fast, light)', labelZh: 'claude-haiku-4（快速轻量）', aliases: ['claude-haiku-4'] },
+    { id: 'claude-fable-5-1', label: 'claude-fable-5-1 (frontier, very expensive)', labelZh: 'claude-fable-5-1（前沿，超贵）', aliases: ['fable', 'fable-5.1'], detail: 'Anthropic frontier for demanding reasoning and long-horizon agentic work. $10/$50 per MTok. Uses your Anthropic API key.' },
+    { id: 'claude-opus-5', label: 'claude-opus-5 (coding, enterprise)', labelZh: 'claude-opus-5（编程，企业级）', aliases: ['opus', 'claude-opus', 'claude'], detail: 'Complex agentic coding and enterprise work. $5/$25 per MTok. Uses your Anthropic API key.' },
+    { id: 'claude-sonnet-5', label: 'claude-sonnet-5 (balanced mid)', labelZh: 'claude-sonnet-5（均衡实用）', aliases: ['sonnet', 'claude-sonnet'], detail: 'Best combination of speed and intelligence. $2/$10 per MTok. Uses your Anthropic API key.' },
+    { id: 'claude-haiku-4-5-20251001', label: 'claude-haiku-4.5 (fast, light)', labelZh: 'claude-haiku-4.5（快速轻量）', aliases: ['haiku', 'claude-haiku'], detail: 'Fastest model with near-frontier intelligence. $1/$5 per MTok. Uses your Anthropic API key.' },
+    { id: 'claude-opus-4', label: 'claude-opus-4 (legacy)', labelZh: 'claude-opus-4（上一代）', aliases: ['claude-opus-4'], detail: 'Previous-generation Anthropic flagship. Kept for compatibility.', featured: false },
 ];
 
 const OPENROUTER_MODELS: ModelMeta[] = [
@@ -356,7 +363,7 @@ export function getProviderSecretKey(provider: ProviderId): string {
 // producing a chat label that disagreed with the sidebar dropdown. All read/write
 // paths for the DeepSeek model now route through these two functions.
 
-const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
+const DEEPSEEK_DEFAULT_MODEL = 'deepseek-flash';
 
 /** Read the active DeepSeek model. Config is the single source of truth. */
 export function getDeepSeekModel(): string {
@@ -485,8 +492,8 @@ export function checkProviderSync(): SyncCheckResult {
     const aliasMap = buildAliasMap();
     const aliasCounts: Record<string, number> = {};
     const aliasProviders: Record<string, Set<string>> = {};
-    // Provider families that share models intentionally
-    const providerFamily: Record<string, string> = {
+    // Provider groups that share models intentionally
+    const providerGroup: Record<string, string> = {
         'moonshot': 'moonshot', 'kimiCode': 'moonshot',
         'zhipu': 'zhipu', 'zhipu-coding': 'zhipu',
         'doubao': 'bytedance', 'doubao-coding': 'bytedance', 'doubao-rewards': 'bytedance',
@@ -496,15 +503,15 @@ export function checkProviderSync(): SyncCheckResult {
         for (const model of provider.models) {
             const allNames = [model.id, ...(model.aliases ?? [])];
             for (const name of allNames) {
-                const family = providerFamily[provider.id] ?? provider.id;
+                const groupId = providerGroup[provider.id] ?? provider.id;
                 if (!aliasProviders[name]) aliasProviders[name] = new Set();
-                aliasProviders[name].add(family);
+                aliasProviders[name].add(groupId);
             }
         }
     }
-    for (const [alias, families] of Object.entries(aliasProviders)) {
-        if (families.size > 1) {
-            issues.push(`Alias "${alias}" is mapped by ${families.size} different provider families — CLI /model ambiguity`);
+    for (const [alias, groups] of Object.entries(aliasProviders)) {
+        if (groups.size > 1) {
+            issues.push(`Alias "${alias}" is mapped by ${groups.size} different provider groups — CLI /model ambiguity`);
         }
     }
 

@@ -23,6 +23,8 @@ export interface PreActionSnapshotRecord {
     mtime?: string;
     copied: boolean;
     copyPath?: string;
+    /** True when the source file was a non-text/binary file copied as raw bytes. */
+    binary?: boolean;
     reason?: string;
 }
 
@@ -105,18 +107,19 @@ export async function createRequiredPreActionSnapshot(root: string, relativePath
             records.push(record);
             continue;
         }
-        if (!PRE_ACTION_SNAPSHOT_TEXT_EXTS.has(path.extname(normalized).toLowerCase())) {
-            record.reason = 'not a supported text-file snapshot extension';
-            failures.push(`${normalized}: ${record.reason}`);
-            records.push(record);
-            continue;
-        }
+        // Binary / non-text files are snapshotted too — as raw byte copies. Previously a
+        // non-text extension was pushed to `failures`, which failed the whole snapshot and
+        // refused the edit (e.g. a PNG icon could not be edited at all). `copyFile` and the
+        // restore path are both byte-exact for text and binary alike, so the extension
+        // whitelist was never a safety boundary — the size cap above is what bounds us.
+        const isText = PRE_ACTION_SNAPSHOT_TEXT_EXTS.has(path.extname(normalized).toLowerCase());
         const copyPath = path.join(filesDir, snapshotCopyName(normalized));
         await fs.mkdir(filesDir, { recursive: true });
         try {
             await fs.copyFile(targetPath, copyPath);
             record.copied = true;
             record.copyPath = normalizeSnapshotPath(path.relative(snapshotDir, copyPath));
+            if (!isText) record.binary = true;
         } catch (error: any) {
             record.reason = error?.message ?? String(error);
             failures.push(`${normalized}: ${record.reason}`);

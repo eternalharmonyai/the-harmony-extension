@@ -1,8 +1,8 @@
 /**
  * DeepSeek Language Model Chat Provider for VS Code Copilot Chat.
  *
- * Registers deepseek-v4-flash and deepseek-v4-pro as native models
- * in Copilot Chat's model picker. All requests go directly to DeepSeek API
+ * Registers deepseek-flash (V4.1), deepseek-v4-flash, deepseek-v4-pro, and deepseek-v4-flash-vision-exp
+ * as native models in Copilot Chat's model picker. All requests go directly to DeepSeek API
  * — no TLS interception, no DNS hacking, no rate limits.
  *
  * This file is ISOLATED: it never touches existing Harmony code.
@@ -21,12 +21,22 @@ interface DeepSeekModelInfo extends vscode.LanguageModelChatInformation {
 
 const MODELS: DeepSeekModelInfo[] = [
     {
+        id: 'deepseek-flash',
+        name: 'DeepSeek Flash (V4.1)',
+        family: VENDOR,
+        version: 'v4.1-flash',
+        maxInputTokens: 1048576,
+        maxOutputTokens: 393216,
+        capabilities: { toolCalling: true },
+        apiModel: 'deepseek-flash',
+    },
+    {
         id: 'deepseek-v4-flash',
         name: 'DeepSeek V4 Flash',
         family: VENDOR,
         version: 'v4-flash',
-        maxInputTokens: 128000,
-        maxOutputTokens: 32768,
+        maxInputTokens: 1048576,
+        maxOutputTokens: 393216,
         capabilities: { toolCalling: true },
         apiModel: 'deepseek-v4-flash',
     },
@@ -35,10 +45,20 @@ const MODELS: DeepSeekModelInfo[] = [
         name: 'DeepSeek V4 Pro',
         family: VENDOR,
         version: 'v4-pro',
-        maxInputTokens: 128000,
-        maxOutputTokens: 32768,
+        maxInputTokens: 1048576,
+        maxOutputTokens: 393216,
         capabilities: { toolCalling: true },
         apiModel: 'deepseek-v4-pro',
+    },
+    {
+        id: 'deepseek-v4-flash-vision-exp',
+        name: 'DeepSeek V4 Flash Vision (exp)',
+        family: VENDOR,
+        version: 'v4-flash-vision-exp',
+        maxInputTokens: 1048576,
+        maxOutputTokens: 393216,
+        capabilities: { toolCalling: true, imageInput: true },
+        apiModel: 'deepseek-v4-flash-vision-exp',
     },
 ];
 
@@ -82,6 +102,34 @@ function mapRole(role: vscode.LanguageModelChatMessageRole): string {
     }
 }
 
+/**
+ * Build the API message content for a native chat request. When the model is
+ * image-capable AND the message carries image parts, emit an OpenAI multimodal
+ * content array (text + image_url). Otherwise emit sanitized text as before.
+ */
+function buildNativeChatContent(model: DeepSeekModelInfo, msg: vscode.LanguageModelChatRequestMessage): string | any[] {
+    const raw = msg.content;
+    if (!Array.isArray(raw)) return sanitizeContent(extractTextContent(msg));
+    const imageParts = raw.filter((p: any) =>
+        p && typeof p === 'object'
+        && typeof (p as any).mimeType === 'string'
+        && (p as any).data !== undefined
+        && !(p instanceof vscode.LanguageModelTextPart)
+    );
+    if (imageParts.length === 0 || model.apiModel !== 'deepseek-v4-flash-vision-exp') {
+        return sanitizeContent(extractTextContent(msg));
+    }
+    const parts: any[] = [];
+    const text = sanitizeContent(extractTextContent(msg));
+    if (text) parts.push({ type: 'text', text });
+    for (const ip of imageParts) {
+        const img = ip as any;
+        const data = typeof img.data === 'string' ? img.data : Buffer.from(img.data).toString('base64');
+        parts.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/png'};base64,${data}` } });
+    }
+    return parts;
+}
+
 export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
     const provider: vscode.LanguageModelChatProvider<DeepSeekModelInfo> = {
         // ── List available models ──────────────────────
@@ -121,14 +169,14 @@ export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
                 .filter(m => m.role === vscode.LanguageModelChatMessageRole.User || m.role === vscode.LanguageModelChatMessageRole.Assistant)
                 .map(m => ({
                     role: mapRole(m.role),
-                    content: sanitizeContent(extractTextContent(m)),
+                    content: buildNativeChatContent(model, m),
                 }));
 
             const requestBody = {
                 model: model.apiModel,
                 messages: deepseekMessages,
                 stream: false,
-                max_tokens: 32768,
+                max_tokens: 393216,
             };
 
             // Safe JSON serialization with fallback for edge cases
@@ -139,7 +187,9 @@ export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
                 console.warn('[DeepSeek Provider] JSON.stringify failed, retrying with aggressive sanitization:', jsonErr);
                 const safeMessages = deepseekMessages.map(m => ({
                     ...m,
-                    content: (m.content || '').replace(/[\x00-\x1F\x7F-\x9F]/g, ''),
+                    content: typeof m.content === 'string'
+                        ? m.content.replace(/[\x00-\x1F\x7F-\x9F]/g, '')
+                        : m.content,
                 }));
                 body = JSON.stringify({ ...requestBody, messages: safeMessages });
             }
@@ -200,7 +250,7 @@ export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
         vscode.lm.registerLanguageModelChatProvider(VENDOR, provider)
     );
 
-    console.log('[DeepSeek Provider] ✅ Registered — vendor: deepseek, models: v4-flash, v4-pro');
+    console.log('[DeepSeek Provider] ✅ Registered — vendor: deepseek, models: flash (V4.1), v4-flash, v4-pro, v4-flash-vision-exp');
 
     // ── DIAGNOSTIC (on-demand): verify models actually landed in the LM registry ──
     // Queries the same registry the model picker reads, then surfaces the

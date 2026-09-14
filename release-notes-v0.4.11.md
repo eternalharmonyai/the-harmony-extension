@@ -6,7 +6,7 @@
 All mutating operations — file writes, terminal commands, background processes, and secret changes — now record a reversible effect in a local ledger. Harmony can roll back file mutations, stop spawned processes, and recover from interrupted operations. Pre-action snapshots are deduplicated, size-capped, and share a single code path.
 
 ### 🦾 Exoskeleton v2.0
-Six new subsystem modules (Phase 0–5) form the Exoskeleton v2.0 skeleton, exposed as four native tools — `harmony_spine`, `harmony_oracle`, `harmony_guard`, and `harmony_dispatch` — giving the orchestration layer planning, verification, and dispatch in one pass.
+Six new subsystem modules form the Exoskeleton v2.0 skeleton, exposed as four native tools — `harmony_spine`, `harmony_oracle`, `harmony_guard`, and `harmony_dispatch` — giving the orchestration layer planning, verification, and dispatch in one pass.
 
 ### 🌏 BytePlus / Doubao / StepFun — correct model IDs
 BytePlus (international) model IDs corrected to the real ModelArk `seed-*` IDs (Seed 2.0 Pro / Lite / Mini / Code). Dedicated **Set API Key** commands for Doubao, BytePlus Coding Plan, and StepFun. Sidebar primary-model selection now routes correctly to chat.

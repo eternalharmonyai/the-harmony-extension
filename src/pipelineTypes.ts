@@ -100,7 +100,7 @@ export type ResearchState =
     | 'synthesis'      // dossier + outline in progress
     | 'publication';   // outline drafted, ready for human review
 
-// ── Research Project (for Phase 5 State Machine) ────────────────────────────
+// ── Research Project (state machine) ────────────────────────────
 
 export interface ResearchProject {
     id: string;

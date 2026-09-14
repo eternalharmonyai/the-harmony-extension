@@ -1,0 +1,88 @@
+name: Provenance
+
+# Two tiers, deliberately separated:
+#
+#   hermetic     — no network, deterministic. GATES MERGES.
+#   integration  — reaches real hosts. NEVER blocks.
+#
+# Mixing them is how teams learn to ignore CI: a suite that depends on a third party being
+# up will go red for reasons no commit caused, and a gate that cries wolf stops being read.
+# The split is machine-enforced, not documented — the hermetic job disables the network via
+# scripts/lib/no-network.js, so a suite that quietly gains a network dependency fails in the
+# job that gates merges rather than becoming an intermittent failure later.
+
+on:
+  push:
+    branches: [main, 'provenance/**']
+  pull_request:
+  schedule:
+    - cron: '17 6 * * *'   # integration tier, daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hermetic:
+    name: Hermetic (gates merges)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Node deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Compile
+        run: npx tsc -p ./
+
+      # Runs first: if the format drifted, every downstream failure is noise.
+      - name: Frozen format vectors
+        run: node scripts/run-provenance-vectors.js
+
+      - name: Provenance suites (network disabled)
+        env:
+          NODE_OPTIONS: -r ${{ github.workspace }}/scripts/lib/no-network.js
+        run: |
+          for suite in webbotauth citation revocation endpoint-config genesis-binding; do
+            echo "::group::$suite"
+            node "scripts/run-provenance-$suite.js"
+            echo "::endgroup::"
+          done
+
+  integration:
+    name: Integration (never blocks)
+    runs-on: ubuntu-latest
+    # Reports, never gates: these depend on third-party availability.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Node deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Compile
+        run: npx tsc -p ./
+
+      - name: MCP server over stdio (live liveness checks)
+        # Never paints a red X: liveness depends on third-party hosts being up.
+        # A failure is still fully visible in the script's FAIL lines — it is just
+        # logged as evidence about the world, not as a failing check.
+        run: node scripts/run-provenance-mcp.js || echo "::warning::integration liveness check failed — non-blocking (world changed); see FAIL lines above"
+
+      # A failure here is evidence about the world, not about the commit: an institution
+      # went down, changed its wording, or started blocking us. That is data worth having
+      # and precisely the kind of change this project exists to notice — but it must never
+      # be the reason a merge is refused.
+      - name: Note on failure
+        if: failure()
+        run: |
+          echo "Integration failure does not indicate a regression in this commit."
+          echo "Check whether a source changed, went down, or began blocking automated access."

@@ -56,7 +56,7 @@ export interface IndexedDoc {
     title: string;
     /** Harvested metadata text, or extracted operative text once ingested. */
     text: string;
-    /** Honest provenance of `text`. Only 'content' is citable. */
+    /** Provenance of `text`. Only 'content' is citable. */
     tier: 'snippet' | 'content';
     /** YYYY-MM-DD of the ORIGINAL retrieval. Never rewritten on re-read. */
     retrieved: string;
@@ -110,9 +110,12 @@ function today(): string {
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     if (ms <= 0) return Promise.resolve();
+    if (signal?.aborted) return Promise.reject(new Error('aborted'));
     return new Promise((resolve, reject) => {
-        const t = setTimeout(resolve, ms);
-        signal?.addEventListener('abort', () => { clearTimeout(t); reject(new Error('aborted')); }, { once: true });
+        let t: ReturnType<typeof setTimeout>;
+        const onAbort = () => { clearTimeout(t); reject(new Error('aborted')); };
+        t = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+        signal?.addEventListener('abort', onAbort, { once: true });
     });
 }
 
@@ -529,7 +532,7 @@ export function createInstitutionalAdapter(
                     hits[i] = { ...hits[i], doc: full };
                     const idx = docs.findIndex(d => d.id === full.id);
                     if (idx >= 0) docs[idx] = full;
-                } catch { /* leave as snippet — honest tier beats an optimistic one */ }
+                } catch { /* leave as snippet — a conservative tier beats an optimistic one */ }
             }
             if (promote > 0) { try { await store.save(source.domain, docs); } catch { /* best effort */ } }
 

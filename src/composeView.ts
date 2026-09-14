@@ -37,7 +37,7 @@ export function openComposeView(context: vscode.ExtensionContext): void {
         }
     );
 
-    panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'harmony-icon.svg');
+    panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'harmony-icon.png');
     panel.webview.html = renderHtml();
     currentPanel = panel;
 
@@ -68,7 +68,7 @@ export function openComposeView(context: vscode.ExtensionContext): void {
 async function handlePickFile(panel: vscode.WebviewPanel): Promise<void> {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
-        vscode.window.showWarningMessage('Harmony Compose: open a workspace folder first.');
+        vscode.window.showWarningMessage(LanguageManager.getInstance().getString('notify.composeNoWorkspace'));
         return;
     }
     const picks = await vscode.window.showOpenDialog({
@@ -108,7 +108,7 @@ async function handleSend(panel: vscode.WebviewPanel, msg: any): Promise<void> {
     }
 
     if (text.trim().length === 0 && filePaths.length === 0 && images.length === 0) {
-        vscode.window.showInformationMessage('Harmony Compose: nothing to send.');
+        vscode.window.showInformationMessage(LanguageManager.getInstance().getString('notify.composeNothingToSend'));
         return;
     }
 

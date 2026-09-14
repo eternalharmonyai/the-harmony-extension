@@ -238,7 +238,35 @@ async function requestJson(rawUrl, timeoutMs = 1500) {
     });
 }
 
-async function postJson(rawUrl, payload, timeoutMs = 1500) {
+// ── Hub auth ──────────────────────────────────────────────────────────────
+// The daemon requires `Authorization: Bearer <token>` on every route. The token is
+// created by the extension at ~/.harmony/hub-auth.token (override via HARMONY_HUB_TOKEN_FILE,
+// or supply HARMONY_HUB_AUTH_TOKEN directly). Read once and reuse.
+let hubAuthTokenCache;
+function hubAuthToken() {
+    if (hubAuthTokenCache !== undefined) return hubAuthTokenCache;
+    const envToken = process.env.HARMONY_HUB_AUTH_TOKEN;
+    if (envToken && envToken.trim()) { hubAuthTokenCache = envToken.trim(); return hubAuthTokenCache; }
+    try {
+        const pathMod = require('path');
+        const osMod = require('os');
+        const fsMod = require('fs');
+        const explicit = process.env.HARMONY_HUB_TOKEN_FILE;
+        const tokenPath = explicit && explicit.trim()
+            ? explicit.trim()
+            : pathMod.join(osMod.homedir(), '.harmony', 'hub-auth.token');
+        hubAuthTokenCache = String(fsMod.readFileSync(tokenPath, 'utf-8')).trim();
+    } catch {
+        hubAuthTokenCache = '';
+    }
+    return hubAuthTokenCache;
+}
+function hubAuthHeaders() {
+    const token = hubAuthToken();
+    return token ? { 'authorization': `Bearer ${token}` } : {};
+}
+
+async function postJson(rawUrl, payload, timeoutMs = 1500, _retried = false) {
     const url = new URL(rawUrl);
     const lib = url.protocol === 'https:' ? https : http;
     const body = JSON.stringify(payload);
@@ -252,13 +280,21 @@ async function postJson(rawUrl, payload, timeoutMs = 1500) {
             headers: {
                 'content-type': 'application/json',
                 'content-length': Buffer.byteLength(body),
+                ...hubAuthHeaders(),
             },
         }, res => {
             let data = '';
             res.on('data', chunk => { data += chunk; });
             res.on('end', () => {
-                if ((res.statusCode || 0) < 200 || (res.statusCode || 0) >= 300) {
-                    reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
+                const code = res.statusCode || 0;
+                if (code === 401 && !_retried) {
+                    // Token may have been regenerated: drop the cache, re-read, retry once.
+                    hubAuthTokenCache = undefined;
+                    postJson(rawUrl, payload, timeoutMs, true).then(resolve, reject);
+                    return;
+                }
+                if (code < 200 || code >= 300) {
+                    reject(new Error(`HTTP ${code}: ${data.slice(0, 200)}`));
                     return;
                 }
                 try { resolve(JSON.parse(data)); }
@@ -4398,7 +4434,7 @@ async function writeSmokeReport(root, report) {
     await fsp.writeFile(filePath, JSON.stringify(report, null, 2), 'utf8');
     await appendLedgerEntry(root, {
         kind: 'smoke.phase3',
-        label: `Phase 3 disposable smoke ${report.status}`,
+        label: `Disposable smoke ${report.status}`,
         status: report.status === 'passed' ? 'completed' : 'failed',
         reportPath: normalizePath(filePath),
         tempWorkspace: report.tempWorkspace,
@@ -4718,7 +4754,7 @@ async function commandSmoke(root, subcommand, options) {
     if (options.json) printJson({ reportPath, report });
     else {
         const lines = [
-            `Phase 3 disposable smoke: ${report.status}`,
+            `Disposable smoke: ${report.status}`,
             `Report: ${normalizePath(reportPath)}`,
             `Temp workspace: ${report.tempWorkspaceKept ? report.tempWorkspace : `${report.tempWorkspace} (removed)`}`,
             '',
@@ -17374,7 +17410,7 @@ async function createSnapshot(root, options) {
         createdAt: new Date().toISOString(),
         workspace: root,
         mode: options['metadata-only'] ? 'metadata-only' : 'small-text-copy',
-        note: String(options.note || 'Wave 12 rollback groundwork: manifest plus optional small text-file copies. Restore supports preview/apply for copied text files only.'),
+        note: String(options.note || 'Snapshot manifest plus optional small text-file copies. Restore supports preview/apply for copied text files only.'),
         limits: {
             maxFiles: Number(options['max-files'] || 200),
             maxBytes: Number(options['max-bytes'] || 256 * 1024),
@@ -17546,7 +17582,7 @@ async function commandSnapshot(root, subcommand, options) {
                 ...options,
                 path: target.relativePath,
                 reason: 'snapshot restore drill',
-                note: 'Disposable snapshot restore drill for Phase 1 recovery automation.',
+                note: 'Disposable snapshot restore drill for recovery automation.',
                 'max-files': 5,
                 'max-bytes': 64 * 1024,
             });

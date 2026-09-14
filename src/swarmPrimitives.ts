@@ -1,8 +1,6 @@
 /**
- * Swarm Primitives — Wave 1 + Wave 2 REDACTED 15-primitive architecture.
- * 
- * Wave 1: convergence_arbiter, adversarial_critic, episodic_memory, decision_log
- * Wave 2: uncertainty_fabric, task_auction, value_resolver
+* Swarm Primitives — a 15-primitive architecture for convergent, adversarial,
+* memory-bearing and planning deliberation.
  */
 
 import * as vscode from 'vscode';
@@ -417,7 +415,7 @@ export class DecisionLogTool implements vscode.LanguageModelTool<DLogInput> {
     }
 }
 
-// ═══ 5. harmony_uncertainty_fabric (Wave 2 — upgraded: Beta distributions + calibration) ═══
+// ═══ 5. harmony_uncertainty_fabric (upgraded: Beta distributions + calibration) ═══
 interface UClaim { id: string; claim: string; alpha: number; beta: number; evidence: string[]; counterevidence: string[]; source: string; timestamp: number; status: string; calibrated?: boolean; }
 interface UFabricInput { action: 'add' | 'query' | 'escalate' | 'stats' | 'calibrate'; add?: { claim: string; confidence?: number; variance?: number; evidence?: string[]; counterevidence?: string[]; source?: string }; query?: { min_confidence?: number; max_variance?: number; status?: string; source?: string; limit?: number }; escalate_threshold?: number; calibrate?: { claim_id: string; actual_outcome: boolean }; }
 export class UncertaintyFabricTool implements vscode.LanguageModelTool<UFabricInput> {
@@ -613,9 +611,9 @@ export class UncertaintyFabricTool implements vscode.LanguageModelTool<UFabricIn
     }
 }
 
-// ═══ 6. harmony_task_auction (Wave 2) ═══
+// ═══ 6. harmony_task_auction ═══
 
-// ═══ 6. harmony_task_auction (Wave 2) ═══
+// ═══ 6. harmony_task_auction ═══
 interface TRecord { taskType: string; agent: string; success: boolean; confidenceBid: number; timestamp: number; }
 interface TAuctionInput { action: 'bid' | 'record' | 'stats'; task_type?: string; bids?: { agent: string; bid: number; specialization?: string[] }[]; record?: { task_type: string; agent: string; success: boolean; confidence_bid?: number }; }
 export class TaskAuctionTool implements vscode.LanguageModelTool<TAuctionInput> {
@@ -649,7 +647,7 @@ export class TaskAuctionTool implements vscode.LanguageModelTool<TAuctionInput> 
     }
 }
 
-// ═══ 7. harmony_value_resolver (Wave 2) ═══
+// ═══ 7. harmony_value_resolver ═══
 interface VHier { principles: { name: string; priority: number; description: string }[]; }
 interface VTen { id: string; option_a: string; option_b: string; principle_a: string; principle_b: string; resolution?: string; justification?: string; timestamp: number; status: string; }
 interface VResolverInput { action: 'define_hierarchy' | 'resolve_tension' | 'query' | 'stats'; principles?: { name: string; priority: number; description: string }[]; tension?: { option_a: string; option_b: string; principle_a: string; principle_b: string }; }
@@ -705,7 +703,7 @@ export class ValueResolverTool implements vscode.LanguageModelTool<VResolverInpu
     }
 }
 
-// ═══ 8. harmony_swarm_topology (Wave 3) ═══
+// ═══ 8. harmony_swarm_topology ═══
 type Topology = 'star' | 'pipeline' | 'ring' | 'small_world';
 interface TopologyInput { action: 'configure' | 'status' | 'phase_transition'; topology?: Topology; phase?: string; reason?: string; }
 export class SwarmTopologyTool implements vscode.LanguageModelTool<TopologyInput> {
@@ -748,7 +746,7 @@ export class SwarmTopologyTool implements vscode.LanguageModelTool<TopologyInput
     }
 }
 
-// ═══ 9. harmony_execution_sandbox (Wave 3 — upgraded to three-tier safe execution) ═══
+// ═══ 9. harmony_execution_sandbox (upgraded to three-tier safe execution) ═══
 interface ESandboxInput { action: 'run' | 'status' | 'capabilities'; language?: string; code?: string; test?: string; timeout_sec?: number; memory_limit_mb?: number; }
 export class ExecutionSandboxTool implements vscode.LanguageModelTool<ESandboxInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<ESandboxInput>, _token: vscode.CancellationToken) {
@@ -820,7 +818,7 @@ export class ExecutionSandboxTool implements vscode.LanguageModelTool<ESandboxIn
     }
 }
 
-// ═══ 10. harmony_temporal_branch (Wave 3 — upgraded: Chronos git-backend) ═══
+// ═══ 10. harmony_temporal_branch (upgraded: Chronos git-backend) ═══
 interface TemporalBranchInput { action: 'checkpoint' | 'fork' | 'rollback' | 'switch' | 'list' | 'log'; branch_name?: string; message?: string; target_commit?: string; mode?: 'hard' | 'soft'; }
 export class TemporalBranchTool implements vscode.LanguageModelTool<TemporalBranchInput> {
     private _store: any = null;
@@ -899,7 +897,7 @@ export class TemporalBranchTool implements vscode.LanguageModelTool<TemporalBran
     }
 }
 
-// ═══ 11. harmony_thought_graph (Wave 4 — upgraded: Rigor executable DAG) ═══
+// ═══ 11. harmony_thought_graph (upgraded: Rigor executable DAG) ═══
 interface ThoughtNode { id: string; claim: string; evidence: string[]; status: 'hypothesis' | 'verified' | 'rejected' | 'pending'; dependencies: string[]; source: string; timestamp: number; counterexamples?: string[]; execution_result?: 'pass' | 'fail' | 'unexecuted'; }
 interface ThoughtGraphInput { action: 'add' | 'query' | 'verify' | 'graph' | 'stats' | 'execute' | 'counterexample'; claim?: string; evidence?: string[]; dependencies?: string[]; source?: string; verify_id?: string; verify_status?: string; query_status?: string; limit?: number; execute_id?: string; counterexample?: { node_id: string; example: string }; }
 export class ThoughtGraphTool implements vscode.LanguageModelTool<ThoughtGraphInput> {
@@ -1133,9 +1131,9 @@ export class ThoughtGraphTool implements vscode.LanguageModelTool<ThoughtGraphIn
     }
 }
 
-// ═══ 12. harmony_horizon_planner (Wave 4) ═══
+// ═══ 12. harmony_horizon_planner ═══
 
-// ═══ 12. harmony_horizon_planner (Wave 4) ═══
+// ═══ 12. harmony_horizon_planner ═══
 interface HorizonPlan { id: string; goal: string; next_step: string; blockers: string[]; estimated_impact: string; timeline: 'tactical' | 'operational' | 'strategic'; timestamp: number; status: string; }
 interface HorizonPlannerInput { action: 'plan' | 'query' | 'align' | 'stats'; goal?: string; next_step?: string; blockers?: string[]; estimated_impact?: string; timeline?: string; query_timeline?: string; limit?: number; }
 export class HorizonPlannerTool implements vscode.LanguageModelTool<HorizonPlannerInput> {
@@ -1190,7 +1188,7 @@ export class HorizonPlannerTool implements vscode.LanguageModelTool<HorizonPlann
     }
 }
 
-// ═══ 13. harmony_skill_distiller (Wave 5) ═══
+// ═══ 13. harmony_skill_distiller ═══
 interface SkillCrystal { id: string; name: string; description: string; preconditions: string[]; invariants: string[]; failure_modes: string[]; solution_pattern: string; language: string; extracted_from: string; timestamp: number; }
 interface SkillDistillerInput { action: 'extract' | 'query' | 'load' | 'stats' | 'export_snippet'; name?: string; description?: string; preconditions?: string[]; invariants?: string[]; failure_modes?: string[]; solution_pattern?: string; language?: string; extracted_from?: string; query_language?: string; query_name?: string; limit?: number; snippet_prefix?: string; snippet_description?: string; }
 export class SkillDistillerTool implements vscode.LanguageModelTool<SkillDistillerInput> {
@@ -1263,7 +1261,7 @@ export class SkillDistillerTool implements vscode.LanguageModelTool<SkillDistill
     }
 }
 
-// ═══ 14. harmony_property_tester (Wave 5) ═══
+// ═══ 14. harmony_property_tester ═══
 interface PropertyTest { id: string; name: string; invariant: string; language: string; test_code: string; generator: string; timestamp: number; status: string; }
 interface PropertyTesterInput { action: 'generate' | 'validate' | 'query' | 'stats'; name?: string; invariant?: string; language?: string; target_code?: string; test_code?: string; query_language?: string; limit?: number; }
 export class PropertyTesterTool implements vscode.LanguageModelTool<PropertyTesterInput> {
@@ -1306,7 +1304,7 @@ export class PropertyTesterTool implements vscode.LanguageModelTool<PropertyTest
     }
 }
 
-// ═══ 15. harmony_analogy_engine (Wave 5) ═══
+// ═══ 15. harmony_analogy_engine ═══
 interface AnalogyRecord { id: string; problem: string; domain: string; mapping: string; verified: boolean; verification_notes: string; timestamp: number; }
 interface AnalogyEngineInput { action: 'map' | 'verify' | 'query' | 'stats'; problem?: string; domain?: string; analogy_id?: string; verified?: boolean; verification_notes?: string; query_domain?: string; limit?: number; }
 export class AnalogyEngineTool implements vscode.LanguageModelTool<AnalogyEngineInput> {

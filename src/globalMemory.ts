@@ -7,7 +7,7 @@ import * as crypto from 'crypto';
  * Uses VS Code ExtensionContext.globalState to persist technical patterns
  * across ALL workspaces. Never stores private data — only technical summaries.
  *
- * DESIGN (post Kimi k2.7 REDACTED):
+ * DESIGN (after review):
  *   - Async mutex: all write paths serialized to prevent race conditions
  *   - In-memory cache: parsed entries cached, only flushed to disk lazily
  *   - Debounced persistence: 500ms batch, plus flush on deactivation

@@ -20,9 +20,9 @@
  * Endpoint: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse
  * Auth: x-goog-api-key header (NOT query param — privacy: avoids proxy logs)
  *
- * Design consensus (Gemini 3.1 Pro + DeepSeek V4 Pro + Kimi K3):
+ * Design decisions:
  *   - Separate function, not a shared abstraction (minimize risk to 17 providers)
- *   - generateContent path first; Interactions API as future Phase 3
+ *   - generateContent path first; Interactions API as a future path
  *   - Fallback to OpenAI-compat on failure
  *   - BLOCK_NONE safety settings for agent loops
  * ════════════════════════════════════════════════════════════════════
@@ -413,7 +413,7 @@ export async function parseGeminiSSEStream(
 /**
  * Call Gemini's native generateContent streaming API.
  *
- * This is the Phase 2 native path that handles thought_signatures as
+ * This is the native streaming path that handles thought_signatures as
  * first-class metadata, eliminating the HTTP 400 errors that plagued
  * the OpenAI-compat endpoint.
  *

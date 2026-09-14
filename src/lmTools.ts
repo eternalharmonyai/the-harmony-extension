@@ -13,6 +13,8 @@ import { consult, confirmHeavyTier, ProviderId, resolveCollabModel, Tier, modelF
 import { addTodos, checkTodo, removeTodo, clearTodos, loadTodos, formatTodos } from './todoStore';
 import { HarmonyAskOptions, showHarmonyAsk } from './askView';
 import { LanguageManager } from './languageManager';
+import { hubMayStart } from './hubPolicy';
+import { hubFetch } from './hubClient';
 import { invokeCreativeService } from './toolExecutor';
 import { appendContinuityEntry, compactContinuity, createContinuityHandoff, forkContinuity, formatContinuityEntry, importContinuityFromText, latestContinuityEntry, listContinuityEntries } from './continuity';
 import { createRepoPack, providerOrchestratorSystem } from './orchestrator';
@@ -553,6 +555,35 @@ function redactTerminalText(text: string): string {
         .replace(/(--(?:token|password|api-key|secret)(?:=|\s+))[^\s'"`]+/ig, '$1[redacted]');
 }
 
+// Cross-shell guard: on Windows, commands run through cmd.exe (via cp.exec / cp.spawn with
+// shell:true), which lacks the POSIX utilities many commands assume. Detect the common ones so
+// we can return an actionable message instead of a raw "'head' is not recognized" error that
+// reads like a real failure. Matches only a command word (the first token of a pipe/&&/;/||
+// segment), so `npm ls` and `git ls-files` are not misflagged.
+const WINDOWS_SHELL_UTILITIES: Array<{ name: string; powershell: string }> = [
+    { name: 'head', powershell: 'Select-Object -First <N>' },
+    { name: 'tail', powershell: 'Select-Object -Last <N>' },
+    { name: 'grep', powershell: 'Select-String' },
+    { name: 'sed', powershell: 'Select-String / -replace' },
+    { name: 'awk', powershell: 'ForEach-Object / -split' },
+    { name: 'cat', powershell: 'Get-Content' },
+    { name: 'wc', powershell: 'Measure-Object -Line/-Word/-Character' },
+    { name: 'which', powershell: 'Get-Command' },
+    { name: 'xargs', powershell: 'ForEach-Object' },
+    { name: 'ls', powershell: 'Get-ChildItem' },
+];
+
+function detectWindowsShellUtility(command: string): { name: string; powershell: string } | undefined {
+    if (process.platform !== 'win32') return undefined;
+    const segments = command.split(/\|\||&&|[|;\n]/).map(segment => segment.trim()).filter(Boolean);
+    for (const segment of segments) {
+        const firstWord = (segment.split(/\s+/)[0] ?? '').replace(/^["']|["']$/g, '').toLowerCase();
+        const match = WINDOWS_SHELL_UTILITIES.find(util => util.name === firstWord);
+        if (match) return match;
+    }
+    return undefined;
+}
+
 function commandAlreadySpecifiesPort(command: string): boolean {
     return /(^|\s)(-p|--port)\s+\d+/i.test(command) || /(^|\s)--port=\d+/i.test(command);
 }
@@ -721,6 +752,14 @@ class RunTerminalTool implements vscode.LanguageModelTool<RunTerminalInput> {
         const portAdjusted = commandWithPreferredPort(rawCommand, resolvedPort.port);
         const notes = [resolvedPort.note, portAdjusted.note].filter(Boolean).join('\n');
         const command = portAdjusted.command;
+        const shellUtility = detectWindowsShellUtility(command);
+        if (shellUtility) {
+            return textResult([
+                `error: \`${shellUtility.name}\` is a POSIX/Unix command and is not available in the Windows shell (cmd.exe) this tool runs commands through.`,
+                `Suggestion: use the PowerShell equivalent \`${shellUtility.powershell}\`, or run the pipeline through Git Bash if it is installed (e.g. \`bash -lc "<command>"\`).`,
+                `Note: this is a shell-portability mismatch, not a failure of the underlying command.`
+            ].join('\n'));
+        }
         const sessionId = (options.input as any).session_id as string | undefined;
         if (options.input.background || sessionId) {
             const sid = sessionId || `harmony-${Date.now()}`;
@@ -2442,17 +2481,17 @@ class RecallAcrossProjectsTool implements vscode.LanguageModelTool<RecallAcrossP
 
         const ensureHub = async (): Promise<string | undefined> => {
             try {
-                const status = await fetch(`${baseUrl}/status`, { signal: AbortSignal.timeout(1500) });
+                const status = await hubFetch(`${baseUrl}/status`, { signal: AbortSignal.timeout(1500) });
                 if (status.ok) return undefined;
             } catch { /* start below if allowed */ }
 
-            if (!(cfg.get<boolean>('hub.autoStart') ?? true)) {
+            if (!hubMayStart(cfg)) {
                 return `HarmonyHub is paused/offline at ${baseUrl}. Use the Hub controls or run Harmony: Start Hub, then retry.`;
             }
 
             try {
                 await vscode.commands.executeCommand('harmony.startHub');
-                const status = await fetch(`${baseUrl}/status`, { signal: AbortSignal.timeout(3000) });
+                const status = await hubFetch(`${baseUrl}/status`, { signal: AbortSignal.timeout(3000) });
                 if (status.ok) return undefined;
             } catch (e: any) {
                 return `HarmonyHub could not start at ${baseUrl}. ${e?.message ?? e}`;
@@ -2466,7 +2505,7 @@ class RecallAcrossProjectsTool implements vscode.LanguageModelTool<RecallAcrossP
         // Optional one-shot index before search
         if (options.input.index_path) {
             try {
-                const idxRes = await fetch(`${baseUrl}/index`, {
+                const idxRes = await hubFetch(`${baseUrl}/index`, {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify({ path: options.input.index_path, scope }),
@@ -2480,7 +2519,7 @@ class RecallAcrossProjectsTool implements vscode.LanguageModelTool<RecallAcrossP
         }
 
         try {
-            const res = await fetch(`${baseUrl}/search`, {
+            const res = await hubFetch(`${baseUrl}/search`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ query, k, scope }),

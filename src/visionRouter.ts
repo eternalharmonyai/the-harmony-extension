@@ -404,6 +404,134 @@ export async function describeImagesViaZhipu(
     }
 }
 
+// ── DeepSeek V4 Flash Vision (experimental) ──────────────────────
+
+const DEEPSEEK_VISION_MODEL_DEFAULT = 'deepseek-v4-flash-vision-exp';
+const DEEPSEEK_VISION_ENDPOINT = 'https://api.deepseek.com/chat/completions';
+
+function deepseekVisionTierForModel(model: string): 'mid' | 'heavy' {
+    const lower = model.toLowerCase();
+    if (lower.includes('pro')) return 'heavy';
+    if (lower.includes('flash') || lower.includes('vision')) return 'mid';
+    return 'mid';
+}
+
+function recordDeepseekVisionUsage(model: string, usage?: any): void {
+    recordUsage({
+        timestamp: new Date().toISOString(),
+        provider: 'deepseek',
+        tier: deepseekVisionTierForModel(model),
+        model,
+        promptTokens: usage?.prompt_tokens ?? 0,
+        completionTokens: usage?.completion_tokens ?? 0
+    });
+}
+
+export async function describeImagesViaDeepSeek(
+    images: ComposeImage[],
+    userNote: string,
+    secrets: vscode.SecretStorage,
+    token: vscode.CancellationToken,
+    modelOverride?: string
+): Promise<VisionRouteResult> {
+    if (images.length === 0) {
+        return { description: '', routedTo: 'none', partial: false };
+    }
+
+    const cfg = vscode.workspace.getConfiguration('harmony');
+    const model = modelOverride ?? cfg.get<string>('vision.deepseekModel') ?? DEEPSEEK_VISION_MODEL_DEFAULT;
+
+    const apiKey = await resolveProviderKey(secrets, 'deepseek', 3); // Vision slot
+    if (!apiKey) {
+        return {
+            description: `[Vision: no DeepSeek API key set. Set harmony.deepseekApiKey in SecretStorage or DEEPSEEK_VISION_API_KEY in .env.]`,
+            routedTo: 'none',
+            partial: true
+        };
+    }
+
+    const allowed = await confirmPremiumModel('deepseek', deepseekVisionTierForModel(model), model, 'vision/image analysis');
+    if (!allowed) {
+        return {
+            description: `[Vision routing cancelled before calling ${model}.]`,
+            routedTo: `deepseek/${model}`,
+            partial: true
+        };
+    }
+
+    const prompt =
+        (userNote && userNote.trim().length > 0
+            ? `User context for these images:\n${userNote.trim()}\n\n`
+            : '') +
+        `Describe each image in detail. For UI/code screenshots, transcribe visible text faithfully ` +
+        `(error messages, code, paths, line numbers, button labels). For diagrams, capture structure ` +
+        `and labels. Number each image (Image 1, Image 2, ...). Be thorough but concise.`;
+
+    // Build OpenAI-compatible multimodal content array (image_url data URLs).
+    const content: any[] = [{ type: 'text', text: prompt }];
+    for (const img of images) {
+        content.push({
+            type: 'image_url',
+            image_url: {
+                url: `data:${img.mimeType || 'image/png'};base64,${img.base64}`
+            }
+        });
+    }
+
+    const body = {
+        model,
+        messages: [{ role: 'user', content }],
+        max_tokens: 4096,
+        temperature: 0.2
+    };
+
+    const controller = new AbortController();
+    const sub = token.onCancellationRequested(() => controller.abort());
+    try {
+        const r = await fetch(DEEPSEEK_VISION_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal as any
+        });
+        const text = await r.text();
+        if (!r.ok) {
+            recordDeepseekVisionUsage(model);
+            return {
+                description: `[DeepSeek vision: HTTP ${r.status}. ${text.slice(0, 400)}]`,
+                routedTo: `deepseek/${model}`,
+                partial: true
+            };
+        }
+        const json = JSON.parse(text);
+        recordDeepseekVisionUsage(model, json?.usage);
+        const description = json?.choices?.[0]?.message?.content?.trim() ?? '';
+        if (!description) {
+            return {
+                description: `[DeepSeek vision returned no text for ${images.length} image(s).]`,
+                routedTo: `deepseek/${model}`,
+                partial: true
+            };
+        }
+        return {
+            description,
+            routedTo: `deepseek/${model}`,
+            partial: false
+        };
+    } catch (e: any) {
+        return {
+            description: `[DeepSeek vision error: ${e?.message ?? String(e)}]`,
+            routedTo: `deepseek/${model}`,
+            partial: true
+        };
+    } finally {
+        sub.dispose();
+    }
+}
+
 // ── Smart router with configurable fallback order ───────────────────
 
 type VisionProviderFn = (
@@ -424,9 +552,10 @@ const VISION_PROVIDERS: Record<string, VisionProviderEntry> = {
     gemini: { id: 'gemini', fn: describeImagesViaGemini, displayName: 'Gemini' },
     zhipu: { id: 'zhipu', fn: describeImagesViaZhipu, displayName: 'Zhipu (GLM)' },
     alibaba: { id: 'alibaba', fn: describeImagesViaQwen, displayName: 'Alibaba (Qwen-VL)' },
+    deepseek: { id: 'deepseek', fn: describeImagesViaDeepSeek, displayName: 'DeepSeek (V4 Flash Vision)' },
 };
 
-const DEFAULT_FALLBACK_ORDER: string[] = ['gemini', 'zhipu', 'alibaba'];
+const DEFAULT_FALLBACK_ORDER: string[] = ['gemini', 'zhipu', 'alibaba', 'deepseek'];
 
 /**
  * Route image description through the best available provider.
@@ -482,6 +611,11 @@ export async function describeImages(
     }
     if (provider === 'zhipu') {
         const result = await describeImagesViaZhipu(images, userNote, secrets, token);
+        if (localNote) { result.description = localNote + result.description; result.routedTo = 'local CPU + ' + result.routedTo; }
+        return result;
+    }
+    if (provider === 'deepseek') {
+        const result = await describeImagesViaDeepSeek(images, userNote, secrets, token);
         if (localNote) { result.description = localNote + result.description; result.routedTo = 'local CPU + ' + result.routedTo; }
         return result;
     }

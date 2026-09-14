@@ -79,7 +79,7 @@ function main() {
   run('VS Code provider key import fixture', npmCommand, ['run', 'smoke:vscode-provider-key-import']);
   run('phase3 disposable smoke', nodeCommand, ['bin/harmony-cli.js', 'smoke', 'phase3']);
   run('disposable VS Code swarm fixture', npmCommand, ['run', 'smoke:vscode-swarm-fixture']);
-  run('public privacy guard', nodeCommand, ['scripts/run-git-privacy-guard.js', '--paths', 'package.json', 'package-lock.json', 'src', 'docs', 'scripts', 'bin', 'native-ui', '--json']);
+  run('staged source check', nodeCommand, ['scripts/check-staged.js', '--paths', 'package.json', 'package-lock.json', 'src', 'docs', 'scripts', 'bin', 'native-ui', '--json']);
   run('package VSIX', npmCommand, ['run', 'package']);
   run('VSIX privacy scan', nodeCommand, ['bin/harmony-cli.js', 'privacy-scan', '--vsix', vsix]);
   run('install dry run only', npmCommand, ['run', 'install:vsix:both:dry-run']);

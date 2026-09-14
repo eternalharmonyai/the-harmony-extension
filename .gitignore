@@ -1,6 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────
 # Public .gitignore — generic build/dependency/secret hygiene only.
-# Identity-revealing patterns live in .git/info/exclude (local, private).
 # ─────────────────────────────────────────────────────────────────────
 
 # Build / dependencies
@@ -67,6 +66,10 @@ logs/
 __pycache__/
 *.pyc
 
+# Python
+__pycache__/
+*.pyc
+
 # Local package/build artifacts
 bin/*.exe
 _backups/
@@ -84,6 +87,9 @@ generated/
 *.webm
 *.mp4
 *.mov
+
+# Editor workspace files can embed absolute local paths.
+*.code-workspace
 
 # Test documents
 *.pdf

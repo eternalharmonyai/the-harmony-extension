@@ -1,0 +1,490 @@
+{
+  "spec": "harmony-citation/1",
+  "genesis_chain": {
+    "records": [
+      {
+        "harmony_record": "genesis/1",
+        "seq": 1,
+        "prev": null,
+        "body": {
+          "signer": "vector",
+          "keyid": "CUjRaO2EKZsYhcYTZoDAB0ODxb30fQSTHTbk8y4mAr8",
+          "recovery_keyid": "8XuH41KHXziWbGsXIkgXHiysW9QPZctWrUuQpB5tMzw",
+          "created_at": "2026-09-05T00:00:00Z"
+        },
+        "id": "7dad3dbb258ddea7f94e7aac6b86289fafc43c7a318ebd061871228c45ec8537",
+        "signature": {
+          "alg": "ed25519",
+          "keyid": "CUjRaO2EKZsYhcYTZoDAB0ODxb30fQSTHTbk8y4mAr8",
+          "signer": "vector",
+          "sig": "rILhIS2plO7EVMjXWgQ11UdYOhx2bt4ZHfbxzvtQyUrkMozOt08RiuDi+COgvr5TcrQppImo2VWfGNk7wzpjDg=="
+        }
+      },
+      {
+        "harmony_record": "capture/1",
+        "seq": 2,
+        "prev": "7dad3dbb258ddea7f94e7aac6b86289fafc43c7a318ebd061871228c45ec8537",
+        "body": {
+          "url": "https://example.org/record/5788",
+          "retrieved": "2026-09-05",
+          "retrieved_at": "2026-09-05T09:37:26Z",
+          "http_status": 200,
+          "content_sha256": "fcae9b239936dafb70fac2f41b0cf4ae892bbbbb66b4fe35f5e58cd0e55283c9",
+          "normalization": "harmony-text/1",
+          "evidence_tier": "content",
+          "retrieval_class": "harvest",
+          "engine": "primary:example.org",
+          "jurisdiction": "institutional",
+          "observer": {
+            "signer": "vector",
+            "jurisdiction": "US"
+          },
+          "title": "Example document title",
+          "verbatim": "Example document operative text for the frozen vector corpus."
+        },
+        "id": "cf5d09b2fdf2993a7fa0508be7ed804f8b9f8c387fe9e71da7a63ca5f561a9d6",
+        "signature": {
+          "alg": "ed25519",
+          "keyid": "CUjRaO2EKZsYhcYTZoDAB0ODxb30fQSTHTbk8y4mAr8",
+          "signer": "vector",
+          "sig": "MqwivkrR+icGk8tdpYzxtg5P2aIEyYrfAnZZmUsVrlSoKY4uUS4CsJEHGIhEeKyqnBG2CQ0zhY5ICVASj6XSDg=="
+        }
+      }
+    ],
+    "recovery_public_key_hex": "11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff"
+  },
+  "note": "FROZEN. Regenerate only with --freeze, and only when a format change is intended.",
+  "test_key": {
+    "warning": "PUBLISHED TEST KEY — NOT SECRET, NEVER USE FOR ANYTHING REAL",
+    "public_key_hex": "6529fcf49e1e740bca8064db55fc4f3d8774c3a0913905e880b10583aeba45dc",
+    "keyid": "CUjRaO2EKZsYhcYTZoDAB0ODxb30fQSTHTbk8y4mAr8"
+  },
+  "canonicalization": [
+    {
+      "name": "key ordering",
+      "input": {
+        "b": 1,
+        "a": "x"
+      },
+      "canonical": "{\"a\":\"x\",\"b\":1}"
+    },
+    {
+      "name": "order independence",
+      "input": {
+        "a": "x",
+        "b": 1
+      },
+      "canonical": "{\"a\":\"x\",\"b\":1}"
+    },
+    {
+      "name": "nulls dropped",
+      "input": {
+        "a": 1,
+        "b": null,
+        "c": "keep"
+      },
+      "canonical": "{\"a\":1,\"c\":\"keep\"}"
+    },
+    {
+      "name": "nested sorting",
+      "input": {
+        "z": {
+          "y": 2,
+          "x": 1
+        },
+        "a": [
+          3,
+          2,
+          1
+        ]
+      },
+      "canonical": "{\"a\":[3,2,1],\"z\":{\"x\":1,\"y\":2}}"
+    },
+    {
+      "name": "unicode string",
+      "input": {
+        "t": "Dag Hammarskjöld — Résumé 中文"
+      },
+      "canonical": "{\"t\":\"Dag Hammarskjöld — Résumé 中文\"}"
+    },
+    {
+      "name": "escapes",
+      "input": {
+        "t": "quote \" backslash \\ newline \n tab \t"
+      },
+      "canonical": "{\"t\":\"quote \\\" backslash \\\\ newline \\n tab \\t\"}"
+    },
+    {
+      "name": "empty containers",
+      "input": {
+        "arr": [],
+        "obj": {},
+        "s": ""
+      },
+      "canonical": "{\"arr\":[],\"obj\":{},\"s\":\"\"}"
+    },
+    {
+      "name": "negative and zero",
+      "input": {
+        "neg": -42,
+        "zero": 0,
+        "big": 9007199254740991
+      },
+      "canonical": "{\"big\":9007199254740991,\"neg\":-42,\"zero\":0}"
+    },
+    {
+      "name": "booleans",
+      "input": {
+        "t": true,
+        "f": false
+      },
+      "canonical": "{\"f\":false,\"t\":true}"
+    },
+    {
+      "name": "astral key order (UTF-16 code unit)",
+      "input": {
+        "𝐀": 1,
+        "ﬀ": 2
+      },
+      "canonical": "{\"𝐀\":1,\"ﬀ\":2}"
+    },
+    {
+      "name": "negative zero normalises to 0",
+      "input": {
+        "z": 0
+      },
+      "canonical": "{\"z\":0}"
+    },
+    {
+      "name": "exponent form emits decimal",
+      "input": {
+        "n": 100
+      },
+      "canonical": "{\"n\":100}"
+    }
+  ],
+  "normalization": [
+    {
+      "name": "plain passthrough",
+      "input": "Simple text.",
+      "isHtml": false,
+      "output": "Simple text.",
+      "sha256": "af831807576f179f1d6a9707b318304b26dbbd90d83857689bd8eecb18643f63"
+    },
+    {
+      "name": "collapse spaces and tabs",
+      "input": "a  \t  b",
+      "isHtml": false,
+      "output": "a b",
+      "sha256": "c8687a08aa5d6ed2044328fa6a697ab8e96dc34291e8c2034ae8c38e6fcc6d65"
+    },
+    {
+      "name": "CRLF to LF",
+      "input": "a\r\nb\r\nc",
+      "isHtml": false,
+      "output": "a\nb\nc",
+      "sha256": "ea7fb08b7a2dc4619ffb7c7bb38d95a2047935fa165d71b12efd3852a2e6d0cc"
+    },
+    {
+      "name": "lone CR to LF",
+      "input": "a\rb",
+      "isHtml": false,
+      "output": "a\nb",
+      "sha256": "7e18f737311b2dc3b2f269dd78396b0351f14fb66efa879f768cb23181883c78"
+    },
+    {
+      "name": "trim ends",
+      "input": "   padded   ",
+      "isHtml": false,
+      "output": "padded",
+      "sha256": "c7f9b538b93ce513f654b8d199e50252ae037c5bde542c132b04a42cd8b92ea0"
+    },
+    {
+      "name": "collapse blank runs",
+      "input": "a\n\n\n\n\nb",
+      "isHtml": false,
+      "output": "a\nb",
+      "sha256": "7e18f737311b2dc3b2f269dd78396b0351f14fb66efa879f768cb23181883c78"
+    },
+    {
+      "name": "strip indent around newline",
+      "input": "a   \n   b",
+      "isHtml": false,
+      "output": "a\nb",
+      "sha256": "7e18f737311b2dc3b2f269dd78396b0351f14fb66efa879f768cb23181883c78"
+    },
+    {
+      "name": "html tags stripped",
+      "input": "<p>Hello <b>world</b></p>",
+      "isHtml": true,
+      "output": "Hello world",
+      "sha256": "64ec88ca00b268e5ba1a35678a1b5316d212f4f366b2477232534a8aeca37f3c"
+    },
+    {
+      "name": "script content removed",
+      "input": "<p>keep</p><script>drop()</script><p>keep2</p>",
+      "isHtml": true,
+      "output": "keep keep2",
+      "sha256": "9b59ffb6d76621262210c8ef83771d52a8e8806c5f83e2c6c8c2b5cbee67f506"
+    },
+    {
+      "name": "style content removed",
+      "input": "<style>.x{color:red}</style><p>keep</p>",
+      "isHtml": true,
+      "output": "keep",
+      "sha256": "6ca7ea2feefc88ecb5ed6356ed963f47dc9137f82526fdd25d618ea626d0803f"
+    },
+    {
+      "name": "entities decoded",
+      "input": "<p>a &amp; b &lt; c &quot;d&quot; &#39;e&#39;</p>",
+      "isHtml": true,
+      "output": "a &amp; b &lt; c &quot;d&quot; &#39;e&#39;",
+      "sha256": "368710c279c57071ded978b1835f2663c833020464e9040b0b9c29c57aa3699e"
+    },
+    {
+      "name": "numeric entity",
+      "input": "<p>&#65;&#66;&#67;</p>",
+      "isHtml": true,
+      "output": "&#65;&#66;&#67;",
+      "sha256": "2eee89760993886f955d5ffbbc05243e7ebb9593754f3185d02979ef9afd92c0"
+    },
+    {
+      "name": "html not treated as html",
+      "input": "<p>literal</p>",
+      "isHtml": false,
+      "output": "<p>literal</p>",
+      "sha256": "6cf184c031c0026df6be69fca7b80f767009e1beb0d873ac20a9359173c81230"
+    },
+    {
+      "name": "unicode preserved",
+      "input": "<p>Hammarskjöld 中文 — em dash</p>",
+      "isHtml": true,
+      "output": "Hammarskjöld 中文 — em dash",
+      "sha256": "4056c52cd62f1e973d5f5790304fd86303b26822118e54f33e834524c1dbb7ff"
+    },
+    {
+      "name": "nbsp handling",
+      "input": "a b",
+      "isHtml": false,
+      "output": "a b",
+      "sha256": "9507017c6d887511a5a6ac28ea7e3a438882576e1bd76fe3df27a336f49c263b"
+    },
+    {
+      "name": "empty input",
+      "input": "",
+      "isHtml": false,
+      "output": "",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "whitespace only",
+      "input": "   \n\t  ",
+      "isHtml": false,
+      "output": "",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "NFD combining acute folds to NFC",
+      "input": "café",
+      "isHtml": false,
+      "output": "café",
+      "sha256": "850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e"
+    },
+    {
+      "name": "NFC already normalised",
+      "input": "café",
+      "isHtml": false,
+      "output": "café",
+      "sha256": "850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e"
+    },
+    {
+      "name": "NFD inside html",
+      "input": "<p>café résumé</p>",
+      "isHtml": true,
+      "output": "café résumé",
+      "sha256": "787ba50328c24630d3e9094a1accc03d9fada07f531f274d20c78d0c11e2846c"
+    },
+    {
+      "name": "NFD hangul jamo",
+      "input": "각",
+      "isHtml": false,
+      "output": "각",
+      "sha256": "45ec909f30174e6585c67833638ece2b73752a2e17b142f2071d058792f16c89"
+    },
+    {
+      "name": "astral character preserved",
+      "input": "math 𝐀 bold A",
+      "isHtml": false,
+      "output": "math 𝐀 bold A",
+      "sha256": "01b6cd29ce09a4ce7c4279e65453b2de5b58a5e13393f229da4b5fd55cb6ae56"
+    }
+  ],
+  "chain": {
+    "records": [
+      {
+        "harmony_record": "capture/1",
+        "seq": 1,
+        "prev": null,
+        "body": {
+          "url": "https://example.org/record/5788",
+          "retrieved": "2026-09-05",
+          "retrieved_at": "2026-09-05T09:37:26Z",
+          "http_status": 200,
+          "content_sha256": "fcae9b239936dafb70fac2f41b0cf4ae892bbbbb66b4fe35f5e58cd0e55283c9",
+          "normalization": "harmony-text/1",
+          "evidence_tier": "content",
+          "retrieval_class": "harvest",
+          "engine": "primary:example.org",
+          "jurisdiction": "institutional",
+          "observer": {
+            "signer": "vector",
+            "jurisdiction": "US"
+          },
+          "title": "Example document title",
+          "verbatim": "Example document operative text for the frozen vector corpus."
+        },
+        "id": "44a5894ea16e1e05350e6b8dfdb0350b8a6d123454eccb376059c679dc806972",
+        "signature": {
+          "alg": "ed25519",
+          "keyid": "CUjRaO2EKZsYhcYTZoDAB0ODxb30fQSTHTbk8y4mAr8",
+          "signer": "vector",
+          "sig": "wtSyYLvpw1ANKjqDAnjfFHb2uc2xFbU18vcJdz0wruElfDuAaXcO8i93CUU+vnBz5GOQTiW5ADwLWy6Qb/2xDA=="
+        }
+      },
+      {
+        "harmony_record": "capture/1",
+        "seq": 2,
+        "prev": "44a5894ea16e1e05350e6b8dfdb0350b8a6d123454eccb376059c679dc806972",
+        "body": {
+          "url": "https://example.org/record/2233",
+          "retrieved": "2026-09-05",
+          "retrieved_at": "2026-09-05T09:40:00Z",
+          "http_status": 200,
+          "content_sha256": "9b2cd781360cb8d4c3ccc5e56a1ade9afa78a52d802e7faa450030aaa7ac0d32",
+          "normalization": "harmony-text/1",
+          "evidence_tier": "content",
+          "retrieval_class": "harvest",
+          "observer": {
+            "signer": "vector",
+            "jurisdiction": "US"
+          }
+        },
+        "id": "c1e8a3b7319bfd654f5a1e292b968ffcb6b81acc60c431a33360fb2525900cfa",
+        "signature": {
+          "alg": "ed25519",
+          "keyid": "CUjRaO2EKZsYhcYTZoDAB0ODxb30fQSTHTbk8y4mAr8",
+          "signer": "vector",
+          "sig": "Ey1mW+71qKlMlR/7PBj9Rb1LX/DzHftV/9RjZp4RV5ZMU7ZEjJCJpCLBQDGnDCuhbX/SgLR3laQZ+xaGAvklAg=="
+        }
+      },
+      {
+        "harmony_record": "capture/1",
+        "seq": 3,
+        "prev": "c1e8a3b7319bfd654f5a1e292b968ffcb6b81acc60c431a33360fb2525900cfa",
+        "body": {
+          "url": "https://example.org/record/9001",
+          "retrieved": "2026-09-05",
+          "retrieved_at": "2026-09-05T09:45:00Z",
+          "http_status": 200,
+          "raw_sha256": "09871d512e15a8e12b6e1ca5a93df01a4c7997e16465a6db4094ec7a8d1f2433",
+          "raw_base64": "Y2FmZcyBIHJlzIFzdW1lzIEgIA0KICBhcmNoaXZhbCBieXRlcw==",
+          "content_sha256": "834ef9525707650926f5fc7fabe3e22bb1928058232baa5c51252496828d3e2e",
+          "normalization": "harmony-text/2",
+          "evidence_tier": "content",
+          "retrieval_class": "archive",
+          "observer": {
+            "signer": "vector",
+            "jurisdiction": "US"
+          },
+          "title": "NFD archival payload"
+        },
+        "id": "64ee13506c9079e0329bab45baa2acf12532f87b221c27e9d937f4f4413276f5",
+        "signature": {
+          "alg": "ed25519",
+          "keyid": "CUjRaO2EKZsYhcYTZoDAB0ODxb30fQSTHTbk8y4mAr8",
+          "signer": "vector",
+          "sig": "Bgzh2E9p+K7EdLNcj0bJcfOmEgDFXVQyP8L+bmVKXxNRNSIOcyP4hYLmkPm5n0Bc+9yNnrWl3ADl0duZ/CVwAw=="
+        }
+      }
+    ]
+  },
+  "liveness": [
+    {
+      "name": "live-unchanged",
+      "status": 200,
+      "expect": "live-unchanged",
+      "verdict": "live-unchanged",
+      "suggestion": null
+    },
+    {
+      "name": "altered",
+      "status": 200,
+      "expect": "altered",
+      "verdict": "altered",
+      "suggestion": "content-changed"
+    },
+    {
+      "name": "soft-404 english",
+      "status": 200,
+      "expect": "soft-404",
+      "verdict": "soft-404",
+      "suggestion": "check-archive"
+    },
+    {
+      "name": "soft-404 repository phrasing",
+      "status": 200,
+      "expect": "soft-404",
+      "verdict": "soft-404",
+      "suggestion": "check-archive"
+    },
+    {
+      "name": "moved",
+      "status": 301,
+      "expect": "moved",
+      "verdict": "moved",
+      "suggestion": "update-citation-url"
+    },
+    {
+      "name": "removed 404",
+      "status": 404,
+      "expect": "removed",
+      "verdict": "removed",
+      "suggestion": "check-archive"
+    },
+    {
+      "name": "removed 410",
+      "status": 410,
+      "expect": "removed",
+      "verdict": "removed",
+      "suggestion": "check-archive"
+    },
+    {
+      "name": "blocked 403",
+      "status": 403,
+      "expect": "blocked",
+      "verdict": "blocked",
+      "suggestion": "unverifiable-from-this-network"
+    },
+    {
+      "name": "blocked 429",
+      "status": 429,
+      "expect": "blocked",
+      "verdict": "blocked",
+      "suggestion": "unverifiable-from-this-network"
+    },
+    {
+      "name": "blocked challenge",
+      "status": 200,
+      "expect": "blocked",
+      "verdict": "blocked",
+      "suggestion": "unverifiable-from-this-network"
+    },
+    {
+      "name": "transient 503",
+      "status": 503,
+      "expect": "transient-error",
+      "verdict": "transient-error",
+      "suggestion": "retry-later"
+    }
+  ]
+}

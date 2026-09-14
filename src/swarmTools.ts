@@ -2097,7 +2097,7 @@ interface SwarmDeepSeekLiveFixtureReport {
     workspaceRoot?: string;
     provider: 'deepseek';
     tier: 'coding';
-    expectedModel: 'deepseek-v4-flash';
+    expectedModel: 'deepseek-flash';
     maxProviderCalls: 1;
     turnId?: string;
     proposalId?: string;
@@ -2413,7 +2413,7 @@ async function runDisposableSwarmDeepSeekLiveFixture(secrets: vscode.SecretStora
         workspaceRoot: hostRoot,
         provider: 'deepseek',
         tier: 'coding',
-        expectedModel: 'deepseek-v4-flash',
+        expectedModel: 'deepseek-flash',
         maxProviderCalls: 1,
         checks: [],
     };
@@ -2431,7 +2431,7 @@ async function runDisposableSwarmDeepSeekLiveFixture(secrets: vscode.SecretStora
             const planResult = await new SwarmPlanTool().invoke({
                 toolInvocationToken: undefined,
                 input: {
-                    objective: 'Live fixture: ask DeepSeek V4 Flash one tiny bounded swarm provider-call question.',
+                    objective: 'Live fixture: ask DeepSeek Flash one tiny bounded swarm provider-call question.',
                     mode: 'execution_guarded',
                     roles: ['coordinator', 'cost_sentinel'],
                     max_cost_usd: 0.01,
@@ -2450,11 +2450,11 @@ async function runDisposableSwarmDeepSeekLiveFixture(secrets: vscode.SecretStora
                 toolInvocationToken: undefined,
                 input: {
                     turn_id: report.turnId,
-                    title: 'Live DeepSeek V4 Flash provider check',
+                    title: 'Live DeepSeek Flash provider check',
                     proposal_type: 'provider_call',
                     target_paths: [],
-                    summary: 'Ask DeepSeek V4 Flash to answer a fixed low-token smoke prompt.',
-                    validation_plan: ['Provider-call receipt records providerCallsRun=1 and deepseek-v4-flash model.'],
+                    summary: 'Ask DeepSeek Flash to answer a fixed low-token smoke prompt.',
+                    validation_plan: ['Provider-call receipt records providerCallsRun=1 and deepseek-flash model.'],
                     estimated_cost_usd: 0.001,
                     write_proposal: true,
                     format: 'json',
@@ -2474,7 +2474,7 @@ async function runDisposableSwarmDeepSeekLiveFixture(secrets: vscode.SecretStora
                         dry_run: false,
                         provider: 'deepseek',
                         tier: 'coding',
-                        question: 'Reply with exactly: Harmony DeepSeek V4 Flash swarm live check passed.',
+                        question: 'Reply with exactly: Harmony DeepSeek Flash swarm live check passed.',
                         max_tokens: 128,
                         write_receipt: true,
                         format: 'json',
@@ -2483,15 +2483,15 @@ async function runDisposableSwarmDeepSeekLiveFixture(secrets: vscode.SecretStora
                 const execution = parseFixtureJsonResult(executeResult, 'harmony_swarm_execute')?.execution;
                 if (execution?.status !== 'executed') throw new Error(`live fixture execution did not execute: ${execution?.status ?? 'unknown'}`);
                 if (execution.providerCallsRun !== 1) throw new Error(`live fixture provider call count was ${execution.providerCallsRun ?? 'unknown'}, expected 1`);
-                if (!/^\[deepseek\/deepseek-v4-flash\]/.test(execution.output || '')) throw new Error('live fixture did not use deepseek-v4-flash');
-                if (execution.provider !== 'deepseek' || execution.tier !== 'coding' || execution.model !== 'deepseek-v4-flash') throw new Error('live fixture execution receipt did not record the exact provider/tier/model route');
+                if (!/^\[deepseek\/deepseek-flash\]/.test(execution.output || '')) throw new Error('live fixture did not use deepseek-flash');
+                if (execution.provider !== 'deepseek' || execution.tier !== 'coding' || execution.model !== 'deepseek-flash') throw new Error('live fixture execution receipt did not record the exact provider/tier/model route');
                 if (typeof execution.estimatedCostUsd !== 'number' || execution.estimatedCostUsd < 0 || execution.estimatedCostUsd > execution.costBudgetUsd) throw new Error('live fixture execution receipt did not record an in-budget provider cost estimate');
                 if (execution.providerCallLimit !== 1 || execution.budgetWithinLimit !== true || execution.costEstimateSource !== 'actual_estimate') throw new Error('live fixture execution receipt did not record explicit provider-call budget verdict fields');
                 if (!Array.isArray(execution.budgetProof) || !execution.budgetProof.some((line: string) => line.includes('actual estimated cost'))) throw new Error('live fixture execution receipt did not include actual cost budget proof');
                 report.executionId = execution.executionId;
                 report.providerCallsRun = execution.providerCallsRun;
                 report.providerCallLimit = execution.providerCallLimit;
-                report.model = 'deepseek-v4-flash';
+                report.model = 'deepseek-flash';
                 report.proposalEstimatedCostUsd = execution.proposalEstimatedCostUsd;
                 report.estimatedCostUsd = execution.estimatedCostUsd;
                 report.costBudgetUsd = execution.costBudgetUsd;
@@ -2500,7 +2500,7 @@ async function runDisposableSwarmDeepSeekLiveFixture(secrets: vscode.SecretStora
                 report.costEstimateSource = execution.costEstimateSource;
                 report.budgetProof = execution.budgetProof;
                 report.outputSha256 = crypto.createHash('sha256').update(execution.output || '', 'utf8').digest('hex');
-                report.checks.push('live swarm provider-call execution used deepseek-v4-flash exactly once with cost/budget proof');
+                report.checks.push('live swarm provider-call execution used deepseek-flash exactly once with cost/budget proof');
             } finally {
                 tokenSource.dispose();
             }

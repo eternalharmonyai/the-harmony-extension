@@ -1,5 +1,5 @@
 /**
- * Uniform provenance schema — one honest label per engine.
+ * Uniform provenance schema — one neutral label per engine.
  *
  * Every engine the search layer can return is described by the SAME fields, so
  * the machine (and the reader) can compare engines on equal terms. This is the

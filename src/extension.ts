@@ -14,6 +14,11 @@ import { registerRepairRestore } from './repairRestore';
 import { registerEvidenceTools } from './evidenceTools';
 import { registerResearchUpgradeTools } from './researchTools';
 import { LanguageManager } from './languageManager';
+// Localization helper — resolves a UI string in the active Harmony language.
+const tr = (key: string) => LanguageManager.getInstance().getString(key);
+import { hubMayStart, hubStartPolicy, hubStartsOnWorkspaceOpen } from './hubPolicy';
+import { hubAuthHeaders, hubAuthToken, hubTokenFilePath, clearHubTokenCache } from './hubClient';
+import { runHubDataRelocation } from './hubMigrations';
 import { initializeErrorLearning } from './careBloom';
 import { registerProviderRegistryTools } from './providerRegistryTools';
 import { buildQuickPickEntries, getDeepSeekModel, setDeepSeekModel } from './providerModels';
@@ -25,6 +30,8 @@ import { buildWebsiteContext, type WebsiteSourceType } from './websiteContextBui
 import { detectWorkspaceProject, offerDevServer, startDevServer, stopDevServer } from './projectAutoDetect';
 import { registerSymbolTools } from './symbolTools';
 import { registerWebSearchTools } from './webSearch';
+import { registerProvenanceTools } from './provenanceTools';
+import { registerConsensusTools } from './consensusTools';
 import { registerChatRecallTool } from './chatRecall';
 import { registerChatHistoryProvider, HARMONY_HISTORY_SCHEME } from './chatHistory';
 import { registerHarmonyParticipant } from './chatParticipant';
@@ -58,11 +65,12 @@ const PROVIDER_ENV_IMPORTS: ProviderEnvImport[] = [
         provider: 'deepseek',
         label: 'DeepSeek',
         secretKey: 'harmony.deepseekApiKey',
-        envNames: ['HARMONY_DEEPSEEK_API_KEY', 'DEEPSEEK_AGENT_API_KEY', 'DEEPSEEK_EXTERNAL_API_KEY', 'EXTERNAL_UI_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY'],
+        envNames: ['HARMONY_DEEPSEEK_API_KEY', 'DEEPSEEK_AGENT_API_KEY', 'DEEPSEEK_EXTERNAL_API_KEY', 'EXTERNAL_UI_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY', 'DEEPSEEK_VISION_API_KEY'],
         slotEnvNames: {
             0: ['DEEPSEEK_API_KEY'],
             1: ['DEEPSEEK_AGENT_API_KEY'],
-            2: ['DEEPSEEK_EXTERNAL_API_KEY']
+            2: ['DEEPSEEK_EXTERNAL_API_KEY'],
+            3: ['DEEPSEEK_VISION_API_KEY']
         }
     },
     {
@@ -565,7 +573,7 @@ async function findHarmonySourceWorkspace(): Promise<string | undefined> {
 async function prepareSelfUpdateCheckpoint(): Promise<boolean> {
     const root = await findHarmonySourceWorkspace();
     if (!root) {
-        vscode.window.showErrorMessage('Open the HarmonyExtension source workspace before preparing a self-update checkpoint. This command does not run from the installed extension copy.');
+        vscode.window.showErrorMessage(tr('notify.needSourceWorkspaceSelfUpdate'));
         return false;
     }
     const choice = await vscode.window.showWarningMessage(
@@ -584,7 +592,7 @@ async function prepareSelfUpdateCheckpoint(): Promise<boolean> {
 async function createSeatHandoffBundle(): Promise<boolean> {
     const root = await findHarmonySourceWorkspace();
     if (!root) {
-        vscode.window.showErrorMessage('Open the HarmonyExtension source workspace before creating a seat handoff bundle. This command does not run from the installed extension copy.');
+        vscode.window.showErrorMessage(tr('notify.needSourceWorkspaceHandoff'));
         return false;
     }
     const choice = await vscode.window.showWarningMessage(
@@ -603,7 +611,7 @@ async function createSeatHandoffBundle(): Promise<boolean> {
 async function createResumeBrief(): Promise<boolean> {
     const root = await findHarmonySourceWorkspace();
     if (!root) {
-        vscode.window.showErrorMessage('Open the HarmonyExtension source workspace before creating a resume brief. This command does not run from the installed extension copy.');
+        vscode.window.showErrorMessage(tr('notify.needSourceWorkspaceResume'));
         return false;
     }
     const choice = await vscode.window.showWarningMessage(
@@ -674,14 +682,14 @@ async function enableLowMemorySafetyMode(context: vscode.ExtensionContext): Prom
     const historyChars = cfg.get<number>('deepseekMaxHistoryChars') ?? 60000;
     if (historyMessages > 20) await cfg.update('deepseekMaxHistoryMessages', 20, vscode.ConfigurationTarget.Global);
     if (historyChars > 30000) await cfg.update('deepseekMaxHistoryChars', 30000, vscode.ConfigurationTarget.Global);
-    vscode.window.showInformationMessage('Harmony low-memory safety mode enabled. Sidebar isolation is active; restart/reload is not required.');
+    vscode.window.showInformationMessage(tr('notify.lowMemoryEnabled'));
     return true;
 }
 
 async function restoreLowMemorySafetySettings(context: vscode.ExtensionContext): Promise<boolean> {
     const snapshot = context.globalState.get<LowMemorySafetySnapshot>(LOW_MEMORY_SAFETY_SNAPSHOT_KEY);
     if (!snapshot?.settings?.length) {
-        vscode.window.showWarningMessage('No Harmony low-memory safety settings snapshot was found in this extension host.');
+        vscode.window.showWarningMessage(tr('notify.lowMemoryNoSnapshot'));
         return false;
     }
     const choice = await vscode.window.showWarningMessage(
@@ -696,11 +704,14 @@ async function restoreLowMemorySafetySettings(context: vscode.ExtensionContext):
         await cfg.update(item.key, item.hadGlobalValue ? item.globalValue : undefined, vscode.ConfigurationTarget.Global);
     }
     await context.globalState.update(LOW_MEMORY_SAFETY_SNAPSHOT_KEY, undefined);
-    vscode.window.showInformationMessage('Harmony low-memory safety settings restored from snapshot.');
+    vscode.window.showInformationMessage(tr('notify.lowMemoryRestored'));
     return true;
 }
 
 // ─── Hub helpers ─────────────────────────────────────────────────────────────
+
+/** Dedicated output channel so Hub indexing results/errors are visible (never silent). */
+const hubOutput = vscode.window.createOutputChannel('Harmony Hub');
 
 function hubUrl(): string {
     return vscode.workspace.getConfiguration('harmony').get<string>('hub.url') ?? 'http://127.0.0.1:7878';
@@ -715,7 +726,11 @@ function hubEndpoint(endpoint: string): URL {
     return new URL(endpoint.replace(/^\/+/, ''), base);
 }
 
-async function hubPost(path: string, body: unknown, timeoutMs = 15000): Promise<unknown> {
+// Hub token + Authorization helpers now live in the shared ./hubClient module so
+// every caller (sidebar, chat participant, LM tools, self-tools) sends the token
+// the daemon requires for /status, /ext/v1/health and every other route.
+
+async function hubPost(path: string, body: unknown, timeoutMs = 15000, _retried = false): Promise<unknown> {
     return new Promise((resolve, reject) => {
         const payload = JSON.stringify(body);
         const url = hubEndpoint(path);
@@ -725,14 +740,22 @@ async function hubPost(path: string, body: unknown, timeoutMs = 15000): Promise<
             port: url.port || (url.protocol === 'https:' ? 443 : 80),
             path: url.pathname + url.search,
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), ...hubAuthHeaders() },
             timeout: timeoutMs,
         }, (res) => {
             let data = '';
             res.on('data', (c) => { data += c; });
             res.on('end', () => {
-                if ((res.statusCode ?? 0) < 200 || (res.statusCode ?? 0) >= 300) {
-                    reject(new Error(`Hub HTTP ${res.statusCode}: ${data.slice(0, 300)}`));
+                const code = res.statusCode ?? 0;
+                if (code === 401 && !_retried) {
+                    // Token may have been regenerated (or the daemon restarted with a newer
+                    // value): drop the cache so the file is re-read, then retry exactly once.
+                    clearHubTokenCache();
+                    hubPost(path, body, timeoutMs, true).then(resolve, reject);
+                    return;
+                }
+                if (code < 200 || code >= 300) {
+                    reject(new Error(`Hub HTTP ${code}: ${data.slice(0, 300)}`));
                     return;
                 }
                 try { resolve(JSON.parse(data)); } catch { resolve(data); }
@@ -745,16 +768,22 @@ async function hubPost(path: string, body: unknown, timeoutMs = 15000): Promise<
     });
 }
 
-async function hubGet(endpoint: string): Promise<unknown> {
+async function hubGet(endpoint: string, _retried = false): Promise<unknown> {
     return new Promise((resolve, reject) => {
         const url = hubEndpoint(endpoint);
         const lib = url.protocol === 'https:' ? https : http;
-        const req = lib.request({ hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search, method: 'GET', timeout: 5000 }, (res) => {
+        const req = lib.request({ hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search, method: 'GET', timeout: 5000, headers: hubAuthHeaders() }, (res) => {
             let data = '';
             res.on('data', (c) => { data += c; });
             res.on('end', () => {
-                if ((res.statusCode ?? 0) < 200 || (res.statusCode ?? 0) >= 300) {
-                    reject(new Error(`Hub HTTP ${res.statusCode}: ${data.slice(0, 300)}`));
+                const code = res.statusCode ?? 0;
+                if (code === 401 && !_retried) {
+                    clearHubTokenCache();
+                    hubGet(endpoint, true).then(resolve, reject);
+                    return;
+                }
+                if (code < 200 || code >= 300) {
+                    reject(new Error(`Hub HTTP ${code}: ${data.slice(0, 300)}`));
                     return;
                 }
                 try { resolve(JSON.parse(data)); } catch { resolve(data); }
@@ -781,6 +810,52 @@ async function waitForHubReady(timeoutMs = 45000): Promise<boolean> {
     return false;
 }
 
+type HubState = 'online' | 'busy' | 'unresponsive' | 'offline';
+
+let hubConsecutiveFailures = 0;
+let hubSawAliveThisSession = false;
+
+/** True only for terminal evidence that nothing is listening (connection refused). */
+function isConnectionRefused(err: unknown): boolean {
+    const code = String((err as { code?: unknown })?.code ?? '');
+    const msg = String((err as { message?: unknown })?.message ?? '');
+    return code === 'ECONNREFUSED' || /ECONNREFUSED/i.test(msg);
+}
+
+/** Raw TCP check: does anything own the Hub port right now? Used as non-terminal liveness
+ *  evidence when /status does not answer in time (a busy daemon still holds its listener). */
+async function portHasListener(): Promise<boolean> {
+    try {
+        const port = Number(hubEndpoint('/status').port || 7878);
+        const netMod = require('net');
+        return await new Promise<boolean>((resolve) => {
+            const sock = netMod.connect({ host: '127.0.0.1', port }, () => { sock.end(); resolve(true); });
+            sock.on('error', () => resolve(false));
+            sock.setTimeout(750, () => { sock.destroy(); resolve(false); });
+        });
+    } catch { return false; }
+}
+
+/** Classify the Hub's real state.
+ *  "offline" requires TERMINAL evidence (connection refused / no listener). A timeout or any
+ *  transient error means the daemon is alive-but-busy, never "offline" — a busy index must
+ *  never be misreported as offline. */
+async function getHubState(): Promise<{ state: HubState; status?: any }> {
+    try {
+        const status = await hubGet('/status');
+        hubConsecutiveFailures = 0;
+        hubSawAliveThisSession = true;
+        return { state: 'online', status };
+    } catch (err) {
+        hubConsecutiveFailures++;
+        if (isConnectionRefused(err)) return { state: 'offline' };
+        const alive = hubSawAliveThisSession || await portHasListener();
+        if (alive) return { state: hubConsecutiveFailures >= 3 ? 'unresponsive' : 'busy' };
+        return { state: 'offline' };
+    }
+}
+
+/** Strict liveness: true only when the Hub actually answered /status. */
 async function isDaemonRunning(): Promise<boolean> {
     try {
         await hubGet('/status');
@@ -869,10 +944,137 @@ function isAutoIndexBlocked(fsPath: string): boolean {
     return AUTO_INDEX_BLOCKLIST.some(needle => lower.includes(needle));
 }
 
-async function indexWorkspaceFolders(): Promise<{ indexed: string[]; skipped: string[]; failed: string[] }> {
+// Bound embedding threads so a full index finishes quickly without starving the
+// editor. Previously forced to 1 thread (~2.4 chunks/s), so a large workspace never
+// finished indexing between messages.
+function embedThreads(): number {
+    const cpus = os.cpus()?.length || 2;
+    return Math.max(2, Math.min(8, cpus - 1));
+}
+
+// ---------------------------------------------------------------------------
+// Hub data directory (the DURABLE index store)
+//
+// The store (snapshot.bincode + index-manifest.json + the embedding model cache)
+// must NOT live inside the extension's globalStorage: VS Code DELETES that directory
+// when the extension is uninstalled, so every install/uninstall cycle silently
+// destroyed the durable index and forced a full re-index. We therefore default to a
+// stable, per-editor folder beside the shared auth token (~/.harmony), and move any
+// existing globalStorage store there ONCE so the change costs no re-embedding.
+// ---------------------------------------------------------------------------
+
+/** Filesystem-safe per-editor segment, e.g. "Visual Studio Code" -> "visual-studio-code". */
+function hubDataDirSlug(): string {
+    const app = vscode.env.appName || 'vscode';
+    return app.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'vscode';
+}
+
+/** Default (non-overridden) data dir: ~/.harmony/hub-data/<editor>. */
+function hubDefaultDataDir(): string {
+    return path.join(os.homedir(), '.harmony', 'hub-data', hubDataDirSlug());
+}
+
+/** Pre-0.4.16 default, inside globalStorage — wiped by every uninstall. */
+function legacyHubDataDir(context: vscode.ExtensionContext): string {
+    return path.join(context.globalStorageUri.fsPath, 'hub-data');
+}
+
+// Session cache of the resolved store location, plus the convergence watch for a PENDING
+// migration. The versioned migration platform itself lives in src/hubMigrations.ts.
+let hubDataDirCache: string | undefined;
+let hubDataRelocationInFlight: Promise<string> | undefined;
+let hubDataRelocationWatch: NodeJS.Timeout | undefined;
+
+/**
+ * Resolve the durable Hub data directory, running the versioned relocation migration
+ * (`0001-hub-data-relocation`) while a legacy globalStorage store is still in place.
+ *
+ * Idempotent and cheap in the steady state (a single stat). While a migration is PENDING
+ * the Hub still owns the legacy store, so we keep using it and re-check once a minute,
+ * converging as soon as the Hub stops - never renaming a directory a live daemon holds
+ * open (that fails on Windows and can tear a copy on other platforms).
+ */
+async function ensureHubDataDir(context: vscode.ExtensionContext): Promise<string> {
+    const explicit = (vscode.workspace.getConfiguration('harmony').get<string>('hub.dataDir') ?? '').trim();
+    if (explicit) return explicit;
+    if (hubDataDirCache) return hubDataDirCache;
+    if (hubDataRelocationInFlight) return hubDataRelocationInFlight;
+    hubDataRelocationInFlight = (async (): Promise<string> => {
+        try {
+            const outcome = await runHubDataRelocation({
+                legacyDir: legacyHubDataDir(context),
+                targetDir: hubDefaultDataDir(),
+                isHubRunning: isDaemonRunning,
+                log: (m) => hubOutput.appendLine(m),
+            });
+            hubDataDirCache = outcome.dir;
+            if (outcome.status !== 'pending') {
+                // Settled (applied/failed/already/nothing): stop watching.
+                if (hubDataRelocationWatch) { clearInterval(hubDataRelocationWatch); hubDataRelocationWatch = undefined; }
+            } else if (!hubDataRelocationWatch) {
+                // Converge once the Hub goes idle, instead of probing on every status refresh.
+                hubDataRelocationWatch = setInterval(() => {
+                    hubDataDirCache = undefined;
+                    void ensureHubDataDir(context).catch(() => undefined);
+                }, 60_000);
+            }
+            return outcome.dir;
+        } catch (err) {
+            hubOutput.appendLine(`[hub-data] migration error: ${(err as any)?.message ?? err}`);
+            hubDataDirCache = hubDefaultDataDir();
+            return hubDataDirCache;
+        } finally {
+            hubDataRelocationInFlight = undefined;
+        }
+    })();
+    return hubDataRelocationInFlight;
+}
+
+// Start a workspace index without blocking the caller (a chat message must never wait
+// on a long index). Guards inside indexWorkspaceFolders skip roots already indexed or
+// already in flight, so this cannot become the old per-message wipe-and-rebuild loop.
+function startWorkspaceIndexInBackground(reason: string): void {
+    indexWorkspaceFolders()
+        .then(reportIndexResult)
+        .catch((err: any) => hubOutput.appendLine(`[index] ${reason} error: ${err?.message ?? err}`));
+}
+
+// One-shot: if the Hub is online but holds an empty index, kick a background index so a
+// manually-started Hub does not sit at "0 vectors" until the user clicks Re-index.
+// Honors harmony.hub.indexOnStart (default on) and never starts the Hub itself.
+async function maybeIndexEmptyHubOnStart(reason: string): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration('harmony');
+    if (!(cfg.get<boolean>('hub.indexOnStart') ?? true)) return;
+    try {
+        const status = await hubGet('/status') as any;
+        const empty = status && (status.vectors ?? status.vector_count ?? status.indexed_files ?? 1) === 0;
+        if (empty) startWorkspaceIndexInBackground(reason);
+    } catch { /* daemon offline or older shape — nothing to do */ }
+}
+
+// True while an index run is progressing, so concurrent triggers cannot restart (and
+// wipe) it. Only the explicit Re-index command forces a fresh run.
+let indexInFlight = false;
+
+// Serialize Hub settings writes so rapid sidebar toggles cannot interleave config updates
+// and leave the UI showing a value that does not match what was last written.
+let hubSettingWriteChain: Promise<unknown> = Promise.resolve();
+function queueHubSettingWrite<T>(fn: () => Thenable<T>): Promise<T> {
+    const run = hubSettingWriteChain.then(() => fn(), () => fn());
+    hubSettingWriteChain = run.then(() => undefined, () => undefined);
+    return run;
+}
+
+async function indexWorkspaceFolders(options: { force?: boolean } = {}): Promise<{ indexed: string[]; skipped: string[]; failed: string[] }> {
+    const force = options.force ?? false;
     const folders = vscode.workspace.workspaceFolders;
     const result = { indexed: [] as string[], skipped: [] as string[], failed: [] as string[] };
     if (!folders || folders.length === 0) { return result; }
+    // An index is already running — do not restart (and wipe) it.
+    if (!force && indexInFlight) {
+        for (const folder of folders) result.skipped.push(folder.uri.fsPath);
+        return result;
+    }
     // Re-verify Hub is responsive before sending heavy indexing requests.
     // A previous failed index can leave Hub in a broken state.
     const hubReady = await waitForHubReady(15000);
@@ -882,11 +1084,28 @@ async function indexWorkspaceFolders(): Promise<{ indexed: string[]; skipped: st
         }
         return result;
     }
+    // Roots the Hub already holds, so an already-indexed workspace is skipped rather
+    // than rebuilt on every message. Empty store / older daemon: index normally.
+    const normRoot = (p: string) => p.replace(/\\/g, '/').toLowerCase().replace(/\/$/, '');
+    const alreadyIndexed = new Set<string>();
+    if (!force) {
+        try {
+            const status = await hubGet('/status') as any;
+            if (Array.isArray(status?.indexed_paths)) {
+                for (const r of status.indexed_paths) alreadyIndexed.add(normRoot(String(r)));
+            }
+        } catch { /* older daemon may not report indexed_paths — proceed to index */ }
+    }
+    indexInFlight = true;
     for (const folder of folders) {
         // Normalize path to resolve Windows case-sensitivity and symlinks
         let fsPath = folder.uri.fsPath;
         try { fsPath = realpathSync(fsPath); } catch { /* keep original if realpath fails */ }
         if (isAutoIndexBlocked(fsPath)) {
+            result.skipped.push(fsPath);
+            continue;
+        }
+        if (!force && alreadyIndexed.has(normRoot(fsPath))) {
             result.skipped.push(fsPath);
             continue;
         }
@@ -896,28 +1115,82 @@ async function indexWorkspaceFolders(): Promise<{ indexed: string[]; skipped: st
         if (!existing.some(r => norm(r) === norm(fsPath))) {
             await cfg.update('hub.allowedRoots', [...existing, fsPath], vscode.ConfigurationTarget.Global);
         }
+        // Async by design: the daemon returns a job id immediately and keeps indexing in the
+        // background. The budget below bounds only how long WE wait for the report — never the
+        // index itself. Giving up no longer cancels the job or discards progress, so a large
+        // folder can no longer livelock (previously: timeout -> retry -> begin_reindex wipes -> repeat).
+        const indexBudgetMs = cfg.get<number>('hub.indexTimeoutMs') ?? 900000;
         try {
             await hubPost('/policy/allow', { path: fsPath });
-            // Index with a 60s timeout — kill and restart Hub if it hangs
-            const indexResult = await Promise.race([
-                hubPost('/index', { path: fsPath, scope: 'all' }, 60000),
-                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Indexing timed out after 60s — Hub may be stalled')), 60000))
-            ]);
-            if (indexResult && typeof indexResult === 'object' && (indexResult as any).indexed_files === 0) {
-                // Hub accepted the request but indexed 0 files — likely a path/permissions issue
-                console.warn(`[Harmony] Hub indexed 0 files for ${fsPath}. Path may not exist or be excluded.`);
+            let started: any;
+            try {
+                started = await hubPost('/index', { path: fsPath, scope: 'all' }, 30000);
+            } catch (err: any) {
+                const msg = String(err?.message ?? '');
+                if (msg.includes('Hub HTTP 409')) {
+                    // The daemon runs only one rebuild at a time (two would fight over the
+                    // single staging slot and discard the in-flight run's chunks). Not a
+                    // failure: this folder simply waits for the next index trigger.
+                    hubOutput.appendLine(`[index] deferred ${fsPath}: another index is already running; it will be indexed on the next trigger.`);
+                    result.skipped.push(fsPath);
+                    continue;
+                }
+                throw err;
             }
-            result.indexed.push(fsPath);
+            const jobId: string | undefined = started?.job_id;
+            if (!jobId) {
+                // Older daemon (synchronous /index) — accept the legacy response shape.
+                if (started && typeof started === 'object' && started.indexed_files === 0) {
+                    hubOutput.appendLine(`[index] 0 files indexed for ${fsPath} — path may not exist or be excluded.`);
+                }
+                hubOutput.appendLine(`[index] ok ${fsPath} (${started?.new_chunks ?? '?'} chunks, ${started?.total_vectors ?? '?'} total vectors)`);
+                result.indexed.push(fsPath);
+            } else {
+                const deadline = Date.now() + indexBudgetMs;
+                let job: any = undefined;
+                while (Date.now() < deadline) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    try {
+                        job = await hubGet(`/index/status/${encodeURIComponent(jobId)}`);
+                    } catch { /* daemon busy — keep waiting */ }
+                    if (job && job.state && job.state !== 'running') break;
+                }
+                if (!job) {
+                    result.failed.push(`${fsPath}: no status for job ${jobId}`);
+                    hubOutput.appendLine(`[index] FAILED ${fsPath}: no status for job ${jobId}`);
+                } else if (job.state === 'done') {
+                    if ((job.files_indexed ?? 0) === 0) {
+                        hubOutput.appendLine(`[index] 0 files indexed for ${fsPath} — path may not exist or be excluded.`);
+                    }
+                    hubOutput.appendLine(`[index] ok ${fsPath} (${job.new_chunks ?? '?'} chunks, ${job.total_vectors ?? '?'} total vectors)`);
+                    result.indexed.push(fsPath);
+                } else if (job.state === 'running') {
+                    hubOutput.appendLine(`[index] still indexing in the background for ${fsPath} (job ${jobId}); progress is saved and the Hub will finish on its own.`);
+                    result.indexed.push(fsPath);
+                } else {
+                    const msg = job.error ?? 'index job failed';
+                    result.failed.push(`${fsPath}: ${msg}`);
+                    hubOutput.appendLine(`[index] FAILED ${fsPath}: ${msg}`);
+                }
+            }
         } catch (error: any) {
-            result.failed.push(`${fsPath}: ${error?.message ?? 'Hub request failed'}`);
-            // If Hub times out, it may be stalled — the caller or next
-            // startHub command will force-stop it before restarting.
-            if (error?.message?.includes('timed out') || error?.message?.includes('stalled')) {
-                console.warn(`[Harmony] Hub indexing timed out for ${fsPath}. Hub may need restart.`);
-            }
+            const message = error?.message ?? 'Hub request failed';
+            result.failed.push(`${fsPath}: ${message}`);
+            hubOutput.appendLine(`[index] FAILED ${fsPath}: ${message}`);
         }
     }
+    indexInFlight = false;
     return result;
+}
+
+/** Surface indexing outcomes so failures are never silent. */
+function reportIndexResult(result: { indexed: string[]; skipped: string[]; failed: string[] }): void {
+    if (result.indexed.length) hubOutput.appendLine(`[index] indexed: ${result.indexed.join(', ')}`);
+    if (result.skipped.length) hubOutput.appendLine(`[index] skipped (privacy/blocklist): ${result.skipped.join(', ')}`);
+    if (result.failed.length) {
+        hubOutput.appendLine(`[index] FAILED: ${result.failed.join(' | ')}`);
+        vscode.window.showWarningMessage(`HarmonyHub could not index ${result.failed.length} folder(s). See the "Harmony Hub" output channel for details.`);
+    }
 }
 
 // ── Creative token loader ────────────────────────────────────────────────────
@@ -986,7 +1259,7 @@ async function processProviderBrokerQueue(context: vscode.ExtensionContext): Pro
         queued += names.filter(name => name.endsWith('.json')).length;
     }
     if (!queued) {
-        vscode.window.showInformationMessage('Harmony: no provider broker requests found.');
+        vscode.window.showInformationMessage(tr('notify.noBrokerRequests'));
         return { processed: 0, failed: 0, skipped: 0 };
     }
     const confirm = await vscode.window.showWarningMessage(
@@ -1027,7 +1300,7 @@ async function processProviderBrokerQueue(context: vscode.ExtensionContext): Pro
             try {
                 if (!request || request.kind !== 'ask') throw new Error('broker request must be kind=ask');
                 if (!isProviderId(request.provider)) throw new Error(`unsupported provider: ${request.provider || '?'}`);
-                const tier = request.tier === 'light' || request.tier === 'mid' || request.tier === 'heavy' || request.tier === 'coding' ? request.tier as Tier : 'coding';
+                const tier = request.tier === 'light' || request.tier === 'mid' || request.tier === 'heavy' || request.tier === 'coding' || request.tier === 'premium' ? request.tier as Tier : 'coding';
                 const prompt = String(request.prompt || '').trim();
                 if (!prompt) throw new Error('broker request prompt is empty');
                 const policy = await outsideVsPolicyAllowsProviderCall(root);
@@ -1159,7 +1432,25 @@ export function activate(context: vscode.ExtensionContext) {
         migrateLegacyToSlots(context.secrets, p).catch(() => {});
     }
     
-    // 0c. Initialize error pattern learning (reads saved config + listens for changes).
+    // 0c. One-time migration: ensure the persisted vision fallback order
+    // includes every provider. Older stored orders predate DeepSeek vision and
+    // would silently omit it (the "had to Reset to default" edge case).
+    {
+        const cfg = vscode.workspace.getConfiguration('harmony');
+        const stored = cfg.get<string[]>('vision.fallbackOrder');
+        const defaults = ['gemini', 'zhipu', 'alibaba', 'deepseek'];
+        if (Array.isArray(stored) && stored.length > 0) {
+            const merged = [...stored];
+            for (const p of defaults) {
+                if (!merged.includes(p)) merged.push(p);
+            }
+            if (merged.length !== stored.length) {
+                void cfg.update('vision.fallbackOrder', merged, true);
+            }
+        }
+    }
+
+    // 0d. Initialize error pattern learning (reads saved config + listens for changes).
     initializeErrorLearning();
     
     registerChatHistoryProvider(context);
@@ -1174,7 +1465,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // Register DeepSeek as a native language model provider in Copilot Chat.
-    // Models deepseek-v4-flash and deepseek-v4-pro will appear in the model picker.
+    // Models deepseek-flash, deepseek-v4-flash and deepseek-v4-pro will appear in the model picker.
     // Safe: if this fails, the error is caught and Harmony continues normally.
     try {
         registerDeepSeekProvider(context);
@@ -1193,7 +1484,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('harmony.refreshCreativeToken', async () => {
             try {
                 await loadCreativeToken(context.secrets);
-                vscode.window.showInformationMessage('Harmony: creative token refreshed.');
+                vscode.window.showInformationMessage(tr('notify.creativeTokenRefreshed'));
             } catch (e) {
                 vscode.window.showErrorMessage(`Harmony: could not load creative token — ${(e as Error).message}`);
             }
@@ -1206,7 +1497,7 @@ export function activate(context: vscode.ExtensionContext) {
             const { startCreativeService } = await import('./toolExecutor');
             try {
                 await startCreativeService();
-                vscode.window.showInformationMessage('Harmony: Creative service is running.');
+                vscode.window.showInformationMessage(tr('notify.creativeRunning'));
             } catch (e) {
                 vscode.window.showErrorMessage(`Harmony: could not start Creative service — ${(e as Error).message}`);
             }
@@ -1289,6 +1580,8 @@ export function activate(context: vscode.ExtensionContext) {
     registerDeepOrchestrate(context);
     registerSymbolTools(context);
     registerWebSearchTools(context);
+    registerProvenanceTools(context);
+    registerConsensusTools(context);
     registerChatRecallTool(context);
 
     // 2. Register the @harmony chat participant (lives in the native Chat panel).
@@ -1366,7 +1659,7 @@ export function activate(context: vscode.ExtensionContext) {
                 await vscode.commands.executeCommand('type', { text: '@harmony ' });
             } catch {
                 await vscode.commands.executeCommand('workbench.action.chat.open');
-                vscode.window.showInformationMessage('Harmony opened Chat without replacing your draft. If needed, place @harmony at the start of the message before sending.');
+                vscode.window.showInformationMessage(tr('notify.chatOpenedNoDraftReplace'));
             }
         })
     );
@@ -1437,9 +1730,9 @@ export function activate(context: vscode.ExtensionContext) {
         const current = `${swarmDefaultProvider()}:${swarmDefaultTier()}`;
         const picks: SwarmProviderPick[] = [
             {
-                label: 'DeepSeek V4 Flash',
+                label: 'DeepSeek Flash (V4.1)',
                 description: 'Recommended default for swarm',
-                detail: 'Sets provider deepseek + coding tier. Current model resolves to deepseek-v4-flash.',
+                detail: 'Sets provider deepseek + coding tier. Current model resolves to deepseek-flash.',
                 provider: 'deepseek',
                 tier: 'coding',
                 picked: current === 'deepseek:coding',
@@ -1732,7 +2025,7 @@ export function activate(context: vscode.ExtensionContext) {
                     // Show pipeline picker (with suggestion if available)
                     const templates = listTemplateIds();
                     if (!templates.length) {
-                        vscode.window.showWarningMessage('No DeepSwarm pipeline templates available.');
+                        vscode.window.showWarningMessage(tr('notify.noDeepSwarmTemplates'));
                         return;
                     }
                     // Sort: put the detected pipeline first if any
@@ -2269,7 +2562,7 @@ export function activate(context: vscode.ExtensionContext) {
                 if (ext === '.pdf' || ext === '.docx') {
                     const converted = await convertFileToMarkdown(filePath);
                     content = converted.markdown;
-                    if (!content.trim()) { vscode.window.showErrorMessage('Could not extract text.'); return; }
+                    if (!content.trim()) { vscode.window.showErrorMessage(tr('notify.extractFailed')); return; }
                 } else {
                     content = (await require('fs').promises.readFile(filePath, 'utf-8')).trim();
                 }
@@ -2396,7 +2689,7 @@ export function activate(context: vscode.ExtensionContext) {
                 if (ext === '.pdf' || ext === '.docx') {
                     const converted = await convertFileToMarkdown(filePath);
                     content = converted.markdown;
-                    if (!content.trim()) { vscode.window.showErrorMessage('Could not extract text.'); return; }
+                    if (!content.trim()) { vscode.window.showErrorMessage(tr('notify.extractFailed')); return; }
                 } else {
                     content = (await require('fs').promises.readFile(filePath, 'utf-8')).trim();
                 }
@@ -2413,7 +2706,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             const pipeline = getTemplateById('convergence-translation-literal');
             if (!pipeline) {
-                vscode.window.showErrorMessage('Faithful translation pipeline not found.');
+                vscode.window.showErrorMessage(tr('notify.translationPipelineMissing'));
                 return;
             }
 
@@ -2446,7 +2739,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('harmony.openTranslationDiff', async () => {
             const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
             if (!wsRoot) {
-                vscode.window.showWarningMessage('No workspace folder open');
+                vscode.window.showWarningMessage(tr('notify.noWorkspaceFolder'));
                 return;
             }
             try {
@@ -2454,13 +2747,13 @@ export function activate(context: vscode.ExtensionContext) {
                 const files = await require('fs').promises.readdir(outDir);
                 const diffs = files.filter((f: string) => f.startsWith('diff-') && f.endsWith('.md')).sort().reverse();
                 if (!diffs.length) {
-                    vscode.window.showInformationMessage('No diff viewer files found. Run a translation first.');
+                    vscode.window.showInformationMessage(tr('notify.noDiffViewerFiles'));
                     return;
                 }
                 const doc = await vscode.workspace.openTextDocument(path.join(outDir, diffs[0]));
                 await vscode.window.showTextDocument(doc, { preview: false });
             } catch {
-                vscode.window.showInformationMessage('No diff viewer outputs yet. Run a translation first.');
+                vscode.window.showInformationMessage(tr('notify.noDiffViewerOutputs'));
             }
         })
     );
@@ -2470,7 +2763,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('harmony.openDisputeLedger', async () => {
             const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
             if (!wsRoot) {
-                vscode.window.showWarningMessage('No workspace folder open');
+                vscode.window.showWarningMessage(tr('notify.noWorkspaceFolder'));
                 return;
             }
             try {
@@ -2478,13 +2771,13 @@ export function activate(context: vscode.ExtensionContext) {
                 const files = await require('fs').promises.readdir(outDir);
                 const ledgers = files.filter((f: string) => f.startsWith('dispute-ledger-') && f.endsWith('.md')).sort().reverse();
                 if (!ledgers.length) {
-                    vscode.window.showInformationMessage('No dispute ledgers found. Run a translation first.');
+                    vscode.window.showInformationMessage(tr('notify.noDisputeLedgers'));
                     return;
                 }
                 const doc = await vscode.workspace.openTextDocument(path.join(outDir, ledgers[0]));
                 await vscode.window.showTextDocument(doc, { preview: false });
             } catch {
-                vscode.window.showInformationMessage('No dispute ledger outputs yet. Run a translation first.');
+                vscode.window.showInformationMessage(tr('notify.noDisputeLedgerOutputs'));
             }
         })
     );
@@ -2494,7 +2787,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('harmony.checkAuthenticity', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
-                vscode.window.showWarningMessage('No document open. Open a file to check authenticity.');
+                vscode.window.showWarningMessage(tr('notify.noDocumentOpen'));
                 return;
             }
             const content = editor.document.getText();
@@ -2533,7 +2826,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('harmony.testDeepSeekTokenLimit', async () => {
             const apiKey = await context.secrets.get('harmony.deepseekApiKey');
             if (!apiKey) {
-                vscode.window.showErrorMessage('No DeepSeek API key set.');
+                vscode.window.showErrorMessage(tr('notify.noDeepSeekKey'));
                 return;
             }
             const testLimits = [8192, 16384, 32768, 65536, 131072, 262144, 384000];
@@ -2567,7 +2860,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
             const msg = results.join('\n');
-            vscode.window.showInformationMessage('DeepSeek Token Limit Test', { modal: true, detail: msg });
+            vscode.window.showInformationMessage(tr('notify.deepseekTokenLimitTestTitle'), { modal: true, detail: msg });
         })
     );
 
@@ -2592,9 +2885,9 @@ export function activate(context: vscode.ExtensionContext) {
                     query: `@harmony ${lastPrompt}`,
                     isPartialQuery: false
                 });
-                vscode.window.showInformationMessage('💾 Last prompt restored. Review and submit when ready.');
+                vscode.window.showInformationMessage(tr('notify.lastPromptRestored'));
             } else {
-                vscode.window.showInformationMessage('No saved prompt to restore. Your last prompt is auto-saved when you submit a Harmony chat message.');
+                vscode.window.showInformationMessage(tr('notify.noSavedPrompt'));
             }
         })
     );
@@ -2781,7 +3074,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
         if (picked.action === 'assignModel') {
             if (models.length === 0) {
-                vscode.window.showWarningMessage('No Gemini models were discovered. Check the saved key or try again later.');
+                vscode.window.showWarningMessage(tr('notify.noGeminiModels'));
                 return;
             }
             const model = await vscode.window.showQuickPick(models, { title: 'Assign Gemini Model', placeHolder: 'Choose a discovered Gemini model.' });
@@ -2810,7 +3103,7 @@ export function activate(context: vscode.ExtensionContext) {
         const rawSwarmProvider = cfg.get<string>('swarm.defaultProvider');
         const swarmProvider: ProviderId = PROVIDER_IDS.includes(rawSwarmProvider as ProviderId) ? rawSwarmProvider as ProviderId : 'deepseek';
         const rawSwarmTier = cfg.get<string>('swarm.defaultTier');
-        const swarmTier: Tier = rawSwarmTier === 'light' || rawSwarmTier === 'mid' || rawSwarmTier === 'heavy' || rawSwarmTier === 'coding' ? rawSwarmTier : 'coding';
+        const swarmTier: Tier = rawSwarmTier === 'light' || rawSwarmTier === 'mid' || rawSwarmTier === 'heavy' || rawSwarmTier === 'coding' || rawSwarmTier === 'premium' ? rawSwarmTier : 'coding';
         const freeQuota = cfg.get<boolean>('gemini.useFreeQuota') === true ? 'enabled' : 'disabled';
         type StatusPick = vscode.QuickPickItem & { command?: string };
         const rows: StatusPick[] = [];
@@ -3136,15 +3429,26 @@ export function activate(context: vscode.ExtensionContext) {
     // Hub status indicator — second status bar item, shows daemon state.
     const hubBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, harmonyStatusPriority.hub);
     let lastHubStatusKey = '';
-    const refreshHubBar = async () => {
-        const hubAutoStart = vscode.workspace.getConfiguration('harmony').get<boolean>('hub.autoStart') ?? true;
+    const refreshHubBar = async (): Promise<boolean> => {
+        const hubAutoStart = hubMayStart();
+        const { state, status } = await getHubState();
         let newKey: string;
-        if (await isDaemonRunning()) {
-            hubBar.text = '$(database) Hub';
-            hubBar.tooltip = 'HarmonyHub is running. Click to re-index workspace.';
-            hubBar.command = 'harmony.indexWorkspace';
+        // A live index job (not a mere slow /status) is what should spin the indicator.
+        const indexing = !!(status && status.indexing);
+        if (state === 'online' || state === 'busy') {
+            hubBar.text = indexing ? '$(database) Hub $(sync~spin)' : '$(database) Hub';
+            hubBar.tooltip = indexing
+                ? 'HarmonyHub is indexing (still responsive). Click for actions.'
+                : 'HarmonyHub is running. Click for actions.';
+            hubBar.command = 'harmony.hubMenu';
             hubBar.color = undefined;
             newKey = 'online';
+        } else if (state === 'unresponsive') {
+            hubBar.text = '$(database) Hub $(warning)';
+            hubBar.tooltip = 'HarmonyHub is not responding to status checks. Click for actions (try Stop Hub, then Start).';
+            hubBar.command = 'harmony.hubMenu';
+            hubBar.color = new vscode.ThemeColor('statusBarItem.warningForeground');
+            newKey = 'unresponsive';
         } else if (!hubAutoStart) {
             hubBar.text = '$(database) Hub paused';
             hubBar.tooltip = 'HarmonyHub is offline and on-demand starts are paused. Click to resume on-demand starts.';
@@ -3152,26 +3456,103 @@ export function activate(context: vscode.ExtensionContext) {
             hubBar.color = new vscode.ThemeColor('statusBarItem.warningForeground');
             newKey = 'paused';
         } else {
-            hubBar.text = '$(database) Hub $(warning)';
-            hubBar.tooltip = 'HarmonyHub is offline. Click to start it.';
+            // Off BY DESIGN: on-demand starts are enabled, so a stopped Hub is the normal
+            // resting state - not a fault. Calling it "offline" and colouring it as a
+            // warning made a healthy, deliberately-sleeping Hub read as broken.
+            hubBar.text = '$(database) Hub off · on demand';
+            hubBar.tooltip = 'HarmonyHub is off. It starts on demand when a Hub action needs it - click to start it now.';
             hubBar.command = 'harmony.startHub';
-            hubBar.color = new vscode.ThemeColor('statusBarItem.warningForeground');
+            hubBar.color = undefined;
             newKey = 'offline';
         }
         // Only refresh sidebar when Hub status actually changes to prevent flicker
         if (newKey !== lastHubStatusKey) {
             lastHubStatusKey = newKey;
             view.refresh();
+            // Distinguish an idle self-stop from an unexpected death (see the daemon's
+            // write_exit_reason). A FRESH "idle" reason means the Hub released itself on
+            // purpose, so we report the idle stop instead of the alarming "stopped responding".
+            let idleStopped = false;
+            if (newKey === 'unresponsive' || newKey === 'offline') {
+                const hubDataDir = await ensureHubDataDir(context);
+                try {
+                    const exitUri = vscode.Uri.file(path.join(hubDataDir, 'exit-reason.json'));
+                    const raw = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(exitUri)).toString('utf8'));
+                    const at = typeof raw?.at === 'number' ? raw.at : 0;
+                    const ageMs = Date.now() - at * 1000;
+                    idleStopped = raw?.reason === 'idle' && ageMs >= 0 && ageMs < 150_000;
+                } catch { /* missing or corrupt file just means "unknown" (best-effort) */ }
+            }
+            if (idleStopped) {
+                vscode.window.showInformationMessage(tr('notify.hubStoppedAfterIdle'));
+            } else if (newKey === 'unresponsive'
+                && vscode.workspace.getConfiguration('harmony').get<string>('hub.restartPolicy') === 'promptOnce') {
+                // restartPolicy === 'promptOnce' (opt-in): offer ONE recovery prompt per
+                // failure episode. Fires only on the transition, so a flapping Hub cannot nag.
+                vscode.window.showWarningMessage(
+                    'HarmonyHub stopped responding. Start it again?',
+                    'Start Hub',
+                    'Not now'
+                ).then(async (choice) => {
+                    if (choice === 'Start Hub') {
+                        await ensureDaemonForAction('recover from unresponsive state', false);
+                    }
+                });
+            }
         }
+        // A running index job drives the faster poll below. NOTE: state is 'online'
+        // while indexing (it only becomes 'busy' when /status itself times out), so the
+        // authoritative signal is the live `indexing` job in the status payload.
+        return indexing;
     };
     refreshHubBar();
-    // Poll hub state every 30s so the indicator stays current without being noisy.
-    const hubPollInterval = setInterval(refreshHubBar, 30_000);
-    context.subscriptions.push({ dispose: () => clearInterval(hubPollInterval) });
+    // Poll hub state every 30s so the indicator stays current without being noisy — but
+    // every 2s while an index job is running, and push a light 'hubStatus' message so the
+    // sidebar's counts line stays live. /status is cheap (measured ~2-3ms) and is on the
+    // daemon's NON_WORK list, so polling it neither resets the idle clock nor starts work.
+    // The message updates ONE element, so there is no full re-render and no flicker.
+    let hubPollTimer: ReturnType<typeof setTimeout> | undefined;
+    let hubPollDisposed = false;
+    let hubWasBusy = false;
+    const pushHubProgress = async () => {
+        try {
+            const s = await hubGet('/status') as any;
+            if (!s) return;
+            view.postHubStatus({
+                online: true,
+                model: s.model,
+                vectors: s.vectors,
+                indexedPathCount: Array.isArray(s.indexed_paths) ? s.indexed_paths.length : 0,
+                indexing: s.indexing ?? undefined,
+                allowedRoots: typeof s.allowed_roots === 'number' ? s.allowed_roots : undefined,
+                // Durability state of the SAVED index (loaded | adopted | empty | incompatible |
+                // corrupt) so the panel can explain an unusable index instead of hiding it.
+                indexState: typeof s.index_state === 'string' ? s.index_state : undefined,
+                indexNote: typeof s.index_note === 'string' ? s.index_note : undefined,
+            });
+        } catch { /* daemon offline — the 30s poll surfaces that */ }
+    };
+    const scheduleHubPoll = async () => {
+        let busy = false;
+        try { busy = await refreshHubBar(); } catch { /* keep polling */ }
+        if (hubPollDisposed) return;
+        if (busy) {
+            await pushHubProgress();
+        } else if (hubWasBusy) {
+            // Job just finished: ONE full refresh restores the
+            // "N vectors · M folder(s) indexed" line and any newly indexed folders.
+            view.refresh();
+        }
+        hubWasBusy = busy;
+        hubPollTimer = setTimeout(() => { void scheduleHubPoll(); }, busy ? 2_000 : 30_000);
+    };
+    void scheduleHubPoll();
+    context.subscriptions.push({ dispose: () => { hubPollDisposed = true; if (hubPollTimer) clearTimeout(hubPollTimer); } });
     hubBar.show();
     context.subscriptions.push(hubBar);
-    // Kill Hub daemon on extension deactivation to prevent zombie ports
-    context.subscriptions.push({ dispose: () => { stopDaemon().catch(() => {}); } });
+    // The Hub is MACHINE-scoped (one per OS user, shared across windows): closing this
+    // window must NOT stop a daemon another window may be using. It releases itself via
+    // the daemon's own idle exit instead. (Removing this fixes the multi-window kill bug.)
 
     // Whisper inbox counter — real-time unread indicator in status bar.
     const whisperBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, harmonyStatusPriority.whisper);
@@ -3202,15 +3583,24 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Daemon lifecycle helpers ─────────────────────────────────────────────
     /** Resolve daemon exe: bundled binary first, then user config, then PATH. */
+    /** Archives do not reliably preserve the Unix execute bit, so re-apply it. */
+    function ensureExecutable(file: string): void {
+        if (process.platform === 'win32') { return; }
+        try {
+            const fs = require('fs') as typeof import('fs');
+            if ((fs.statSync(file).mode & 0o111) === 0) { fs.chmodSync(file, 0o755); }
+        } catch { /* best effort — spawn reports any real failure */ }
+    }
+
     function resolveHubExe(): string | undefined {
         const fs = require('fs') as typeof import('fs');
         const exeName = process.platform === 'win32' ? 'harmonyhub.exe' : 'harmonyhub';
         // 1. Bundled inside the VSIX (production path — works for any user).
         const bundled = path.join(context.extensionPath, 'bin', exeName);
-        if (fs.existsSync(bundled)) { return bundled; }
+        if (fs.existsSync(bundled)) { ensureExecutable(bundled); return bundled; }
         // 2. User-configured path.
         const cfg = vscode.workspace.getConfiguration('harmony').get<string>('hub.exePath') ?? '';
-        if (cfg && fs.existsSync(cfg)) { return cfg; }
+        if (cfg && fs.existsSync(cfg)) { ensureExecutable(cfg); return cfg; }
         // 3. PATH lookup for users who install HarmonyHub separately.
         for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
             if (!dir) continue;
@@ -3258,7 +3648,7 @@ export function activate(context: vscode.ExtensionContext) {
         const indexOnReady = opts.indexOnReady ?? false;
 
         if (daemonStartPromise) {
-            if (!silent) vscode.window.showInformationMessage('HarmonyHub is already starting. Waiting for it to become ready...');
+            if (!silent) vscode.window.showInformationMessage(tr('notify.hubAlreadyStarting'));
             return daemonStartPromise;
         }
 
@@ -3270,11 +3660,13 @@ export function activate(context: vscode.ExtensionContext) {
             if (await isDaemonRunning()) {
                 if (startGeneration !== daemonStartGeneration) return false;
                 await syncAllowedRoots();
-                if (indexOnReady) await indexWorkspaceFolders();
+                // Never block a chat message on a long index, and never restart one already
+                // indexed or in flight (guards live inside indexWorkspaceFolders).
+                if (indexOnReady) startWorkspaceIndexInBackground('ensure-index');
                 await writeHubSupervisorHeartbeat();
                 refreshHubBar();
                 view.refresh();
-                if (!silent) vscode.window.showInformationMessage('HarmonyHub is already running.');
+                if (!silent) vscode.window.showInformationMessage(tr('notify.hubAlreadyRunning'));
                 return true;
             }
 
@@ -3289,7 +3681,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return false;
             }
             const cfg = vscode.workspace.getConfiguration('harmony');
-            const dataDir = cfg.get<string>('hub.dataDir') || path.join(context.globalStorageUri.fsPath, 'hub-data');
+            const dataDir = await ensureHubDataDir(context);
             // Ensure the data directory exists
             const fs = require('fs') as typeof import('fs');
             if (!fs.existsSync(dataDir)) {
@@ -3311,7 +3703,7 @@ export function activate(context: vscode.ExtensionContext) {
                 sock.setTimeout(2000, () => { sock.destroy(); r(true); });
             }))();
             if (portTaken) {
-                if (!silent) vscode.window.showWarningMessage('HarmonyHub port 7878 is occupied. Retrying…');
+                if (!silent) vscode.window.showWarningMessage(tr('notify.hubPortOccupiedRetry'));
                 for (let attempt = 0; attempt < 3; attempt++) {
                     await new Promise(r => setTimeout(r, 2000));
                     const stillTaken = await (() => new Promise<boolean>(r => {
@@ -3327,7 +3719,7 @@ export function activate(context: vscode.ExtensionContext) {
                     s.setTimeout(1000, () => { s.destroy(); r(true); });
                 }))();
                 if (finalCheck) {
-                    if (!silent) vscode.window.showErrorMessage('HarmonyHub cannot start: port 7878 is still occupied.');
+                    if (!silent) vscode.window.showErrorMessage(tr('notify.hubPortStillOccupied'));
                     return false;
                 }
             }
@@ -3370,6 +3762,26 @@ export function activate(context: vscode.ExtensionContext) {
                 };
 
                 const daemonArgs = ['--data-dir', dataDir];
+                // Idle exit threshold (0 = never): the daemon releases its own memory when idle.
+                const idleStopMinutes = vscode.workspace.getConfiguration('harmony').get<number>('hub.idleStopMinutes') ?? 40;
+                daemonArgs.push('--idle-stop-minutes', String(Math.max(0, Math.floor(idleStopMinutes))));
+                const idleUnloadMinutes = vscode.workspace.getConfiguration('harmony').get<number>('hub.idleUnloadMinutes') ?? 10;
+                daemonArgs.push('--idle-unload-minutes', String(Math.max(0, Math.floor(idleUnloadMinutes))));
+                // Embedding model (read at startup, so it applies on the NEXT Hub start).
+                // Default keeps the code-quality Jina model; 'fast' trades recall for speed.
+                const embedModel = vscode.workspace.getConfiguration('harmony').get<string>('hub.embedModel') ?? 'jina-code';
+                if (embedModel) daemonArgs.push('--embed-model', String(embedModel));
+                // Fail CLOSED: never start an unauthenticated daemon — that is the whole fix.
+                const authToken = hubAuthToken();
+                if (!authToken) {
+                    if (!silent) {
+                        vscode.window.showErrorMessage(
+                            `HarmonyHub auth token could not be created at ${hubTokenFilePath()}. Refusing to start an unauthenticated daemon.`,
+                            'Open Settings'
+                        ).then(go => { if (go) vscode.commands.executeCommand('workbench.action.openSettings', 'harmony.hub'); });
+                    }
+                    return false;
+                }
                 const supervisorWorkspace = currentWorkspaceForSupervisor();
                 if (supervisorWorkspace) daemonArgs.push('--supervisor-workspace', supervisorWorkspace);
 
@@ -3378,10 +3790,14 @@ export function activate(context: vscode.ExtensionContext) {
                     stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
                     env: {
                         ...process.env,
-                        'OMP_NUM_THREADS': '1',
-                        'RAYON_NUM_THREADS': '1',
-                        'MKL_NUM_THREADS': '1',
-                        'TOKIO_WORKER_THREADS': '1',
+                        // Auth token via env (never argv) so it cannot appear in process listings.
+                        'HARMONY_HUB_AUTH_TOKEN': authToken,
+                        // Indexing is CPU-bound embedding work. Forcing 1 thread made a full
+                        // index take ~2.4 chunks/s, so it never finished between messages.
+                        'OMP_NUM_THREADS': String(embedThreads()),
+                        'RAYON_NUM_THREADS': String(embedThreads()),
+                        'MKL_NUM_THREADS': String(embedThreads()),
+                        'TOKIO_WORKER_THREADS': '2',
                         'ORT_ARENA_ALLOCATOR': '0'
                     }
                 });
@@ -3416,7 +3832,9 @@ export function activate(context: vscode.ExtensionContext) {
                         retries++;
                         if (await isDaemonRunning()) {
                             await syncAllowedRoots();
-                            if (indexOnReady) await indexWorkspaceFolders();
+                            // Non-blocking: a long index must not stall startup, and the guards
+                            // stop it from restarting a run that is already indexed/in flight.
+                            if (indexOnReady) startWorkspaceIndexInBackground('startup-index');
                             await writeHubSupervisorHeartbeat();
                             if (!silent) vscode.window.showInformationMessage(indexOnReady ? 'HarmonyHub started and workspace indexing was requested.' : 'HarmonyHub started.');
                             finish(true);
@@ -3442,7 +3860,7 @@ export function activate(context: vscode.ExtensionContext) {
     async function ensureDaemonForAction(actionLabel: string, silent = false, indexOnReady = false): Promise<boolean> {
         if (await isDaemonRunning()) return true;
         const cfg = vscode.workspace.getConfiguration('harmony');
-        const hubAutoStart = cfg.get<boolean>('hub.autoStart') ?? true;
+        const hubAutoStart = hubMayStart(cfg);
         if (!hubAutoStart) {
             if (silent) {
                 refreshHubBar();
@@ -3501,19 +3919,22 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.startHub', async () => {
             if (await isDaemonRunning()) {
-                vscode.window.showInformationMessage('HarmonyHub is already running.');
+                vscode.window.showInformationMessage(tr('notify.hubAlreadyRunning'));
                 refreshHubBar();
                 view.refresh();
                 return true;
             }
-            return spawnDaemon({ silent: false, indexOnReady: false, reason: 'start Hub' });
+            const started = await spawnDaemon({ silent: false, indexOnReady: false, reason: 'start Hub' });
+            // A Hub you start by hand should not stay empty: index once if it has no vectors.
+            if (started) await maybeIndexEmptyHubOnStart('start-hub-index');
+            return started;
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.stopHub', async () => {
             if (!await isDaemonRunning() && !daemonStartPromise) {
-                vscode.window.showInformationMessage('HarmonyHub is already stopped.');
+                vscode.window.showInformationMessage(tr('notify.hubAlreadyStopped'));
                 refreshHubBar();
                 view.refresh();
                 return;
@@ -3528,33 +3949,103 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.toggleHubAutoStart', async () => {
             const cfg = vscode.workspace.getConfiguration('harmony');
-            const current = cfg.get<boolean>('hub.autoStart') ?? true;
+            const current = hubMayStart(cfg);
             if (current) {
                 // Turning OFF — show warning first
                 const choice = await vscode.window.showWarningMessage(
-                    'Turning off auto-start means HarmonyHub will NOT automatically restart when the connection drops. You will need to start it manually for local recall, indexing, and other Hub features.',
+                    'Turning off auto-start means HarmonyHub will NOT start automatically when you use Hub features. You will need to start it manually for local recall, indexing, and other Hub features.',
                     { modal: false },
                     'Turn Off',
                     'Cancel'
                 );
                 if (choice !== 'Turn Off') return;
             }
-            await cfg.update('hub.autoStart', !current, vscode.ConfigurationTarget.Global);
+            await queueHubSettingWrite(() => cfg.update('hub.startPolicy', current ? 'never' : 'onDemand', vscode.ConfigurationTarget.Global));
             refreshHubBar();
             view.refresh();
             if (current) {
-                vscode.window.showInformationMessage('HarmonyHub auto-start paused. Hub will not restart automatically. Use Start Hub daemon below to resume.');
+                vscode.window.showInformationMessage(tr('notify.hubAutoStartPaused'));
             } else {
-                vscode.window.showInformationMessage('HarmonyHub auto-start resumed. Hub will restart automatically when needed.');
+                vscode.window.showInformationMessage(tr('notify.hubAutoStartResumed'));
+            }
+        })
+    );
+
+    // Explicit 3-way start policy (the sidebar segmented selector). This is the lossless
+    // control: picking "On workspace open" is never overwritten by a later click, unlike
+    // the quick Never<->onDemand toggle above, which remains for the status-bar entry point.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('harmony.setHubStartPolicy', async (policy?: string) => {
+            const allowed = ['never', 'onDemand', 'onWorkspaceOpen'];
+            if (!policy || !allowed.includes(policy)) return;
+            const cfg = vscode.workspace.getConfiguration('harmony');
+            if (hubStartPolicy(cfg) === policy) return; // no-op keeps writes minimal
+            if (policy === 'never') {
+                const choice = await vscode.window.showWarningMessage(
+                    'Turning off auto-start means HarmonyHub will NOT start automatically when you use Hub features. You will need to start it manually for local recall, indexing, and other Hub features.',
+                    { modal: false },
+                    'Turn Off',
+                    'Cancel'
+                );
+                if (choice !== 'Turn Off') {
+                    refreshHubBar();
+                    view.refresh();
+                    return;
+                }
+            }
+            await queueHubSettingWrite(() => cfg.update('hub.startPolicy', policy, vscode.ConfigurationTarget.Global));
+            refreshHubBar();
+            view.refresh();
+            const label = policy === 'never' ? 'Never' : (policy === 'onWorkspaceOpen' ? 'Workspace opens' : 'When needed');
+            vscode.window.showInformationMessage(`HarmonyHub auto-start: ${label}.`);
+        })
+    );
+
+    // Cycle the Hub's on-message behavior: Ask first -> Auto-start -> Never -> Ask first.
+    // Serialized with the other Hub writes so rapid clicks cannot interleave.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('harmony.toggleHubMessageMode', async () => {
+            const cfg = vscode.workspace.getConfiguration('harmony');
+            const current = cfg.get<string>('hub.startOnMessage') ?? 'prompt';
+            const order = ['prompt', 'auto', 'off'];
+            const next = order[(Math.max(0, order.indexOf(current)) + 1) % order.length];
+            await queueHubSettingWrite(() => cfg.update('hub.startOnMessage', next, vscode.ConfigurationTarget.Global));
+            refreshHubBar();
+            view.refresh();
+            const label = next === 'auto' ? 'Auto-start' : (next === 'off' ? 'Never' : 'Ask first');
+            vscode.window.showInformationMessage(`HarmonyHub message behavior: ${label}.`);
+        })
+    );
+
+    // Status-bar click opens a quick-pick menu instead of launching a heavy re-index on a
+    // stray click. Re-index is listed first so a reflexive Enter is still fast.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('harmony.hubMenu', async () => {
+            const { state, status } = await getHubState();
+            const detail = [state, status?.build, status?.pid ? `pid ${status.pid}` : '', typeof status?.vectors === 'number' ? `${status.vectors} vectors` : ''].filter(Boolean).join(' · ');
+            const pick = await vscode.window.showQuickPick([
+                { label: '$(sync) Re-index workspace', detail: 'Rebuild the local search index', action: 'reindex' },
+                { label: '$(info) Status', detail, action: 'status' },
+                { label: '$(debug-stop) Stop Hub', detail: 'Stop the local daemon', action: 'stop' },
+            ], { title: 'HarmonyHub', placeHolder: 'Choose an action' });
+            if (!pick) return;
+            const action = (pick as any).action;
+            if (action === 'reindex') await vscode.commands.executeCommand('harmony.indexWorkspace');
+            else if (action === 'stop') await stopDaemon();
+            else if (action === 'status') {
+                const live = await getHubState();
+                vscode.window.showInformationMessage(`HarmonyHub: ${[live.state, live.status?.model, typeof live.status?.vectors === 'number' ? `${live.status.vectors} vectors` : ''].filter(Boolean).join(' · ')}`);
             }
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.ensureHubForChat', async (options?: { indexOnReady?: boolean }) => {
+            // Honor hub.indexOnStart unless the caller explicitly overrides it (F8 fix).
+            const indexOnStart = vscode.workspace.getConfiguration('harmony').get<boolean>('hub.indexOnStart') ?? true;
             return spawnDaemon({
                 silent: false,
-                indexOnReady: options?.indexOnReady ?? true,
+                indexOnReady: options?.indexOnReady ?? indexOnStart,
                 reason: 'prepare local recall for this message'
             });
         })
@@ -3565,14 +4056,11 @@ export function activate(context: vscode.ExtensionContext) {
     (async () => {
         if (await isDaemonRunning()) {
             await syncAllowedRoots();
-            // Check if index is empty — if so, trigger background re-index
-            try {
-                const status = await hubGet('/status') as any;
-                if (status && (status.vectors ?? status.vector_count ?? status.indexed_files ?? 1) === 0) {
-                    // Fire-and-forget background indexing — don't block startup
-                    indexWorkspaceFolders().catch(() => {});
-                }
-            } catch { /* daemon may not support /status fields yet */ }
+            // If the Hub is online but empty, kick one background index (honors hub.indexOnStart).
+            await maybeIndexEmptyHubOnStart('activation-index');
+        } else if (hubStartsOnWorkspaceOpen()) {
+            // Opt-in only (never the default): the user asked the Hub to start with the workspace.
+            await ensureDaemonForAction('workspace open', true);
         }
         refreshHubBar();
         view.refresh();
@@ -3585,7 +4073,8 @@ export function activate(context: vscode.ExtensionContext) {
                 { location: vscode.ProgressLocation.Notification, title: 'HarmonyHub: indexing workspace…', cancellable: false },
                 async () => {
                     await syncAllowedRoots();
-                    const result = await indexWorkspaceFolders();
+                    const result = await indexWorkspaceFolders({ force: true });
+                    reportIndexResult(result);
                     view.refresh();
                     if (result.failed.length > 0) {
                         vscode.window.showWarningMessage(`Hub indexing requested for ${result.indexed.length} folder(s); ${result.failed.length} failed.`);
@@ -3635,7 +4124,7 @@ export function activate(context: vscode.ExtensionContext) {
             await context.secrets.store('harmony.deepseekApiKey', apiKey.trim());
             invalidateKeyCache();
             await vscode.workspace.getConfiguration('harmony').update('modelProvider', 'deepseek', true);
-            vscode.window.showInformationMessage('DeepSeek key saved. Harmony will use DeepSeek for new chat turns.');
+            vscode.window.showInformationMessage(tr('notify.deepseekKeySaved'));
         })
     );
 
@@ -3643,7 +4132,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('harmony.clearDeepSeekApiKey', async () => {
             await context.secrets.delete('harmony.deepseekApiKey');
             invalidateKeyCache();
-            vscode.window.showInformationMessage('DeepSeek key cleared.');
+            vscode.window.showInformationMessage(tr('notify.deepseekKeyCleared'));
         })
     );
 
@@ -3691,7 +4180,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.setProviderSlotKey', async (provider: ProviderId, slotIndex: number) => {
             if (provider === 'tencent') {
-                vscode.window.showInformationMessage('Tencent uses native SecretId+SecretKey auth — not slot-based.');
+                vscode.window.showInformationMessage(tr('notify.tencentNativeAuth'));
                 return;
             }
             const slotLabels = ['Chat', 'Agents', 'External', 'Vision'];
@@ -3724,7 +4213,7 @@ export function activate(context: vscode.ExtensionContext) {
         // Multi-key slot editor: opens a webview panel to edit all 4 slots at once.
         vscode.commands.registerCommand('harmony.editProviderSlots', async (provider: ProviderId) => {
             if (provider === 'tencent') {
-                vscode.window.showInformationMessage('Tencent uses native SecretId+SecretKey auth — not slot-based.');
+                vscode.window.showInformationMessage(tr('notify.tencentNativeAuth'));
                 return;
             }
             const currentSlots = await getProviderKeys(context.secrets, provider);
@@ -3973,7 +4462,7 @@ document.getElementById('cancel').addEventListener('click', () => {
             if (answer === 'Clear All') {
                 const { clearGlobalMemory } = await import('./globalMemory');
                 await clearGlobalMemory(context);
-                vscode.window.showInformationMessage('🌐 Global memory cleared.');
+                vscode.window.showInformationMessage(tr('notify.globalMemoryCleared'));
                 vscode.commands.executeCommand('harmony.refreshSidebar');
             }
         })
@@ -4051,7 +4540,7 @@ document.getElementById('cancel').addEventListener('click', () => {
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.resetCostCounters', () => {
             clearUsage();
-            vscode.window.showInformationMessage('Harmony session usage counters reset.');
+            vscode.window.showInformationMessage(tr('notify.sessionUsageReset'));
         })
     );
 
@@ -4078,7 +4567,7 @@ document.getElementById('cancel').addEventListener('click', () => {
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.listSessions', async () => {
             const names = await listSessions();
-            if (names.length === 0) { vscode.window.showInformationMessage('No saved sessions in this workspace.'); return; }
+            if (names.length === 0) { vscode.window.showInformationMessage(tr('notify.noSavedSessions')); return; }
             const action = await vscode.window.showQuickPick(
                 names.map(n => ({ label: n, description: 'click to choose action' })),
                 { placeHolder: 'Saved sessions' }
@@ -4124,7 +4613,7 @@ document.getElementById('cancel').addEventListener('click', () => {
             try {
                 const unread = await readUnread();
                 if (unread.length === 0) {
-                    vscode.window.showInformationMessage('📥 Whisper Inbox is empty — no unread whispers.');
+                    vscode.window.showInformationMessage(tr('notify.whisperInboxEmpty'));
                     return;
                 }
                 const markAction = 'Mark All Read';
@@ -4176,7 +4665,7 @@ document.getElementById('cancel').addEventListener('click', () => {
         }),
         vscode.commands.registerCommand('harmony.editCustomRolesJson', async () => {
             const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-            if (!root) { vscode.window.showErrorMessage('No workspace open.'); return; }
+            if (!root) { vscode.window.showErrorMessage(tr('notify.noWorkspaceOpen')); return; }
             const dir = vscode.Uri.joinPath(root, '.harmony', 'swarm');
             const file = vscode.Uri.joinPath(dir, 'custom-roles.json');
             await vscode.workspace.fs.createDirectory(dir);
@@ -4192,7 +4681,7 @@ document.getElementById('cancel').addEventListener('click', () => {
                 const file = vscode.Uri.joinPath(root, '.harmony', 'swarm', 'custom-roles.json');
                 const buf = await vscode.workspace.fs.readFile(file);
                 const roles: any[] = JSON.parse(Buffer.from(buf).toString('utf8'));
-                if (index < 0 || index >= roles.length) { vscode.window.showErrorMessage('Invalid role index.'); return; }
+                if (index < 0 || index >= roles.length) { vscode.window.showErrorMessage(tr('notify.invalidRoleIndex')); return; }
                 const removed = roles[index];
                 roles.splice(index, 1);
                 await vscode.workspace.fs.writeFile(file, Buffer.from(JSON.stringify(roles, null, 2), 'utf8'));
@@ -4223,7 +4712,7 @@ document.getElementById('cancel').addEventListener('click', () => {
             try {
                 const unread = await readUnread();
                 if (unread.length === 0) {
-                    vscode.window.showInformationMessage('📥 No unread whispers.');
+                    vscode.window.showInformationMessage(tr('notify.noUnreadWhispers'));
                     return;
                 }
                 const items = unread.map((w, i) => ({

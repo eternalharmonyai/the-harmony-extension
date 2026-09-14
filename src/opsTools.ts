@@ -1143,7 +1143,7 @@ class SupervisorStateTool implements vscode.LanguageModelTool<SupervisorStateInp
                 operations: '.harmony/operations/ledger.json',
                 managedProcesses: '.harmony/processes/managed',
             },
-            note: 'Wave 12 Phase 1 coordination core: VS Code, terminal CLI, and future floating UI can share heartbeats, events, locks, process records, and operation ledger state through these local files.',
+            note: 'Local coordination core: VS Code, terminal CLI, and future floating UI can share heartbeats, events, locks, process records, and operation ledger state through these local files.',
         };
         if (options.input.format === 'json') return textResult(JSON.stringify(payload, null, 2));
         return textResult([

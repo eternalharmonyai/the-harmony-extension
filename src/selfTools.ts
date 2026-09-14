@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as cp from 'child_process';
 import { summarize as summarizeUsage, totalCalls, totalTokens } from './costTracker';
+import { hubFetch } from './hubClient';
 
 function clip(text: string): string {
     return clipResult(text);
@@ -162,7 +163,7 @@ async function registeredToolNamesFromSource(sourceRoot: string | undefined): Pr
 async function fetchHubJson(endpoint: string): Promise<{ ok: boolean; status?: number; body?: unknown; error?: string }> {
     const base = (vscode.workspace.getConfiguration('harmony').get<string>('hub.url') ?? 'http://127.0.0.1:7878').replace(/\/+$/, '');
     try {
-        const response = await fetch(base + endpoint, { signal: AbortSignal.timeout(3500) });
+        const response = await hubFetch(base + endpoint, { signal: AbortSignal.timeout(3500) });
         const text = await response.text();
         let body: unknown = text;
         try { body = JSON.parse(text); } catch { /* text body is okay */ }
