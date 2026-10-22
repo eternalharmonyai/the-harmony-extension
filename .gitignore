@@ -1,7 +1,3 @@
-# ─────────────────────────────────────────────────────────────────────
-# Public .gitignore — generic build/dependency/secret hygiene only.
-# ─────────────────────────────────────────────────────────────────────
-
 # Build / dependencies
 node_modules/
 out/
@@ -26,7 +22,6 @@ $null
 # Secrets & credentials
 .env
 .env.*
-*.env
 *.key
 *.pem
 *.pfx
@@ -54,17 +49,12 @@ logs/
 *.log.*
 
 # Harmony local tool state
-.carebloom/
 .harmony/
 .harmony-archive/
 .harmony-staging/
 .harmony-recipes/
 .harmony-repair/
 .fastembed_cache/
-
-# Python
-__pycache__/
-*.pyc
 
 # Python
 __pycache__/
@@ -88,7 +78,7 @@ generated/
 *.mp4
 *.mov
 
-# Editor workspace files can embed absolute local paths.
+# Workspace files
 *.code-workspace
 
 # Test documents

@@ -47,7 +47,8 @@ function commandExists(command) {
   }
   const checker = process.platform === 'win32' ? 'where.exe' : 'command';
   const args = process.platform === 'win32' ? [command] : ['-v', command];
-  return cp.spawnSync(checker, args, { stdio: 'ignore' }).status === 0;
+  // 'command' is a POSIX shell builtin — it only resolves when spawned through a shell.
+  return cp.spawnSync(checker, args, { stdio: 'ignore', shell: process.platform !== 'win32' }).status === 0;
 }
 
 function resolveCommand(editor) {

@@ -8,6 +8,7 @@ import { appendChatHistory, appendChatResponse } from './chatHistory';
 import { appendMemory, recallMemory, formatRecallForPrompt, memoryStats } from './memory';
 import { saveSession, loadSession, listSessions, formatSessionPreamble, SessionTurn } from './sessions';
 import { recordUsage, summarize as summarizeUsage, totalTokens } from './costTracker';
+import { COMPACTION_KEEP_NEWEST_MESSAGES, isContextLengthError, planInTurnCompaction } from './inTurnCompaction';
 import { consumeComposePayload, ComposeImage } from './composeQueue';
 import { describeImages, formatComposeContext } from './visionRouter';
 import { formatHarmonyToolLedger } from './opsTools';
@@ -17,14 +18,21 @@ import { formatRulesDetails, formatRulesStatus, loadRulesContext } from './rules
 import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, invalidateKeyCache, listAvailableProviders, modelFor, primaryEnvNameFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, resolveProviderKey, resolveProviderKeyDetailed, secretKeyFor, Tier, tencentSignV3, TENCENT_NATIVE_HOST, TENCENT_NATIVE_SERVICE, TENCENT_NATIVE_REGION, TENCENT_NATIVE_VERSION, sha256Hex, hmacSha256, CollabDirectProvider } from './providers';
 import { formatMcpStatus, mcpStatusSummary } from './mcp';
 import { readUnread, markAllRead, formatWhispersForPrompt, onWhisperChange, getUnreadCount, startMidSessionTracking, getPendingMidSessionWhispers, markMidSessionWhispersDelivered } from './whisperInbox';
+import {
+    MemoryNotice,
+    MemoryNoticeSession,
+    classifyMemoryHealthNotice,
+    memoryUnreadableNotice,
+} from './memoryNotice';
 import { searchPatterns as searchGlobalMemory, autoCapturePattern } from './globalMemory';
 import { defaultVerificationCommand, defaultVerificationTimeoutSec, runVerification } from './verification';
 import { LanguageManager } from './languageManager';
+import { captureStepFields } from './stepCapture';
 import { hubMayStart } from './hubPolicy';
 import { hubFetch } from './hubClient';
 import { tendGarden, scanUnresolvedSprouts, scanResolvedSprouts } from './careBloom';
 import { buildAliasMap, getDeepSeekModel, PROVIDER_REGISTRY, setDeepSeekModel } from './providerModels';
-import { callGeminiNativeStreaming, shouldUseGeminiNative, type OpenAICompatMessage } from './geminiNativeStreaming';
+import { callGeminiNativeStreaming, shouldUseGeminiNative, classifyGeminiThinking, type OpenAICompatMessage } from './geminiNativeStreaming';
 
 /**
  * Global output channel for raw Harmony Agent logs.
@@ -193,6 +201,11 @@ const HARMONY_TOOL_NAMES = [
     'harmony_intent_model',
     'harmony_output_preview',
     'harmony_context_triage',
+    'harmony_dns_ssl_probe',
+    'harmony_net_path_audit',
+    'harmony_wp_site_diagnostic',
+    'harmony_wp_rest_client',
+    'harmony_cloud_connector',
 ];
 
 // Read-only subset for plan-only mode. Run-terminal is excluded too
@@ -272,6 +285,10 @@ const HARMONY_READONLY_TOOL_NAMES = [
     'harmony_process_registry',
     'harmony_operation_ledger',
     'harmony_capability_audit',
+    'harmony_dns_ssl_probe',
+    'harmony_net_path_audit',
+    'harmony_wp_site_diagnostic',
+    'harmony_cloud_connector',
 ];
 
 const CRITICAL_TOOL_NAMES = [
@@ -360,7 +377,25 @@ function describeNetworkError(error: any): string {
 
 function streamIdleTimeoutMs(): number {
     const sec = vscode.workspace.getConfiguration('harmony').get<number>('streamIdleTimeoutSec');
-    return Math.max(0, (sec ?? 120)) * 1000;
+    // A non-positive value previously disabled the idle guard entirely (0 = hang
+    // forever) — a foot-gun that can be injected via a workspace .vscode/settings.json.
+    // Treat anything below 30 as the 120s default so the guard can never be switched off,
+    // cap at 900 (mirrors the schema maximum) so a stray large value cannot stretch a
+    // stall to hours, and Number.isFinite rejects NaN/Infinity — values a strict-JSON
+    // settings file cannot express but a programmatic write could.
+    const effective = (typeof sec === 'number' && Number.isFinite(sec) && sec >= 30) ? Math.min(sec, 900) : 120;
+    return effective * 1000;
+}
+
+function ttfbTimeoutMs(): number {
+    const sec = vscode.workspace.getConfiguration('harmony').get<number>('ttfbTimeoutSec');
+    // First-byte budget for streaming requests: heavy reasoning models can think
+    // for minutes before the first token (observed: 90–150s under load). 180s
+    // default = 3 full minutes covered. Floor 30, cap 600, non-finite → default —
+    // same discipline as streamIdleTimeoutMs so the guard can never be disabled
+    // or stretched absurdly by a stray settings value.
+    const effective = (typeof sec === 'number' && Number.isFinite(sec) && sec >= 30) ? Math.min(sec, 600) : 180;
+    return effective * 1000;
 }
 
 // Race a streaming read against an idle timeout so a stalled connection
@@ -376,7 +411,7 @@ function withStreamIdleTimeout(read: Promise<any>, onTimeout: () => void): Promi
     const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
             onTimeout();
-            reject(new Error(`stream idle timeout after ${Math.round(timeoutMs / 1000)}s without data — connection stalled; aborted`));
+            reject(new Error(`stream idle timeout after ${Math.round(timeoutMs / 1000)}s without data — connection stalled`));
         }, timeoutMs);
     });
     return Promise.race([read, timeout]).finally(() => { if (timer) clearTimeout(timer); });
@@ -685,30 +720,34 @@ function stripReasoningFromDeepSeekMessages(messages: DeepSeekMessage[]): DeepSe
  */
 function geminiSanitizeMessages(messages: DeepSeekMessage[]): DeepSeekMessage[] {
     // Quick scan: are there any unsigned assistant tool_calls?
+    // Every individual tool_call MUST carry thought_signature — if even one
+    // parallel tool_call lacks a signature, Gemini 3+/4.x rejects that element
+    // with HTTP 400 ("Function call is missing a thought_signature").
     const hasUnsignedCalls = messages.some(
         m => m.role === 'assistant'
             && Array.isArray(m.tool_calls)
             && m.tool_calls!.length > 0
-            && !m.tool_calls!.some((tc: any) => tc.thought_signature)
+            && m.tool_calls!.some((tc: any) => !tc.thought_signature)
     );
     if (!hasUnsignedCalls) return messages; // All good — no sanitization needed
 
-    debugLog('[Gemini Sanitize] found unsigned assistant tool_calls — converting to text format to prevent HTTP 400');
+    debugLog('[Gemini Sanitize] found unsigned assistant tool_calls — converting unsigned calls to text format to prevent HTTP 400');
     const result: DeepSeekMessage[] = [];
-    // Track tool_call_ids we've absorbed so we can skip their tool result messages
+    // Track tool_call_ids we've absorbed so we can convert their tool result messages
     const absorbedToolCallIds = new Set<string>();
 
     for (const msg of messages) {
         if (msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-            const hasSignature = msg.tool_calls.some((tc: any) => tc.thought_signature);
-            if (hasSignature) {
-                // Keep as-is — signatures present
+            const signedCalls = msg.tool_calls.filter((tc: any) => Boolean(tc.thought_signature));
+            const unsignedCalls = msg.tool_calls.filter((tc: any) => !tc.thought_signature);
+            if (unsignedCalls.length === 0) {
+                // Keep as-is — all signatures present
                 result.push(msg);
                 continue;
             }
 
             // Convert unsigned tool_calls to a text description
-            const callDescriptions = msg.tool_calls.map((tc: any) => {
+            const callDescriptions = unsignedCalls.map((tc: any) => {
                 const name = tc.function?.name ?? '(unknown)';
                 let args = '';
                 try { args = tc.function?.arguments ? JSON.stringify(JSON.parse(tc.function.arguments)) : '{}'; } catch { args = tc.function?.arguments ?? '{}'; }
@@ -716,7 +755,11 @@ function geminiSanitizeMessages(messages: DeepSeekMessage[]): DeepSeekMessage[] 
                 return `[Tool call: ${name}(${args})]`;
             });
             const textContent = [deepSeekContentToText(msg.content), ...callDescriptions].filter(Boolean).join('\n');
-            result.push({ role: 'assistant', content: textContent || '[tool calls converted to text]' });
+            result.push({
+                ...msg,
+                content: textContent || '[tool calls converted to text]',
+                tool_calls: signedCalls.length > 0 ? signedCalls : undefined
+            });
         } else if (msg.role === 'tool' && msg.tool_call_id && absorbedToolCallIds.has(msg.tool_call_id)) {
             // Merge this tool result into the previous message as a user message
             const mergedResult = `[Tool result for ${msg.tool_call_id}]: ${deepSeekContentToText(msg.content) || '(empty)'}`;
@@ -744,6 +787,8 @@ interface DirectPrimaryRoute {
     secretKey: string;
     tier: Tier;
     supportsReasoningContent: boolean;
+    /** DeepSeek only: documented reasoning effort (low | high | max). */
+    reasoningEffort?: string;
     supportsImageContent?: boolean;
     thinkingEnabled: boolean;
     showThinking: boolean;
@@ -768,6 +813,7 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
             tier: deepSeekTierForModel(model),
             supportsReasoningContent: true,
             supportsImageContent: model === 'deepseek-v4-flash-vision-exp',
+            reasoningEffort: cfg.get<string>('deepseekReasoningEffort') ?? 'high',
             thinkingEnabled: cfg.get<boolean>('deepseekThinking') ?? true,
             showThinking: cfg.get<boolean>('deepseekShowThinking') ?? false
         };
@@ -1065,6 +1111,16 @@ function classifyParticipantError(error: any, token: vscode.CancellationToken): 
     const name = typeof error?.name === 'string' ? error.name : '';
     const text = `${name} ${raw}`.toLowerCase();
 
+    // Timeouts must be classified BEFORE cancellation: an aborted-by-guard request
+    // surfaces with AbortError and would otherwise read as a silent user cancel.
+    if (!token.isCancellationRequested && /timed out|idle timeout|first response bytes/.test(text)) {
+        return {
+            message: 'Harmony provider request timed out — the connection stalled or the model took too long. The request was aborted to protect the turn; please retry.',
+            diagnosticError: raw,
+            showDiagnostics: true
+        };
+    }
+
     if (token.isCancellationRequested || /aborterror|aborted|cancelled|canceled/.test(text)) {
         return {
             message: 'Harmony turn cancelled before it finished.',
@@ -1264,6 +1320,110 @@ async function resolveReferences(refs: readonly vscode.ChatPromptReference[]): P
     return out.sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * One visible memory-hub signal per session.
+ * A paused, quarantining or recovering hub surfaces a user-visible notice in
+ * addition to the debug log.
+ */
+let memoryHealthCheckedThisSession = false;
+
+/**
+ * Session-scoped notice deduplicator: one failure slot and one slot per
+ * informational key (src/memoryNotice.ts).
+ */
+const memoryNotifySession = new MemoryNoticeSession();
+
+const memoryText = (key: string): string => LanguageManager.getInstance().getString(key);
+
+/** Show a notice. The session gate decides WHETHER — never the logging. */
+function showMemoryNotice(notice: MemoryNotice | null): void {
+    if (!notice || notice.severity === 'silent') return;
+    if (notice.severity === 'error') {
+        void vscode.window.showErrorMessage(notice.text);
+    } else if (notice.severity === 'warning') {
+        void vscode.window.showWarningMessage(notice.text);
+    } else {
+        void vscode.window.showInformationMessage(notice.text);
+    }
+}
+
+/**
+ * Always log the memory health notice to the debug channel, and display it in
+ * the UI at most once per severity slot.
+ */
+function reportMemoryNotice(notice: MemoryNotice | null, text: string): void {
+    const line = text.trim() || notice?.text?.trim() || '';
+    if (line) debugLog(`[Memory Hub] ${line}`);
+    showMemoryNotice(notice);
+}
+
+/** Store-path failures share the classifier's single failure slot. */
+function notifyMemoryIssue(message: string): void {
+    reportMemoryNotice(memoryNotifySession.considerFailureText(message), message);
+}
+
+/** Read the hub's own words for a failed call — bounded, and never thrown. */
+async function hubFailureReason(resp: any): Promise<string> {
+    const status = typeof resp?.status === 'number' ? `HTTP ${resp.status}` : 'no response';
+    try {
+        const text = typeof resp?.text === 'function' ? String((await resp.text()) ?? '') : '';
+        const trimmed = text.trim();
+        if (!trimmed) return status;
+        try {
+            const parsed = JSON.parse(trimmed);
+            const reason = parsed?.error ?? parsed?.message ?? parsed?.reason;
+            if (typeof reason === 'string' && reason.trim()) {
+                return `${status}: ${reason.trim().slice(0, 300)}`;
+            }
+        } catch { /* not JSON — fall through to the raw text */ }
+        return `${status}: ${trimmed.slice(0, 300)}`;
+    } catch {
+        return status;
+    }
+}
+
+/**
+ * One health read per session, keyed on the REASON — never on the state name.
+ * A plain `empty` is a fresh install and stays quiet; a lost snapshot is reported by
+ * the hub as `corrupt` with a reason, so this notice stays honest as new states appear.
+ */
+async function reportMemoryHealthOnce(baseUrl: string): Promise<void> {
+    if (memoryHealthCheckedThisSession) return;
+    memoryHealthCheckedThisSession = true;
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 2000);
+        let resp: any;
+        try {
+            resp = await hubFetch(`${baseUrl}/ext/v1/health`, { signal: controller.signal as any });
+        } finally {
+            clearTimeout(timer);
+        }
+        if (!resp || resp.ok === false) {
+            const detail = await hubFailureReason(resp);
+            reportMemoryNotice(
+                memoryNotifySession.considerUnreadable(memoryText, detail),
+                memoryUnreadableNotice(memoryText, detail).text,
+            );
+            return;
+        }
+        const health = (await resp.json()) as Record<string, unknown>;
+        // Classify twice on purpose: once for the log line (always), once through the
+        // gate (shown at most once). Both are pure, so they cannot disagree.
+        reportMemoryNotice(
+            memoryNotifySession.consider(health, memoryText),
+            classifyMemoryHealthNotice(health, memoryText).text,
+        );
+    } catch (e: any) {
+        // A health read is best-effort: never let it break a turn — but never silent.
+        const detail = String(e?.message ?? e);
+        reportMemoryNotice(
+            memoryNotifySession.considerUnreadable(memoryText, detail),
+            `health read failed: ${detail}`,
+        );
+    }
+}
+
 /** Optional: store a turn in the local Harmony memory hub for semantic cross-session recall. */
 async function tryMemoryStore(profileId: string, prompt: string, response: string) {
     try {
@@ -1272,14 +1432,31 @@ async function tryMemoryStore(profileId: string, prompt: string, response: strin
         const url = (cfg.get<string>('hub.url') ?? 'http://127.0.0.1:7878').replace(/\/+$/, '');
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 2000);
-        await hubFetch(`${url}/ext/v1/memory/store`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ profile: profileId, prompt, response, source: 'harmony-extension' }),
-            signal: controller.signal as any
-        }).catch(() => undefined);
-        clearTimeout(timer);
-    } catch { /* memory hub is optional, never block on it */ }
+        let resp: any;
+        try {
+            resp = await hubFetch(`${url}/ext/v1/memory/store`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile: profileId, prompt, response, source: 'harmony-extension' }),
+                signal: controller.signal as any
+            });
+        } catch (e: any) {
+            // Report transport failures once per session.
+            notifyMemoryIssue(memoryText('memory.storeFailed').replace('{reason}', String(e?.message ?? e)));
+            return;
+        } finally {
+            clearTimeout(timer);
+        }
+        if (!resp || resp.ok === false) {
+            // A paused hub answers with an HTTP error: a real refusal, not a no-op.
+            notifyMemoryIssue(memoryText('memory.storeFailed').replace('{reason}', await hubFailureReason(resp)));
+            return;
+        }
+        await reportMemoryHealthOnce(url);
+    } catch (e: any) {
+        // Memory stays optional — it must never block a turn. But it must not vanish.
+        notifyMemoryIssue(memoryText('memory.storeFailed').replace('{reason}', String(e?.message ?? e)));
+    }
 }
 
 interface MemoryHubHit {
@@ -1723,6 +1900,48 @@ function deepSeekMessageSize(message: DeepSeekMessage): number {
         + (message.tool_calls ? JSON.stringify(message.tool_calls).length : 0);
 }
 
+/** CJK characters in text (Han + Kana + Hangul). */
+function countCjkChars(text: string): number {
+    const matches = text.match(/[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF]/g);
+    return matches ? matches.length : 0;
+}
+
+/**
+ * Pre-send prompt measurements for the usage ledger and context guard.
+ * promptChars mirrors deepSeekMessageSize accounting; the tools schema is
+ * captured separately as toolSchemaChars.
+ */
+function measurePromptMetrics(messages: DeepSeekMessage[]): { promptChars: number; promptCjkChars: number } {
+    let promptChars = 0;
+    let promptCjkChars = 0;
+    for (const message of messages) {
+        promptChars += deepSeekMessageSize(message);
+        promptCjkChars += countCjkChars(deepSeekContentToText(message.content));
+    }
+    return { promptChars, promptCjkChars };
+}
+
+// ── Context guard constants ──
+// DeepSeek and Gemini 1M routes share a 1,048,576-token context window.
+// The pre-send guard triggers compaction at ~81% of the window so output
+// reservation and token-estimation variance stay well below the hard limit.
+const DEEPSEEK_CONTEXT_WALL_TOKENS = 1_048_576;
+const DEEPSEEK_CONTEXT_GUARD_TOKENS = 850_000;
+
+// One-time-per-route notice for routes that do not use the 1M pre-send guard.
+const routesWithoutEstimateNotified = new Set<string>();
+
+/**
+ * Pre-send token estimate for the context guard (versioned in ./stepCapture's
+ * PROMPT_ESTIMATOR_VERSION). Formula: nonCJK/3 + CJK×1.5, seeded from
+ * documented character-to-token ratios (~0.30 token/char non-CJK, ~0.60
+ * token/char CJK with an upward safety margin).
+ */
+function estimatePromptTokens(promptChars: number, promptCjkChars: number): number {
+    const nonCjkChars = Math.max(0, promptChars - promptCjkChars);
+    return Math.ceil(nonCjkChars / 3) + Math.ceil(promptCjkChars * 1.5);
+}
+
 // Stable-prefix anchor: the first N history turns are always kept, so the
 // message prefix (system + head) is deterministic across turns and stays in
 // DeepSeek's context cache. The tail carries recent state; the middle is dropped.
@@ -1788,6 +2007,9 @@ async function callDeepSeek(apiKey: string, body: unknown, token: vscode.Cancell
     const baseUrl = (cfg.get<string>('deepseekBaseUrl') ?? 'https://api.deepseek.com/v1').replace(/\/$/, '');
     const controller = new AbortController();
     const cancelSub = token.onCancellationRequested(() => controller.abort());
+    // Total guard: bound the whole non-streaming call (connect + body read) so a
+    // stalled connection fails loudly instead of hanging the agent step forever.
+    const ttfGuard = setTimeout(() => controller.abort(new Error('DeepSeek request timed out waiting for a response (120s).')), 120_000);
     try {
         const response = await fetch(`${baseUrl}/chat/completions`, {
             method: 'POST',
@@ -1804,6 +2026,7 @@ async function callDeepSeek(apiKey: string, body: unknown, token: vscode.Cancell
         }
         return JSON.parse(text);
     } finally {
+        clearTimeout(ttfGuard);
         cancelSub.dispose();
     }
 }
@@ -1814,20 +2037,31 @@ async function callDeepSeekStreaming(
     body: any,
     token: vscode.CancellationToken,
     onDelta: (delta: { content?: string; reasoning?: string; toolCalls?: any[] }) => void
-): Promise<{ content: string; reasoning: string; toolCalls: DeepSeekToolCall[]; usage?: { promptTokens?: number; completionTokens?: number }; durationMs: number }> {
+): Promise<{ content: string; reasoning: string; toolCalls: DeepSeekToolCall[]; usage?: { promptTokens?: number; completionTokens?: number; cachedPromptTokens?: number }; servedModel?: string; durationMs: number; truncated: boolean }> {
     const cfg = vscode.workspace.getConfiguration('harmony');
     const baseUrl = route.baseUrl;
     const controller = new AbortController();
     const cancelSub = token.onCancellationRequested(() => controller.abort());
     const startedAt = Date.now();
+    // TTFB guard: a stalled connect/think before headers must fail loudly instead of
+    // hanging forever. Cleared once headers arrive; the per-chunk idle guard
+    // (withStreamIdleTimeout) covers the rest of the stream. Budget is configurable
+    // via harmony.ttfbTimeoutSec (180s default) — heavy reasoners can think for
+    // minutes before the first streaming token.
+    const ttfMs = ttfbTimeoutMs();
+    const ttfGuard = setTimeout(() => controller.abort(new Error(`${route.label} request timed out before the first response bytes (${Math.round(ttfMs / 1000)}s).`)), ttfMs);
 
     if (vscode.workspace.getConfiguration('harmony').get<boolean>('enableDebugLogging') !== false) {
          harmonyDebugChannel.appendLine(`\n[${route.label} Direct API] Fetching ${baseUrl}/chat/completions ...`);
     }
 
     const accumulated = { content: '', reasoning: '' };
+    let truncated = false;
     const toolCallsByIndex: Map<number, any> = new Map();
-    let usage: { promptTokens?: number; completionTokens?: number } | undefined;
+    let usage: { promptTokens?: number; completionTokens?: number; cachedPromptTokens?: number } | undefined;
+    // Provider-reported served model id (first chunk that carries it wins).
+    let servedModel: string | undefined;
+    let reader: any = undefined;
 
     try {
         const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -1840,13 +2074,14 @@ async function callDeepSeekStreaming(
             body: JSON.stringify({ ...body, stream: true }),
             signal: controller.signal as any
         });
+        clearTimeout(ttfGuard); // headers arrived — hand the budget to the per-chunk idle guard
         if (!response.ok) {
             const text = await response.text();
             throw new Error(sanitizeHttpError(response.status, text, route.label));
         }
         if (!response.body) throw new Error(`${route.label} returned no body.`);
 
-        const reader = (response.body as any).getReader();
+        reader = (response.body as any).getReader();
         const decoder = new TextDecoder('utf-8');
         let buffer = '';
 
@@ -1875,14 +2110,28 @@ async function callDeepSeekStreaming(
                     continue;
                 }
 
+                // Provider-reported served model (best-effort).
+                if (typeof parsed?.model === 'string' && !servedModel) {
+                    servedModel = parsed.model;
+                }
+
                 if (parsed?.usage) {
+                    // Cache-accounting wiring: DeepSeek reports prompt_cache_hit_tokens;
+                    // OpenAI-compat providers report prompt_tokens_details.cached_tokens.
+                    const cachedPromptTokens = typeof parsed.usage.prompt_cache_hit_tokens === 'number'
+                        ? parsed.usage.prompt_cache_hit_tokens
+                        : (typeof parsed.usage.prompt_tokens_details?.cached_tokens === 'number'
+                            ? parsed.usage.prompt_tokens_details.cached_tokens
+                            : undefined);
                     usage = {
                         promptTokens: parsed.usage.prompt_tokens,
-                        completionTokens: parsed.usage.completion_tokens
+                        completionTokens: parsed.usage.completion_tokens,
+                        cachedPromptTokens
                     };
                 }
 
                 const choice = parsed?.choices?.[0];
+                if (choice?.finish_reason === 'length') truncated = true;
                 const delta = choice?.delta;
 
                 // ── Gemini thought_signature capture (multi-location) ──────────
@@ -1903,13 +2152,14 @@ async function callDeepSeekStreaming(
                     const deltaSig = delta?.thought_signature ?? delta?.thoughtSignature;
 
                     // If a signature arrives at the choice/delta/message level
-                    // (not inside a specific tool_call), attach it to the most
-                    // recently created tool_call at index 0 (the common case).
+                    // (not inside a specific tool_call), attach it to any
+                    // created tool_call that does not yet carry a signature.
                     if ((choiceSig || deltaSig) && toolCallsByIndex.size > 0) {
-                        const first = toolCallsByIndex.get(0);
-                        if (first && !first.thought_signature) {
-                            first.thought_signature = choiceSig || deltaSig;
-                            debugLog(`[Gemini Stream] captured thought_signature at ${choiceSig ? 'choice' : 'delta'} level for tool_call[0]`);
+                        for (const [idx, tcEntry] of toolCallsByIndex.entries()) {
+                            if (tcEntry && !tcEntry.thought_signature) {
+                                tcEntry.thought_signature = choiceSig || deltaSig;
+                                debugLog(`[Gemini Stream] captured thought_signature at ${choiceSig ? 'choice' : 'delta'} level for tool_call[${idx}]`);
+                            }
                         }
                     }
                 }
@@ -1956,6 +2206,8 @@ async function callDeepSeekStreaming(
             }
         }
     } finally {
+        clearTimeout(ttfGuard);
+        try { reader?.cancel()?.catch(() => { /* already errored — absorb */ }); } catch { /* released */ }
         cancelSub.dispose();
     }
 
@@ -1969,6 +2221,8 @@ async function callDeepSeekStreaming(
         reasoning: accumulated.reasoning,
         toolCalls,
         usage,
+        servedModel,
+        truncated,
         durationMs: Date.now() - startedAt
     };
 }
@@ -2641,6 +2895,10 @@ async function runDeepSeekAgent(
     const limit = resolveAgentStepLimit();
     const tools = await deepSeekTools(forceReadOnly);
     const advertisedToolNames = toolSchemaNames(tools);
+    // Capture serialized tool-schema weight and a turn id for the usage ledger.
+    const toolSchemaChars = safeJson(tools).length;
+    const toolCount = tools.length;
+    const turnId = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     const missingCriticalTools = criticalToolsForMode(forceReadOnly).filter(name => !advertisedToolNames.includes(name));
     if (missingCriticalTools.length > 0) {
         const message = `Harmony tool health check failed before contacting DeepSeek. Missing critical tool(s): ${missingCriticalTools.join(', ')}. Reload this VS Code window and check Output > Harmony Debug.`;
@@ -2664,9 +2922,11 @@ async function runDeepSeekAgent(
         warnedStepLimit = maybeWarnStepLimit(stream, limit, step, warnedStepLimit);
 
         // Moonshot/Kimi k2.7+ requires temperature=1.0 or omitting it entirely;
-        // Claude 5-family removed sampling params (temperature/top_p/top_k).
+        // Claude 5 generation removed sampling params (temperature/top_p/top_k);
+        // Gemini deprecated sampling params (ignored since 3.6 Flash, errors on
+        // upcoming models).
         // Omit temperature for these; other providers use 0.2 for determinism.
-        const needsStrictTemp = route.provider === 'moonshot' || route.provider === 'kimiCode' || route.provider === 'claude';
+        const needsStrictTemp = route.provider === 'moonshot' || route.provider === 'kimiCode' || route.provider === 'claude' || route.provider === 'gemini';
         // Gemini requires thought_signature on replayed tool_calls. Our
         // streaming parser captures them, but as a safety net, sanitize any
         // unsigned tool_calls to text BEFORE sending (prevents HTTP 400).
@@ -2682,35 +2942,142 @@ async function runDeepSeekAgent(
             stream_options: { include_usage: true }
         };
         if (route.supportsReasoningContent && (!thinkingEnabled || suppressThinkingForTurn)) requestBody.thinking = { type: 'disabled' };
-        // Gemini 2.5/3 thinking models attach a thought_signature to every
+        // DeepSeek: thinking mode is ON by default, so state it explicitly, and apply the
+        // documented effort control. DeepSeek-only — other reasoning-capable providers
+        // (alibaba / byteplus / stepfun) may not accept an unknown `thinking` field.
+        if (route.provider === 'deepseek') {
+            if (thinkingEnabled && !suppressThinkingForTurn) requestBody.thinking = { type: 'enabled' };
+            if (route.reasoningEffort) requestBody.reasoning_effort = route.reasoningEffort;
+        }
+        // Gemini 2.5+ thinking models attach a thought_signature to every
         // functionCall part; the OpenAI-compatible endpoint requires it on
         // multi-turn tool use, so we capture + echo it (see callDeepSeekStreaming
         // and the assistant tool_calls push below). Thinking cannot be disabled
-        // on Gemini 3 models, so we minimize it via extra_body.google — the
-        // documented nesting for the OpenAI-compat REST endpoint.
-        if (route.provider === 'gemini') {
-            requestBody.extra_body = {
-                google: {
-                    thinking_config: {
-                        thinking_level: 'minimal'
-                    }
-                }
-            };
+        // on Gemini 3+ models, so we ask for the lightest widely supported effort
+        // through the compat layer's own parameter. Note: Google's OpenAI-compat
+        // endpoint forwards reasoning_effort='minimal' as thinkingLevel='MINIMAL',
+        // which HTTP 400s on Gemini 3.x Pro and gemini-4-argon ("Thinking level
+        // MINIMAL is not supported for this model"). Using 'low' matches
+        // geminiNativeStreaming.ts (which maps minimal -> low) and works across
+        // 2.5, 3.x, and 4.x. Never send both — Google 400s on that too.
+        // Unknown/older ids: omit entirely (same safe default as native).
+        if (route.provider === 'gemini' && classifyGeminiThinking(model) !== 'none') {
+            requestBody.reasoning_effort = 'low';
         }
 
         debugLog(`[${route.label} Agent] step=${step + 1}/${limit.maxSteps} model=${model} messages=${messages.length} tools=${advertisedToolNames.length} tool_choice=${requestBody.tool_choice} thinking=${route.supportsReasoningContent ? requestBody.thinking?.type ?? 'enabled' : 'unsupported'}`);
+        // Measure pre-send prompt size for the usage ledger and context guard.
+        let promptMetrics = measurePromptMetrics(sanitizedMessages);
+        // Pre-send context budget guard + in-turn compaction.
+        // When the estimate exceeds the guard, the CONTENT of the oldest eligible
+        // tool results is stubbed — one batched rewrite (hysteresis) targeting ~75%
+        // of the guard. Messages are never removed so tool_call_id pairing survives
+        // by construction. DeepSeek and Gemini both share a 1,048,576-token context
+        // window (1M); compact `messages` in-place so both `sanitizedMessages` and
+        // the Gemini native path (`messages`) stay below the 1,048,576-token limit.
+        if (route.provider === 'deepseek' || route.provider === 'gemini') {
+            let estPromptTokens = estimatePromptTokens(promptMetrics.promptChars, promptMetrics.promptCjkChars);
+            if (estPromptTokens > DEEPSEEK_CONTEXT_GUARD_TOKENS) {
+                const targetTokens = Math.floor(DEEPSEEK_CONTEXT_GUARD_TOKENS * 0.75);
+                // Inverse of the conservative estimator (worst case: ~3 chars per token).
+                const charsToShed = Math.max(0, Math.ceil((estPromptTokens - targetTokens) * 3));
+                const outcome = planInTurnCompaction(messages, charsToShed, COMPACTION_KEEP_NEWEST_MESSAGES);
+                if (outcome.stubbed > 0) {
+                    if (route.provider === 'gemini' && sanitizedMessages !== messages) {
+                        planInTurnCompaction(sanitizedMessages, charsToShed, COMPACTION_KEEP_NEWEST_MESSAGES);
+                    }
+                    promptMetrics = measurePromptMetrics(sanitizedMessages);
+                    estPromptTokens = estimatePromptTokens(promptMetrics.promptChars, promptMetrics.promptCjkChars);
+                    debugLog(`[${route.label} Guard] compacted ${outcome.stubbed} tool result(s) (~${outcome.charsSaved} chars saved); new estimate ≈${estPromptTokens} tokens (target ≈${targetTokens}).`);
+                    stream.markdown('\n\n> _(older tool results compacted to keep this turn within the context limit)_\n\n');
+                }
+                if (estPromptTokens > DEEPSEEK_CONTEXT_WALL_TOKENS) {
+                    // Pause visibly — the turn cannot fit even after compaction.
+                    const limitText = `**Context limit reached.** Even after compacting older tool results this step estimates ≈${estPromptTokens.toLocaleString()} tokens — beyond the model's ${DEEPSEEK_CONTEXT_WALL_TOKENS.toLocaleString()}-token window. The turn stopped safely; start a new chat to continue (all work so far is on disk).`;
+                    debugLog(`[${route.label} Guard] hard pause: ≈${estPromptTokens} tokens still over the wall after compaction.`);
+                    stream.markdown(`\n\n${limitText}\n\n`);
+                    if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
+                    return {
+                        result: { metadata: { functionCalls: usageCalls } },
+                        finalText: `${assistantTextSoFar}\n\n${limitText}`
+                    };
+                }
+            }
+        } else if (!routesWithoutEstimateNotified.has(route.provider)) {
+            // The pre-send context guard covers DeepSeek and Gemini 1M routes.
+            // Notify once per session for other routes.
+            routesWithoutEstimateNotified.add(route.provider);
+            stream.markdown('\n\n> _(no pre-send estimate for this route — the pre-send context guard covers DeepSeek and Gemini routes for now)_\n\n');
+        }
 
         let bufferedReasoning = '';
         let emittedThinking = false;
-        let result: Awaited<ReturnType<typeof callDeepSeekStreaming>>;
+        let thinkHeartbeat: NodeJS.Timeout | undefined;
+        const lm = LanguageManager.getInstance();
+        const clearThinkHeartbeat = () => {
+            if (thinkHeartbeat) { clearInterval(thinkHeartbeat); thinkHeartbeat = undefined; }
+        };
+        // Structural type: all five streaming paths (DeepSeek, Gemini native/compat,
+        // Tencent, Anthropic) satisfy it; only callDeepSeekStreaming sets truncated.
+        let result: { content: string; reasoning: string; toolCalls: DeepSeekToolCall[]; usage?: { promptTokens?: number; completionTokens?: number; cachedPromptTokens?: number }; servedModel?: string; durationMs: number; truncated?: boolean };
         let networkRetried = false;
+        // Allow at most one context-length compact→retry per step.
+        let contextRetryUsed = false;
         const stepTextBefore = assistantTextSoFar;
         const stepReasoningBefore = reasoningTextSoFar;
+        const stepStartedAt = Date.now();
+        // Ledger-on-throw: a terminally failed step (timeout / abort / HTTP error)
+        // must not vanish from the usage ledger. 0 tokens = $0 estimate, but the
+        // attempt and its wall-time stay visible for cost/latency accounting.
+        // User cancellations are excluded — a deliberate stop is not a failure.
+        // try/catch so ledger trouble can never mask the original rethrown error.
+        const recordFailedStep = () => {
+            if (token.isCancellationRequested) return;
+            try {
+                recordUsage({
+                    timestamp: new Date().toISOString(),
+                    ...captureStepFields({
+                        provider: route.provider,
+                        tier: route.tier,
+                        model,
+                        promptChars: promptMetrics.promptChars,
+                        promptCjkChars: promptMetrics.promptCjkChars,
+                        toolSchemaChars,
+                        toolCount,
+                        turnId,
+                        stepIndex: step,
+                        isDeepSeek: route.provider === 'deepseek',
+                        stepOutcome: 'failed'
+                    }),
+                    promptTokens: 0,
+                    completionTokens: 0,
+                    usageReported: false,
+                    durationMs: Date.now() - stepStartedAt
+                });
+            } catch { /* never mask the original error */ }
+        };
         const handleDelta = (delta: { content?: string; reasoning?: string; toolCalls?: any[] }) => {
             if (delta.reasoning) {
                 bufferedReasoning += delta.reasoning;
+                // Liveness heartbeat: transient progress so a long think never looks dead.
+                // Gated on reasoning-capable routes with thinking enabled — NOT showThinking,
+                // because this is a liveness signal, not a thinking transcript. stream.progress()
+                // leaves no residue in the chat transcript (unlike stream.markdown).
+                if (route.supportsReasoningContent && thinkingEnabled && !thinkHeartbeat) {
+                    const thinkStartedAt = Date.now();
+                    const tick = () => {
+                        if (token.isCancellationRequested) { clearThinkHeartbeat(); return; }
+                        const seconds = Math.round((Date.now() - thinkStartedAt) / 1000);
+                        try {
+                            stream.progress(lm.getString('chat.thinkingProgress').replace('{model}', route.label).replace('{seconds}', String(seconds)));
+                        } catch { /* progress is best-effort */ }
+                    };
+                    tick();
+                    thinkHeartbeat = setInterval(tick, 10_000);
+                }
             }
             if (delta.content) {
+                clearThinkHeartbeat();
                 if (showThinking && !emittedThinking && bufferedReasoning.trim()) {
                     stream.markdown(formatThinkingBlock(bufferedReasoning));
                     emittedThinking = true;
@@ -2718,6 +3085,7 @@ async function runDeepSeekAgent(
                 stream.markdown(delta.content);
             }
         };
+        try {
         // Dispatch to provider-specific streaming function
         const isTencentNative = !!(route.tencentNativeCreds);
         const callStream = route.provider === 'claude' ? callAnthropicStreaming : callDeepSeekStreaming;
@@ -2750,7 +3118,9 @@ async function runDeepSeekAgent(
             // ── Gemini native → compat fallback ──
             // If the native path fails (network, model not found, etc.), fall back
             // to the OpenAI-compat endpoint with the sanitizer safety net.
-            if (useGeminiNative && !token.isCancellationRequested && !networkRetried) {
+            // Skip compat fallback if the failure is a terminal context-length 400
+            // so the context-length compaction retry below can handle it instead!
+            if (useGeminiNative && !token.isCancellationRequested && !networkRetried && !isContextLengthError(message)) {
                 debugLog(`[Gemini Native → Compat Fallback] native path failed: ${message}. Falling back to OpenAI-compat with sanitizer.`);
                 stream.markdown('\n\n> _([Gemini native path unavailable — using compat fallback](debug:gemini-native-fallback))_\n\n');
                 networkRetried = true;
@@ -2781,10 +3151,67 @@ async function runDeepSeekAgent(
                         if (delta.content) { stream.markdown(delta.content); }
                     });
                 }
+            } else if (route.provider === 'deepseek' && !token.isCancellationRequested && /reasoning_effort|thinking/i.test(message) && /HTTP 4\d\d/.test(message)) {
+                // Distinct from the reasoning_content history-replay retry above: a 400
+                // whose body names reasoning_effort/thinking means the model rejected our
+                // control params. Retry once with both stripped, then fail loud.
+                suppressThinkingForTurn = true;
+                debugLog(`[${route.label} Agent] DeepSeek rejected reasoning_effort/thinking params at step=${step + 1}; retrying once with both stripped: ${message.slice(0, 300)}`);
+                stream.markdown('\n\n> _(DeepSeek rejected the reasoning params — retrying once without them...)_\n\n');
+                bufferedReasoning = '';
+                emittedThinking = false;
+                const strippedBody = { ...requestBody };
+                delete strippedBody.reasoning_effort;
+                delete strippedBody.thinking;
+                if (isTencentNative) {
+                    result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, strippedBody, token, handleDelta);
+                } else {
+                    result = await callStream(route, apiKey, strippedBody, token, handleDelta);
+                }
+            } else if ((route.provider === 'deepseek' || route.provider === 'gemini') && !token.isCancellationRequested && !contextRetryUsed && isContextLengthError(message)) {
+                // Context-length 400 fallback: if the server rejects the request for
+                // exceeding the context window, compact older tool results (targeting
+                // ~50% of the guard, or at least 20% of current prompt chars) and retry once.
+                contextRetryUsed = true;
+                const estNow = estimatePromptTokens(promptMetrics.promptChars, promptMetrics.promptCjkChars);
+                const hardTargetTokens = Math.floor(DEEPSEEK_CONTEXT_GUARD_TOKENS * 0.5);
+                const charsToShed = Math.max(
+                    Math.ceil(Math.max(0, estNow - hardTargetTokens) * 3),
+                    Math.ceil(promptMetrics.promptChars * 0.2)
+                );
+                const outcome = planInTurnCompaction(messages, charsToShed, COMPACTION_KEEP_NEWEST_MESSAGES);
+                promptMetrics = measurePromptMetrics(messages);
+                if (outcome.stubbed > 0) {
+                    debugLog(`[${route.label} Guard] context-length 400 at step=${step + 1} — compacted ${outcome.stubbed} tool result(s) (~${outcome.charsSaved} chars saved); retrying once: ${message.slice(0, 200)}`);
+                    stream.markdown('\n\n> _(the model refused the request for length — older tool results compacted, retrying once...)_\n\n');
+                    bufferedReasoning = '';
+                    emittedThinking = false;
+                    if (useGeminiNative) {
+                        result = await callGeminiNativeStreaming(model, apiKey, messages as OpenAICompatMessage[], tools, token, handleDelta);
+                    } else if (isTencentNative) {
+                        result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, requestBody, token, handleDelta);
+                    } else {
+                        const retryCompatBody = route.provider === 'gemini'
+                            ? { ...requestBody, messages: geminiSanitizeMessages(messages) }
+                            : requestBody;
+                        result = await callStream(route, apiKey, retryCompatBody, token, handleDelta);
+                    }
+                } else {
+                    // Nothing left to compact — stop safely and visibly instead of another 400.
+                    const limitText = '**Context limit reached.** The model refused this request for length and no compactable tool results remain. The turn stopped safely; start a new chat to continue (all work so far is on disk).';
+                    debugLog(`[${route.label} Guard] context-length 400 with nothing left to compact — visible pause.`);
+                    stream.markdown(`\n\n${limitText}\n\n`);
+                    if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
+                    return {
+                        result: { metadata: { functionCalls: usageCalls } },
+                        finalText: `${assistantTextSoFar}\n\n${limitText}`
+                    };
+                }
             } else if (!networkRetried && !token.isCancellationRequested && isTransientProviderInterruption(e)) {
                 const autoRetry = vscode.workspace.getConfiguration('harmony').get<boolean>('autoRetry') ?? true;
                 if (!autoRetry) {
                     stream.markdown('\n\n> _(connection interrupted - auto-retry is off; retry manually or switch providers)_\n\n');
+                    recordFailedStep();
                     throw e;
                 }
                 networkRetried = true;
@@ -2801,8 +3228,12 @@ async function runDeepSeekAgent(
                     result = await callStream(route, apiKey, requestBody, token, handleDelta);
                 }
             } else {
+                recordFailedStep();
                 throw e;
             }
+        }
+        } finally {
+            clearThinkHeartbeat();
         }
 
         if (showThinking && !emittedThinking && bufferedReasoning.trim()) {
@@ -2810,13 +3241,30 @@ async function runDeepSeekAgent(
             emittedThinking = true;
         }
 
+        if (result?.truncated) {
+            stream.markdown('\n\n> _(the model hit the output token limit — response truncated)_\n\n');
+        }
+
         recordUsage({
             timestamp: new Date().toISOString(),
-            provider: route.provider,
-            tier: route.tier,
-            model,
+            ...captureStepFields({
+                provider: route.provider,
+                tier: route.tier,
+                model,
+                promptChars: promptMetrics.promptChars,
+                promptCjkChars: promptMetrics.promptCjkChars,
+                toolSchemaChars,
+                toolCount,
+                turnId,
+                stepIndex: step,
+                isDeepSeek: route.provider === 'deepseek',
+                stepOutcome: 'completed'
+            }),
             promptTokens: result.usage?.promptTokens ?? 0,
             completionTokens: result.usage?.completionTokens ?? 0,
+            cachedPromptTokens: result.usage?.cachedPromptTokens,
+            usageReported: typeof result.usage?.promptTokens === 'number',
+            servedModel: result.servedModel,
             durationMs: result.durationMs
         });
 
@@ -3161,7 +3609,12 @@ async function runAgent(
                 ));
             }
         }
-        // ── Inject mid-session whispers before tool results ──
+        // Tool results must be pushed FIRST. OpenAI-compatible servers (DeepSeek
+        // included) require every role:'tool' message to immediately follow the
+        // assistant message carrying tool_calls. Any mid-session whisper is
+        // delivered immediately after the tool results in this same turn.
+        messages.push(vscode.LanguageModelChatMessage.User(resultParts));
+        // ── Inject mid-session whispers after tool results ──
         try {
             const pending = await getPendingMidSessionWhispers();
             if (pending.length > 0) {
@@ -3171,7 +3624,6 @@ async function runAgent(
                 markMidSessionWhispersDelivered(pending);
             }
         } catch { /* best-effort */ }
-        messages.push(vscode.LanguageModelChatMessage.User(resultParts));
     }
 
     emitStepLimitReached(stream, limit);

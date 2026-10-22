@@ -31,6 +31,7 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'gemini-2.0-flash': 8192,
     'gemini-3.7-flash': 65536,
     'gemini-3.8-flash': 65536,
+    'gemini-4-argon': 65536,
     'qwen-max': 8192,
     'qwen-plus': 8192,
     'qwen-turbo': 8192,
@@ -144,8 +145,8 @@ export interface ProviderTierMap {
 /** Default model names per provider/tier. User can override via settings. */
 export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
     deepseek: {
-        light: 'deepseek-v4-flash',
-        mid: 'deepseek-v4-flash',
+        light: 'deepseek-flash',
+        mid: 'deepseek-flash',
         heavy: 'deepseek-v4-pro',
         coding: 'deepseek-flash'
     },
@@ -177,6 +178,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         light: 'gemini-3.8-flash',
         mid: 'gemini-3.8-flash',
         heavy: 'gemini-3.1-pro-preview',
+        premium: 'gemini-4-argon',
         coding: 'gemini-3.8-flash'
     },
     openrouter: {
@@ -1201,6 +1203,11 @@ async function openaiCompat(
             delete body.temperature;
             body.reasoning_effort = 'max';
         }
+        // DeepSeek thinking mode exposes a documented effort control (low/high/max).
+        // Model-gated: only the V4 thinking models accept reasoning_effort.
+        if (provider === 'deepseek' && /^deepseek-(flash|v4-)/.test(model)) {
+            body.reasoning_effort = vscode.workspace.getConfiguration('harmony').get<string>('deepseekReasoningEffort') || 'high';
+        }
         // NOTE: KimiCode does NOT accept a context_window parameter — K3's context
         // (256k vs 1M) is unlocked by plan tier (Allegretto+), not a request field.
         const r = await fetch(url, {
@@ -1373,7 +1380,8 @@ async function geminiCall(
         const body = {
             systemInstruction: { parts: [{ text: system }] },
             contents: [{ role: 'user', parts: [{ text: question }] }],
-            generationConfig: { maxOutputTokens: maxTokens, temperature: 0.3 }
+            // Gemini: no sampling params — deprecated by Google.
+            generationConfig: { maxOutputTokens: maxTokens }
         };
         const r = await fetch(url, {
             method: 'POST',
@@ -1408,7 +1416,7 @@ async function geminiCall(
 }
 
 function isPremiumModelName(model: string): boolean {
-    return /(^|[-_.])pro($|[-_.])|(^|[-_.])opus($|[-_.])|(^|[-_.])o4($|[-_.])|(^|[-_.])astra($|[-_.])|(^|[-_.])fable($|[-_.])/i.test(model);
+    return /(^|[-_.])pro($|[-_.])|(^|[-_.])opus($|[-_.])|(^|[-_.])o4($|[-_.])|(^|[-_.])astra($|[-_.])|(^|[-_.])fable($|[-_.])|(^|[-_.])argon($|[-_.])/i.test(model);
 }
 
 export async function confirmPremiumModel(provider: ProviderId, tier: Tier, model: string, purpose = 'helper model call'): Promise<boolean> {
@@ -1427,7 +1435,7 @@ export async function confirmPremiumModel(provider: ProviderId, tier: Tier, mode
 
     const kind = tier === 'premium' ? 'the premium tier (very expensive)' : tier === 'heavy' ? 'the heavy tier' : 'a premium model';
     const choice = await vscode.window.showWarningMessage(
-        `Harmony wants to call ${kind} for ${purpose} on ${provider} (${model}, tier: ${tier}). This may cost more. Allow?`,
+        `Harmony wants to call ${kind} for ${purpose} on ${provider} (${model}, tier: ${tier}). This may cost more — please check your provider's current pricing, as rates change. Allow?`,
         { modal: false },
         'Allow once', 'Always allow this provider', 'Deny'
     );

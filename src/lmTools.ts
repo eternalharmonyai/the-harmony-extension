@@ -3136,7 +3136,7 @@ class RenameSymbolTool implements vscode.LanguageModelTool<RenameSymbolInput> {
 interface GithubSearchInput { scope: string; query: string; maxResults?: number; }
 
 class GithubSearchTool implements vscode.LanguageModelTool<GithubSearchInput> {
-    async invoke(options: vscode.LanguageModelToolInvocationOptions<GithubSearchInput>) {
+    async invoke(options: vscode.LanguageModelToolInvocationOptions<GithubSearchInput>, token: vscode.CancellationToken) {
         const { scope, query, maxResults } = options.input;
         if (!scope || !query) return textResult('error: missing arguments: scope and query required');
         const perPage = Math.max(1, Math.min(100, maxResults ?? 20));
@@ -3144,8 +3144,12 @@ class GithubSearchTool implements vscode.LanguageModelTool<GithubSearchInput> {
         const url = isOrg
             ? `https://api.github.com/search/code?q=${encodeURIComponent(query)}+org:${encodeURIComponent(scope)}&per_page=${perPage}`
             : `https://api.github.com/search/code?q=${encodeURIComponent(query)}+repo:${encodeURIComponent(scope)}&per_page=${perPage}`;
+        const controller = new AbortController();
+        const cancelSub = token.onCancellationRequested(() => controller.abort());
+        const timeoutId = setTimeout(() => controller.abort(new Error('GitHub search timed out (15s).')), 15_000);
         try {
-            const resp = await fetch(url, { headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'Harmony-Extension' } });
+            const resp = await fetch(url, { headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'Harmony-Extension' }, signal: controller.signal });
+            clearTimeout(timeoutId);
             if (!resp.ok) return textResult(`GitHub API error: ${resp.status} ${resp.statusText}`);
             const data = await resp.json() as any;
             if (!data.items?.length) return textResult(`No results found for "${query}" in ${scope}.`);
@@ -3155,6 +3159,10 @@ class GithubSearchTool implements vscode.LanguageModelTool<GithubSearchInput> {
             }
             return textResult(lines.join('\n'));
         } catch (e: any) { return textResult(`GitHub search error: ${e?.message ?? String(e)}`); }
+        finally {
+            clearTimeout(timeoutId);
+            cancelSub?.dispose();
+        }
     }
     async prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<GithubSearchInput>) {
         return { invocationMessage: `Searching GitHub: ${options.input.query?.slice(0, 60)}…` };
@@ -3663,7 +3671,7 @@ class ParallelTool implements vscode.LanguageModelTool<ParallelInput> {
         const defaultProvider: ProviderId = selected?.provider ?? 'deepseek';
         const defaultTier: Tier = selected?.tier ?? 'light';
 
-        // Cost guard — heuristic: ~4 chars per token, rate ~$0.15/M input + $0.60/M output for coding tier
+        // Cost guard — heuristic: ~4 chars per token, plus a per-tier rate assumption
         const estimatedInputTokens = tasks.reduce((sum, t) => sum + Math.ceil((t.prompt?.length ?? 0) / 4), 0);
         const estimatedOutputTokens = tasks.length * 512;
         const roughCost = (estimatedInputTokens / 1_000_000) * 0.15 + (estimatedOutputTokens / 1_000_000) * 0.60;

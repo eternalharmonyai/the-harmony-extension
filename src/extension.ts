@@ -33,6 +33,10 @@ import { registerWebSearchTools } from './webSearch';
 import { registerProvenanceTools } from './provenanceTools';
 import { registerConsensusTools } from './consensusTools';
 import { registerChatRecallTool } from './chatRecall';
+import { registerNetworkCheck } from './networkCheck';
+import { registerItNetworkTools } from './itNetworkTools';
+import { registerWpHostingTools } from './wpHostingTools';
+import { registerCloudConnectorTools } from './cloudConnectorTools';
 import { registerChatHistoryProvider, HARMONY_HISTORY_SCHEME } from './chatHistory';
 import { registerHarmonyParticipant } from './chatParticipant';
 import { registerDeepSeekProvider } from './deepseekProvider';
@@ -1471,6 +1475,11 @@ export function activate(context: vscode.ExtensionContext) {
         registerDeepSeekProvider(context);
     } catch (e) {
         console.error('[Harmony] DeepSeek provider registration failed:', e);
+        // No-silent-failures: if the LM provider API is missing (older VS Code),
+        // the user must be told — console.error is never seen (exthost.log doesn't capture it).
+        if (typeof (vscode.lm as any)?.registerLanguageModelChatProvider !== 'function') {
+            vscode.window.showWarningMessage('Harmony: DeepSeek models could not be registered — this VS Code version does not support language model chat providers. Update VS Code to use DeepSeek in the model picker.');
+        }
     }
 
     context.subscriptions.push(
@@ -1583,6 +1592,13 @@ export function activate(context: vscode.ExtensionContext) {
     registerProvenanceTools(context);
     registerConsensusTools(context);
     registerChatRecallTool(context);
+    registerItNetworkTools(context);
+    registerWpHostingTools(context);
+    registerCloudConnectorTools(context);
+    // Network diagnostics: a silent redirect of a provider (or Copilot's own)
+    // endpoint hangs chat with no error anywhere. Registers the command and runs
+    // one cheap local pass that speaks only when something is actually wrong.
+    registerNetworkCheck(context);
 
     // 2. Register the @harmony chat participant (lives in the native Chat panel).
     registerHarmonyParticipant(context);
@@ -1730,9 +1746,9 @@ export function activate(context: vscode.ExtensionContext) {
         const current = `${swarmDefaultProvider()}:${swarmDefaultTier()}`;
         const picks: SwarmProviderPick[] = [
             {
-                label: 'DeepSeek Flash (V4.1)',
+                label: 'DeepSeek Coding / Flash (V4.1)',
                 description: 'Recommended default for swarm',
-                detail: 'Sets provider deepseek + coding tier. Current model resolves to deepseek-flash.',
+                detail: 'Sets provider deepseek + coding tier. Current model resolves to deepseek-flash (V4.1).',
                 provider: 'deepseek',
                 tier: 'coding',
                 picked: current === 'deepseek:coding',
@@ -3289,6 +3305,7 @@ export function activate(context: vscode.ExtensionContext) {
             const currentPreset = getCollabModelPreset();
             const currentProvider = getCollabDirectProvider();
             const currentTier = collabTierForPreset(currentPreset);
+            const deepseekKeySaved = !!(await context.secrets.get('harmony.deepseekApiKey'));
             const geminiKeySaved = !!(await context.secrets.get('harmony.geminiApiKey'));
             const alibabaKeySaved = !!(await context.secrets.get('harmony.alibaba.apiKey'));
             const moonshotKeySaved = !!(await context.secrets.get('harmony.moonshot.apiKey'));
@@ -3301,10 +3318,11 @@ export function activate(context: vscode.ExtensionContext) {
                 { label: 'Auto / Balanced', description: 'Recommended default', detail: 'Uses a coding-tier direct provider when Route needs Harmony. Prefers Gemini only when Gemini free-quota mode is enabled.', action: 'set', preset: 'auto', provider: 'auto', tier: 'coding', picked: currentPreset === 'auto' },
                 { label: 'Economy / Fast', description: 'Light models', detail: 'Best for routine scouts and low-intensity sessions.', action: 'set', preset: 'economy', provider: 'auto', tier: 'light', picked: currentPreset === 'economy' },
                 { label: 'Power / Hard Sessions', description: 'Heavy models with cost guard', detail: 'Best for intense planning/review. Premium guards still ask before expensive calls unless allowed.', action: 'set', preset: 'power', provider: 'auto', tier: 'heavy', picked: currentPreset === 'power' },
+                { label: 'DeepSeek Coding / Flash (V4.1)', description: deepseekKeySaved ? 'DeepSeek key saved' : 'DeepSeek key not saved', detail: 'Sets Agents to DeepSeek coding tier with deepseek-flash (V4.1) — fast, thinking ON, and cost-efficient.', action: 'set', preset: 'custom', provider: 'deepseek', tier: 'coding', modelOverride: 'deepseek-flash', picked: currentPreset === 'custom' && currentProvider === 'deepseek' && currentTier === 'coding' },
+                { label: 'DeepSeek Flash', description: deepseekKeySaved ? 'DeepSeek key saved (light tier)' : 'DeepSeek light tier', detail: 'Fast, inexpensive direct provider route using deepseek-flash (V4.1).', action: 'set', preset: 'custom', provider: 'deepseek', tier: 'light', modelOverride: 'deepseek-flash', picked: currentPreset === 'custom' && currentProvider === 'deepseek' && currentTier === 'light' },
+                { label: 'DeepSeek Pro', description: deepseekKeySaved ? 'DeepSeek key saved (heavy tier)' : 'DeepSeek heavy tier', detail: 'Most capable DeepSeek route. Premium/cost guards apply.', action: 'set', preset: 'custom', provider: 'deepseek', tier: 'heavy', picked: currentPreset === 'custom' && currentProvider === 'deepseek' && currentTier === 'heavy' },
                 { label: 'Gemini Flash / Coding', description: geminiKeySaved ? 'Gemini key saved' : 'Gemini key not saved', detail: 'Uses the Google Generative Language / AI Studio key. Good long-context collaborative worker route.', action: 'set', preset: 'custom', provider: 'gemini', tier: 'coding', picked: currentPreset === 'custom' && currentProvider === 'gemini' && currentTier === 'coding' },
                 { label: 'Gemini Pro / Heavy', description: geminiKeySaved ? 'Gemini key saved' : 'Gemini key not saved', detail: 'Uses Gemini heavy tier. Premium/cost guards apply.', action: 'set', preset: 'custom', provider: 'gemini', tier: 'heavy', picked: currentPreset === 'custom' && currentProvider === 'gemini' && currentTier === 'heavy' },
-                { label: 'DeepSeek Flash', description: 'DeepSeek light tier', detail: 'Fast, inexpensive direct provider route.', action: 'set', preset: 'custom', provider: 'deepseek', tier: 'light', picked: currentPreset === 'custom' && currentProvider === 'deepseek' && currentTier === 'light' },
-                { label: 'DeepSeek Pro', description: 'DeepSeek heavy tier', detail: 'Most capable DeepSeek route. Premium/cost guards apply.', action: 'set', preset: 'custom', provider: 'deepseek', tier: 'heavy', picked: currentPreset === 'custom' && currentProvider === 'deepseek' && currentTier === 'heavy' },
                 { label: 'Alibaba / Qwen Turbo Latest', description: alibabaKeySaved ? 'Alibaba key saved' : 'Alibaba key not saved', detail: 'Sets Agents to Alibaba light tier and uses the curated flash-equivalent qwen-turbo-latest route.', action: 'set', preset: 'custom', provider: 'alibaba', tier: 'light', modelOverride: 'qwen-turbo-latest', picked: currentPreset === 'custom' && currentProvider === 'alibaba' && currentTier === 'light' && modelFor('alibaba', 'light') === 'qwen-turbo-latest' },
                 { label: 'Alibaba / Qwen3 Coder Plus', description: alibabaKeySaved ? 'Alibaba key saved' : 'Alibaba key not saved', detail: 'Sets Agents to Alibaba coding tier and uses qwen3-coder-plus.', action: 'set', preset: 'custom', provider: 'alibaba', tier: 'coding', modelOverride: 'qwen3-coder-plus', picked: currentPreset === 'custom' && currentProvider === 'alibaba' && currentTier === 'coding' && modelFor('alibaba', 'coding') === 'qwen3-coder-plus' },
                 { label: 'Alibaba / Qwen3 Max', description: alibabaKeySaved ? 'Alibaba key saved' : 'Alibaba key not saved', detail: 'Sets Agents to Alibaba heavy tier and uses qwen3-max. Premium/cost guards apply.', action: 'set', preset: 'custom', provider: 'alibaba', tier: 'heavy', modelOverride: 'qwen3-max', picked: currentPreset === 'custom' && currentProvider === 'alibaba' && currentTier === 'heavy' && modelFor('alibaba', 'heavy') === 'qwen3-max' },

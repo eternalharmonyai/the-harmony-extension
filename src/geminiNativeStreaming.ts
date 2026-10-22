@@ -85,12 +85,10 @@ interface GeminiFunctionDeclaration {
     parameters?: Record<string, unknown>;
 }
 
-/** Gemini native generation config */
+/** Gemini native generation config (sampling params removed — deprecated upstream) */
 interface GeminiGenerationConfig {
-    temperature?: number;
     maxOutputTokens?: number;
-    topP?: number;
-    topK?: number;
+    /** Gemini 3+ only; older models use the legacy integer `thinkingBudget` instead. */
     thinkingLevel?: string; // 'minimal' | 'low' | 'medium' | 'high'
 }
 
@@ -119,6 +117,10 @@ export function convertMessagesToGeminiContents(
     // Tracks tool_call_id → function name so functionResponse parts can be
     // named after the DECLARED function (Gemini requires this), not the call id.
     const callIdToFnName = new Map<string, string>();
+    // Tracks tool_call_ids whose functionCall part lacked a thought_signature
+    // and was degraded to plain text — their matching tool result must also be
+    // emitted as plain text instead of an orphaned functionResponse part.
+    const unsignedCallIds = new Set<string>();
 
     // Group messages into Gemini contents with strict role alternation
     const contents: GeminiContent[] = [];
@@ -172,14 +174,21 @@ export function convertMessagesToGeminiContents(
                         args = { _raw: tc.function.arguments };
                     }
                     callIdToFnName.set(tc.id, tc.function.name);
-                    const part: GeminiPart = {
-                        functionCall: { name: tc.function.name, args }
-                    };
-                    // Attach thought_signature if present
                     if (tc.thought_signature) {
-                        (part as any).thoughtSignature = tc.thought_signature;
+                        const part: GeminiPart = {
+                            functionCall: { name: tc.function.name, args },
+                            thoughtSignature: tc.thought_signature,
+                        };
+                        pendingParts.parts.push(part);
+                    } else {
+                        // Never emit an unsigned functionCall part — Gemini 3+ and
+                        // gemini-4-argon reject any functionCall lacking thoughtSignature
+                        // with HTTP 400 ("Function call is missing a thought_signature").
+                        unsignedCallIds.add(tc.id);
+                        pendingParts.parts.push({
+                            text: `[Tool call: ${tc.function.name}(${JSON.stringify(args)})]`,
+                        });
                     }
-                    pendingParts.parts.push(part);
                 }
             }
         } else if (msg.role === 'tool') {
@@ -194,15 +203,21 @@ export function convertMessagesToGeminiContents(
             // functionResponse.name must match the DECLARED function name that
             // was called — not the OpenAI-style tool_call_id (would 400).
             const toolName = callIdToFnName.get(msg.tool_call_id ?? '') ?? msg.tool_call_id ?? 'unknown_tool';
-            let responseContent: Record<string, unknown>;
-            try {
-                responseContent = { result: msg.content ?? '(empty)' };
-            } catch {
-                responseContent = { result: String(msg.content ?? '(empty)') };
+            if (msg.tool_call_id && unsignedCallIds.has(msg.tool_call_id)) {
+                pendingParts.parts.push({
+                    text: `[Tool result for ${toolName}]: ${String(msg.content ?? '(empty)')}`
+                });
+            } else {
+                let responseContent: Record<string, unknown>;
+                try {
+                    responseContent = { result: msg.content ?? '(empty)' };
+                } catch {
+                    responseContent = { result: String(msg.content ?? '(empty)') };
+                }
+                pendingParts.parts.push({
+                    functionResponse: { name: toolName, response: responseContent }
+                });
             }
-            pendingParts.parts.push({
-                functionResponse: { name: toolName, response: responseContent }
-            });
         } else {
             // Regular user message
             if (msg.content) {
@@ -361,7 +376,12 @@ export async function parseGeminiSSEStream(
             const parts = candidate?.content?.parts;
             if (!Array.isArray(parts)) continue;
 
+            let lastPartSignature: string | undefined;
             for (const part of parts) {
+                const partSig = part.thoughtSignature ?? part.thought_signature;
+                if (typeof partSig === 'string' && partSig) {
+                    lastPartSignature = partSig;
+                }
                 // Text content
                 if (typeof part.text === 'string' && part.text) {
                     if (part.thought === true) {
@@ -381,7 +401,7 @@ export async function parseGeminiSSEStream(
                     const fnArgs = part.functionCall.args ?? {};
                     const callId = `gemini-call-${toolCallCounter.count++}`;
                     const argsStr = JSON.stringify(fnArgs);
-                    const signature = part.thoughtSignature ?? part.thought_signature;
+                    const signature = part.thoughtSignature ?? part.thought_signature ?? lastPartSignature;
 
                     const toolCall: GeminiNativeToolCall = {
                         id: callId,
@@ -410,6 +430,9 @@ export async function parseGeminiSSEStream(
 
 // ── Main Streaming Function ──────────────────────────────────────────
 
+// One-time guard: warn at most once per extension-host session.
+let thinkingClampNotified = false;
+
 /**
  * Call Gemini's native generateContent streaming API.
  *
@@ -433,9 +456,21 @@ export async function callGeminiNativeStreaming(
     const startedAt = Date.now();
 
     // Read user-configurable settings
-    const thinkingLevel = cfg.get<string>('gemini.thinking.level') ?? 'medium';
+    const rawThinkingLevel = cfg.get<string>('gemini.thinking.level') ?? 'medium';
+    // Clamp to the four API-valid strings — settings files can be hand-edited.
+    const thinkingLevelValid = /^(minimal|low|medium|high)$/.test(rawThinkingLevel);
+    const thinkingLevel: ThinkingLevel = thinkingLevelValid ? (rawThinkingLevel as ThinkingLevel) : 'medium';
+    // A corrected hand-edited value must not be silent — one visible notice per
+    // session (debug line follows below).
+    if (!thinkingLevelValid && !thinkingClampNotified) {
+        thinkingClampNotified = true;
+        void vscode.window.showWarningMessage(
+            `Harmony: Gemini thinking level "${String(rawThinkingLevel).slice(0, 20)}" is not valid (minimal|low|medium|high) — using medium. Please update harmony.gemini.thinking.level in Settings.`
+        );
+    }
     const safetyPreset = cfg.get<string>('gemini.safety.preset') ?? 'permissive';
-    const temperature = 0.2; // Match our agent loop default
+    // No temperature: Gemini sampling params are deprecated (ignored since 3.6 Flash,
+    // error on upcoming models). Gemini uses its own defaults.
 
     // Convert messages → Gemini contents format
     const { systemInstruction, contents } = convertMessagesToGeminiContents(messages);
@@ -443,21 +478,30 @@ export async function callGeminiNativeStreaming(
     // Convert tools → Gemini functionDeclarations
     const functionDeclarations = convertToolsToGemini(tools);
 
-    // Gemini's valid field is generationConfig.thinkingConfig.thinkingBudget
-    // (an integer). The old `thinkingLevel` string field does not exist in the
-    // API and 400s every native call. Map our level to a budget:
-    // high → 8192, low/minimal → 1024, anything else (medium) → 2048.
-    const thinkingBudget = thinkingLevel === 'high' ? 8192
-        : (thinkingLevel === 'low' || thinkingLevel === 'minimal') ? 1024
-        : 2048;
+    // Thinking config is model-gated (Google deprecation notice; classifier and
+    // casing follow):
+    // - 'level'  (Gemini 3+ and -latest aliases): `thinkingLevel` — uppercase API
+    //   enum; `minimal` is mapped to `low`, because several 3.x models don't list
+    //   minimal and Argon documents it as a 400.
+    // - 'budget' (Gemini 2.5.x): legacy integer `thinkingBudget` (still supported).
+    // - 'none'   (older or unrecognized ids): omit `thinkingConfig` entirely — the
+    //   safe default, because new models reject the legacy field with a 400.
+    const thinkingMode = classifyGeminiThinking(model);
+    const effectiveLevel: ThinkingLevel = thinkingLevel === 'minimal' ? 'low' : thinkingLevel;
+    const thinkingConfig = thinkingMode === 'level'
+        ? { thinkingLevel: effectiveLevel.toUpperCase() }
+        : thinkingMode === 'budget'
+            ? {
+                thinkingBudget: thinkingLevel === 'high' ? 8192
+                    : (thinkingLevel === 'low' || thinkingLevel === 'minimal') ? 1024
+                    : 2048
+            }
+            : undefined;
 
-    // Build the generateContent request body
+    // Build the generateContent request body (no sampling params — deprecated).
     const requestBody: any = {
         contents,
-        generationConfig: {
-            temperature,
-            thinkingConfig: { thinkingBudget },
-        },
+        generationConfig: thinkingConfig ? { thinkingConfig } : undefined,
         tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
         toolConfig: functionDeclarations.length > 0 ? { functionCallingConfig: { mode: 'AUTO' } } : undefined,
     };
@@ -481,7 +525,7 @@ export async function callGeminiNativeStreaming(
     const harmonyDebugChannel = vscode.window.createOutputChannel('Harmony Debug');
     if (cfg.get<boolean>('enableDebugLogging') !== false) {
         harmonyDebugChannel.appendLine(`\n[Gemini Native API] Fetching streamGenerateContent for ${model} ...`);
-        harmonyDebugChannel.appendLine(`[Gemini Native API] contents=${contents.length} tools=${functionDeclarations.length} thinking=${thinkingLevel} safety=${safetyPreset}`);
+        harmonyDebugChannel.appendLine(`[Gemini Native API] contents=${contents.length} tools=${functionDeclarations.length} thinking=${thinkingMode === 'level' ? effectiveLevel.toUpperCase() : thinkingLevel}${thinkingMode === 'none' ? ' (omitted)' : ''}${thinkingLevelValid ? '' : ' (clamped from invalid setting)'} safety=${safetyPreset}`);
     }
 
     const toolCallCounter = { count: 0 };
@@ -532,20 +576,47 @@ export async function callGeminiNativeStreaming(
 
 // ── Helper: Check if model supports native generateContent ───────────
 
+/** Normalize a Gemini model id: trim, lowercase, strip a leading `models/`. */
+export function normalizeGeminiModelId(model: string): string {
+    return model.trim().toLowerCase().replace(/^models\//, '');
+}
+
+export type GeminiThinkingMode = 'level' | 'budget' | 'none';
+
+/**
+ * Classify how a Gemini model wants its thinking config (shared by the native
+ * request builder and the route selector):
+ * - 'level'  — Gemini 3+ (and gemini-(pro|flash|flash-lite)-latest): `thinkingLevel`.
+ * - 'budget' — Gemini 2.5.x: legacy integer `thinkingBudget`.
+ * - 'none'   — older or unrecognized ids: omit thinkingConfig (safe default —
+ *              new models 400 on the legacy field, so guessing is the worst choice).
+ */
+export function classifyGeminiThinking(model: string): GeminiThinkingMode {
+    const id = normalizeGeminiModelId(model);
+    if (/^gemini-(pro|flash|flash-lite)-latest$/.test(id)) return 'level';
+    const m = /^gemini-(\d+)(?:\.(\d+))?/.exec(id);
+    if (!m) return 'none';
+    const major = parseInt(m[1], 10);
+    const minor = parseInt(m[2] ?? '0', 10);
+    if (major >= 3) return 'level';
+    if (major === 2 && minor >= 5) return 'budget';
+    return 'none';
+}
+
 /**
  * Determine if a Gemini model should use the native generateContent path.
  *
- * Only Gemini 2.5+ thinking models benefit from native path (they have
- * thought_signature requirements). Non-thinking models work fine on compat.
+ * Native for thinking-capable models (Gemini 2.5 and later, including future
+ * families like gemini-4-*): they attach
+ * thought_signatures to function calls and are where the thinking config belongs.
+ * Everything else stays on compat.
  */
 export function shouldUseGeminiNative(model: string, userPreference: string): boolean {
     // Explicit user override
     if (userPreference === 'generateContent') return true;
     if (userPreference === 'openai-compat') return false;
 
-    // 'auto' mode: use native for thinking models (2.5+ and 3.x)
-    const lowerModel = model.toLowerCase();
-    return lowerModel.includes('gemini-2.5')
-        || lowerModel.includes('gemini-3.')
-        || lowerModel.includes('gemini-3-');
+    // 'auto' mode: native for 2.5+ and -latest aliases (any parsed major >= 2.5)
+    const mode = classifyGeminiThinking(model);
+    return mode === 'level' || mode === 'budget';
 }

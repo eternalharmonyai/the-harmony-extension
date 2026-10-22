@@ -1996,7 +1996,7 @@ async function executeThoroughStep(
         }
     }
 
-    // Estimate cost (rough: $0.01 per call for light, $0.03 for mid, $0.05 for coding/heavy)
+    // Estimate cost (rough ordering only: light < mid < coding/heavy)
     const tierCost: Record<string, number> = { light: 0.005, mid: 0.02, heavy: 0.05, coding: 0.05 };
     const costDollars = allProviders.reduce((sum, p) => sum + (tierCost[p.tier] ?? 0.02), 0);
 
@@ -3085,7 +3085,7 @@ export async function runPipeline(
     // Apply user-selected provider override (replaces ALL primary providers)
     if (providerOverride && PROVIDER_IDS.includes(providerOverride as ProviderId)) {
         const overridePid = providerOverride as ProviderId;
-        const overrideTier = tierOverride || 'mid';
+        const overrideTier = tierOverride || 'coding';
         effectivePipeline = {
             ...effectivePipeline,
             steps: effectivePipeline.steps.map(step => ({

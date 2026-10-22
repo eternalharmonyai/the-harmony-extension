@@ -100,7 +100,9 @@ export async function describeImagesViaGemini(
 
     const body = {
         contents: [{ role: 'user', parts }],
-        generationConfig: { maxOutputTokens: 4096, temperature: 0.2 }
+        // Gemini: no sampling params — deprecated by Google (ignored since 3.6 Flash,
+        // errors on upcoming models).
+        generationConfig: { maxOutputTokens: 4096 }
     };
 
     const url =

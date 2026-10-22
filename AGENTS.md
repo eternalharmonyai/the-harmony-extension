@@ -51,3 +51,11 @@ defect, and only with a backup.
 - Confirm a file's live-vs-static status before writing to it.
 - When unsure, change code rather than editing data.
 - Re-check for updated rules before acting on older guidance.
+
+## 6. No silent failures
+
+Every guard that fires, every truncation, and every capability that fails to
+register must produce a user-visible signal and a ledger entry. If a code path
+can fail, it must be able to say so — and the say-so must reach a surface a
+human actually reads (a message, a chat marker, or the usage ledger), never
+just a console log that extension hosts don't capture.

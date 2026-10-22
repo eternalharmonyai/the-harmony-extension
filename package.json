@@ -2,15 +2,15 @@
   "name": "harmony-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.15",
+  "version": "0.4.16",
   "publisher": "harmony",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE",
   "bin": {
     "harmony": "./bin/harmony-cli.js"
   },
   "engines": {
-    "vscode": "^1.95.0"
+    "vscode": "^1.116.0"
   },
   "categories": [
     "Other",
@@ -9043,6 +9043,260 @@
             }
           }
         }
+      },
+      {
+        "name": "harmony_dns_ssl_probe",
+        "displayName": "Harmony: DNS, SSL/TLS & Security Header Probe",
+        "modelDescription": "Probe a hostname or URL for DNS records (A, AAAA, CNAME, MX, TXT, NS, CAA, SOA), TLS/SSL certificate chain, SANs, expiration daysRemaining, and HTTP redirect hops + security headers (HSTS, CSP, X-Frame-Options, CDN/edge server fingerprint).",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyDnsSslProbe",
+        "tags": [
+          "network",
+          "dns",
+          "ssl",
+          "security",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "target"
+          ],
+          "properties": {
+            "target": {
+              "type": "string",
+              "description": "Target hostname or http(s) URL to inspect."
+            },
+            "record_types": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "DNS record types to query (default: A, AAAA, CNAME, MX, TXT, NS, CAA, SOA)."
+            },
+            "check_tls": {
+              "type": "boolean",
+              "description": "Inspect the TLS certificate chain and expiration (default true)."
+            },
+            "check_http_headers": {
+              "type": "boolean",
+              "description": "Trace HTTP redirect hops and audit security/edge headers (default true)."
+            },
+            "timeout_ms": {
+              "type": "number",
+              "description": "Timeout per check in milliseconds (default 6000)."
+            }
+          }
+        }
+      },
+      {
+        "name": "harmony_net_path_audit",
+        "displayName": "Harmony: Network Path & TCP Port Matrix Audit",
+        "modelDescription": "Audit network connectivity: TCP port latency matrix (ports 80, 443, 22, 2083 cPanel, 2087 WHM, 3306 MySQL, 5432 Postgres, 8080, or custom ports), DNS resolver comparison (OS vs Cloudflare 1.1.1.1 vs Google 8.8.8.8), and local hosts/portproxy rules.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyNetPathAudit",
+        "tags": [
+          "network",
+          "ports",
+          "diagnostics",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "description": "Optional target hostname or IP to probe TCP ports and DNS resolvers against."
+            },
+            "ports": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "description": "TCP ports to test (default: [80, 443, 22, 2083, 2087, 3306, 5432, 8080])."
+            },
+            "include_local_routes": {
+              "type": "boolean",
+              "description": "Include local network interfaces, hosts entries, and Windows portproxy rules (default true)."
+            },
+            "compare_resolvers": {
+              "type": "boolean",
+              "description": "Compare OS resolver vs 1.1.1.1 and 8.8.8.8 (default true)."
+            },
+            "timeout_ms": {
+              "type": "number",
+              "description": "Per-probe timeout in milliseconds (default 4000)."
+            }
+          }
+        }
+      },
+      {
+        "name": "harmony_wp_site_diagnostic",
+        "displayName": "Harmony: WordPress & Shared Hosting Site Diagnostic",
+        "modelDescription": "Read-only diagnostic of a WordPress / Bluehost / cPanel site: homepage status & TTFB, hosting stack headers (Endurance Cache, LiteSpeed, Cloudflare), active theme & plugin slugs, mixed content, fatal/DB error detection, and /wp-json/, /wp-login.php, /xmlrpc.php, /wp-cron.php probes.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyWpSiteDiagnostic",
+        "tags": [
+          "wordpress",
+          "hosting",
+          "bluehost",
+          "diagnostics",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "site_url"
+          ],
+          "properties": {
+            "site_url": {
+              "type": "string",
+              "description": "WordPress site URL (trailing /wp-admin or /wp-login.php is normalized automatically)."
+            },
+            "check_endpoints": {
+              "type": "boolean",
+              "description": "Probe /wp-json/, /wp-login.php, /xmlrpc.php, and /wp-cron.php (default true)."
+            },
+            "timeout_ms": {
+              "type": "number",
+              "description": "Per-request timeout in milliseconds (default 10000)."
+            }
+          }
+        }
+      },
+      {
+        "name": "harmony_wp_rest_client",
+        "displayName": "Harmony: WordPress REST API Client",
+        "modelDescription": "Interact with a WordPress site's REST API (/wp-json/) with optional Application Password authentication (HARMONY_WP_APP_PASSWORD). Non-GET requests default to dry_run=true and block destructive core option edits.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyWpRestClient",
+        "tags": [
+          "wordpress",
+          "rest",
+          "cms",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "site_url",
+            "action"
+          ],
+          "properties": {
+            "site_url": {
+              "type": "string",
+              "description": "WordPress site URL."
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "site_info",
+                "posts",
+                "pages",
+                "plugins",
+                "themes",
+                "users_me",
+                "site_health",
+                "custom"
+              ],
+              "description": "WordPress REST action to perform."
+            },
+            "endpoint": {
+              "type": "string",
+              "description": "Custom relative REST path when action is custom."
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "DELETE"
+              ],
+              "description": "HTTP method (default GET)."
+            },
+            "body": {
+              "type": "object",
+              "description": "JSON request payload for POST/PUT."
+            },
+            "username": {
+              "type": "string",
+              "description": "WordPress username (or set HARMONY_WP_USERNAME)."
+            },
+            "app_password_env": {
+              "type": "string",
+              "description": "Env var holding the WordPress Application Password (default HARMONY_WP_APP_PASSWORD)."
+            },
+            "dry_run": {
+              "type": "boolean",
+              "description": "Preview non-GET requests without mutating the remote site (default true for mutations)."
+            },
+            "timeout_ms": {
+              "type": "number",
+              "description": "Request timeout in milliseconds (default 15000)."
+            }
+          }
+        }
+      },
+      {
+        "name": "harmony_cloud_connector",
+        "displayName": "Harmony: Multi-Cloud & BaaS Connector",
+        "modelDescription": "Inspect and query cloud/BaaS platforms (Supabase, Cloudflare, Netlify, Firebase, Google Cloud / GCP) including Supabase PostgREST table/RLS exposure, Cloudflare zones/DNS/SSL mode, Netlify deploys, Firebase Hosting/Firestore rules, and GCP API enablement (e.g. aiplatform.googleapis.com).",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyCloudConnector",
+        "tags": [
+          "cloud",
+          "supabase",
+          "cloudflare",
+          "netlify",
+          "firebase",
+          "gcp",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "provider",
+            "action"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": [
+                "supabase",
+                "cloudflare",
+                "netlify",
+                "firebase",
+                "gcp"
+              ],
+              "description": "Cloud provider to inspect."
+            },
+            "action": {
+              "type": "string",
+              "description": "Provider action (e.g. project_health, openapi_tables, verify_token, zones_list, dns_records, ssl_setting, sites_list, deploys_list, hosting_site_probe, firestore_rules_probe, gcp_api_enablement, cloud_run_probe)."
+            },
+            "project_id": {
+              "type": "string",
+              "description": "Project ID, Zone ID, Site ID, or Supabase project ref."
+            },
+            "target": {
+              "type": "string",
+              "description": "Target URL or resource identifier."
+            },
+            "api_service": {
+              "type": "string",
+              "description": "GCP API service name (e.g. aiplatform.googleapis.com) or Supabase Edge Function slug."
+            },
+            "token_env": {
+              "type": "string",
+              "description": "Optional environment variable name holding the provider API token."
+            },
+            "timeout_ms": {
+              "type": "number",
+              "description": "Request timeout in milliseconds (default 10000)."
+            }
+          }
+        }
       }
     ],
     "commands": [
@@ -9053,6 +9307,11 @@
       {
         "command": "harmony.lmCheck",
         "title": "Harmony: LM Check (DeepSeek Registry Diagnostic)",
+        "category": "Harmony"
+      },
+      {
+        "command": "harmony.networkCheck",
+        "title": "Harmony: Network Check (DNS, Port Forwards, Endpoint Reachability)",
         "category": "Harmony"
       },
       {
@@ -9358,6 +9617,7 @@
       "properties": {
         "harmony.backendUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "http://127.0.0.1:8889",
           "description": "%config.harmony.backendUrl.description%"
         },
@@ -9436,11 +9696,14 @@
             "deepseek",
             "alibaba",
             "moonshot",
+            "kimiCode",
             "gemini",
             "openrouter",
             "openai",
             "claude",
             "tencent",
+            "zhipu",
+            "zhipu-coding",
             "doubao",
             "doubao-coding",
             "doubao-rewards",
@@ -9465,6 +9728,7 @@
         },
         "harmony.deepseekBaseUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "https://api.deepseek.com/v1",
           "description": "%config.harmony.deepseekBaseUrl.description%"
         },
@@ -9501,6 +9765,21 @@
           "default": true,
           "description": "%config.harmony.deepseekThinking.description%"
         },
+        "harmony.deepseekReasoningEffort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "high",
+            "max"
+          ],
+          "default": "high",
+          "enumDescriptions": [
+            "%config.harmony.deepseekReasoningEffort.enum.0%",
+            "%config.harmony.deepseekReasoningEffort.enum.1%",
+            "%config.harmony.deepseekReasoningEffort.enum.2%"
+          ],
+          "description": "%config.harmony.deepseekReasoningEffort.description%"
+        },
         "harmony.deepseekShowThinking": {
           "type": "boolean",
           "default": false,
@@ -9522,10 +9801,25 @@
         },
         "harmony.streamIdleTimeoutSec": {
           "type": "number",
+          "scope": "machine",
           "default": 120,
-          "minimum": 0,
+          "minimum": 30,
           "maximum": 900,
           "description": "%config.harmony.streamIdleTimeoutSec.description%"
+        },
+        "harmony.ttfbTimeoutSec": {
+          "type": "number",
+          "scope": "machine",
+          "default": 180,
+          "minimum": 30,
+          "maximum": 600,
+          "description": "%config.harmony.ttfbTimeoutSec.description%"
+        },
+        "harmony.networkCheckOnStartup": {
+          "type": "boolean",
+          "scope": "machine",
+          "default": true,
+          "description": "%config.harmony.networkCheckOnStartup.description%"
         },
         "harmony.lmDirectFallback": {
           "type": "boolean",
@@ -9881,10 +10175,19 @@
             "gemini",
             "alibaba",
             "moonshot",
+            "kimiCode",
             "openrouter",
             "openai",
             "claude",
-            "tencent"
+            "tencent",
+            "zhipu",
+            "zhipu-coding",
+            "doubao",
+            "doubao-coding",
+            "doubao-rewards",
+            "byteplus",
+            "byteplus-coding",
+            "stepfun"
           ],
           "default": "deepseek",
           "description": "%config.harmony.swarm.defaultProvider.description%"
@@ -10005,6 +10308,7 @@
         },
         "harmony.hub.url": {
           "type": "string",
+          "scope": "machine",
           "default": "http://127.0.0.1:7878",
           "description": "%config.harmony.hub.url.description%"
         },
@@ -10151,6 +10455,7 @@
         },
         "harmony.hub.allowedRoots": {
           "type": "array",
+          "scope": "machine",
           "items": {
             "type": "string"
           },
@@ -10174,11 +10479,13 @@
         },
         "harmony.hub.exePath": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "description": "%config.harmony.hub.exePath.description%"
         },
         "harmony.hub.dataDir": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "description": "%config.harmony.hub.dataDir.description%"
         },
@@ -10302,6 +10609,7 @@
         },
         "harmony.openrouter.baseUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "https://openrouter.ai/api/v1",
           "description": "%config.harmony.openrouter.baseUrl.description%"
         },
@@ -10327,6 +10635,7 @@
         },
         "harmony.moonshot.baseUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "https://api.moonshot.ai/v1",
           "description": "%config.harmony.moonshot.baseUrl.description%"
         },
@@ -10370,6 +10679,7 @@
         },
         "harmony.alibaba.baseUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
           "description": "%config.harmony.alibaba.baseUrl.description%"
         },
@@ -10504,6 +10814,7 @@
         },
         "harmony.creativeServiceUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "http://127.0.0.1:8896",
           "description": "%config.harmony.creativeServiceUrl.description%"
         },
@@ -10551,6 +10862,7 @@
         },
         "harmony.tencent.baseUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "description": "%config.harmony.tencent.baseUrl.description%"
         },
@@ -10863,18 +11175,22 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile && npm run check:hub-auth && npm run check:webview && npm run check:migrations && npm run bundle-hub",
+    "vscode:prepublish": "npm run compile && npm run check:tool-bridge && npm run check:lm-capabilities && npm run check:hub-auth && npm run check:webview && npm run check:migrations && npm run check:summarize-gate && npm run bundle-hub",
     "compile": "tsc -p ./",
+    "check:tool-bridge": "node scripts/run-deepseek-tool-bridge-tests.js",
+    "check:lm-capabilities": "node scripts/check-lm-model-capabilities.js --self-test && node scripts/check-lm-model-capabilities.js",
     "check:hub-auth": "node scripts/check-hub-auth.js",
     "check:webview": "node scripts/check-webview-js.js",
     "check:durability": "node scripts/run-durability-harness.js",
     "check:durability:resume": "node scripts/run-durability-resume.js",
+    "check:step0-capture": "node scripts/run-step0-capture-tests.js",
     "check:durability:commit": "node scripts/run-durability-commit.js",
     "check:durability:incremental": "node scripts/run-durability-incremental.js",
     "check:migrations": "node scripts/run-migration-tests.js",
+    "check:summarize-gate": "node scripts/check-no-summarize-callers.js",
     "watch": "tsc -watch -p ./",
     "bundle-hub": "node scripts/bundle-hub.js",
-    "package": "npm run compile && npm run check:hub-auth && npm run check:webview && npm run check:migrations && npm run bundle-hub && npx --yes @vscode/vsce package --allow-missing-repository",
+    "package": "npm run compile && npm run check:tool-bridge && npm run check:lm-capabilities && npm run check:step0-capture && npm run check:hub-auth && npm run check:webview && npm run check:migrations && npm run check:summarize-gate && npm run bundle-hub && npx --yes @vscode/vsce package --allow-missing-repository",
     "harmony": "node bin/harmony-cli.js",
     "harmony:status": "node bin/harmony-cli.js status",
     "harmony:health": "node bin/harmony-cli.js health",
@@ -10921,7 +11237,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.0.0",
-    "@types/vscode": "^1.95.0",
+    "@types/vscode": "^1.116.0",
     "@vscode/test-electron": "^2.5.2",
     "typescript": "^5.3.0"
   },

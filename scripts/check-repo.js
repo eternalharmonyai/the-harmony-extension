@@ -21,6 +21,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+// Shared loader for protected terms and verification policy.
+const { loadProtectedTerms, verificationGate, describeSources } = require('./lib/check-terms');
+
 const root = path.resolve(__dirname, '..');
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 
@@ -41,6 +44,24 @@ function loadLocalOnlyPaths() {
     return { file, patterns };
 }
 
+/** Named CLI presets for common scan modes. */
+const ENTRY_PRESETS = {
+    commit: { tree: true },
+    push: { tree: true, messages: true, history: true },
+    package: { tree: true, auto: true },
+    audit: { tree: true, messages: true, history: true, auto: true },
+};
+
+/**
+ * Queue the newest local artifact and the bundled daemon for scanning.
+ */
+function addDefaultArtifacts(args) {
+    const bin = 'bin/harmonyhub.exe';
+    if (fs.existsSync(path.join(root, bin)) && !args.binaries.includes(bin)) args.binaries.push(bin);
+    const v = newestVsix();
+    if (v && !args.vsixes.includes(v)) args.vsixes.push(v);
+}
+
 function parseArgs(argv) {
     const args = { tree: false, history: false, messages: false, binaries: [], vsixes: [], json: false, all: false };
     for (let i = 0; i < argv.length; i += 1) {
@@ -50,6 +71,7 @@ function parseArgs(argv) {
         else if (a === '--messages') args.messages = true;
         else if (a === '--all') args.all = true;
         else if (a === '--json') args.json = true;
+        else if (a === '--entry') args.entry = argv[++i];
         else if (a === '--binary') args.binaries.push(argv[++i]);
         else if (a === '--vsix') args.vsixes.push(argv[++i]);
         else throw new Error(`unknown argument: ${a}`);
@@ -92,18 +114,11 @@ function historyBoundaryWrap(pattern) {
 }
 
 function loadNeedles() {
-    const file = process.env.HARMONY_CHECK_TERMS_FILE || path.join(os.homedir(), '.harmony-checks', 'terms.txt');
+    const loaded = loadProtectedTerms();
+    const file = loaded.primaryFile;
     const username = os.userInfo().username;
-    const needles = [username];
-    let missing = false;
-    if (fs.existsSync(file)) {
-        for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
-            const t = line.trim();
-            if (t && !t.startsWith('#')) needles.push(t);
-        }
-    } else {
-        missing = true;
-    }
+    const needles = [username, ...loaded.terms];
+    const missing = loaded.missing.length > 0;
     // The term list is CASE-SENSITIVE and its lines are regex patterns — matching
     // the shared git hooks (grep, no -i). The OS username is matched
     // case-insensitively as a literal. Case sensitivity is deliberate: it stops a
@@ -126,7 +141,27 @@ function loadNeedles() {
             skipped.push(pattern);
         }
     }
-    return { file, username, missing, needles: matchers.map((m) => m.needle), matchers, skipped };
+    // Phrase patterns are matched case-insensitively without word boundaries
+    // and apply to working-tree and VSIX scans.
+    const phraseMatchers = loaded.phrases.map((phrase) => ({
+        needle: phrase,
+        re: new RegExp(escapeRegExp(phrase), 'gi'),
+        search: escapeRegExp(phrase),
+        kind: 'phrase',
+    }));
+
+    return {
+        file,
+        username,
+        missing,
+        needles: matchers.map((m) => m.needle),
+        matchers,
+        phraseMatchers,
+        skipped,
+        verified: loaded.verified,
+        warnings: loaded.warnings,
+        sources: loaded.sources,
+    };
 }
 
 function mergeHits(target, extra) {
@@ -266,7 +301,16 @@ function newestVsix() {
 
 async function main() {
     const args = parseArgs(process.argv.slice(2));
-    const { file, username, missing, needles, matchers } = loadNeedles();
+    if (args.entry) {
+        const preset = ENTRY_PRESETS[args.entry];
+        if (!preset) {
+            throw new Error(`unknown --entry "${args.entry}" (expected: ${Object.keys(ENTRY_PRESETS).join(', ')})`);
+        }
+        Object.assign(args, preset);
+        if (preset.auto) addDefaultArtifacts(args);
+    }
+    const { file, username, missing, needles, matchers, phraseMatchers, verified, warnings, sources } = loadNeedles();
+    const gate = verificationGate({ verified, missing: missing ? [file] : [], primaryFile: file });
 
     const report = {
         generatedAt: new Date().toISOString(),
@@ -285,19 +329,16 @@ async function main() {
         args.tree = true;
         args.history = true;
         args.messages = true;
-        const bin = 'bin/harmonyhub.exe';
-        if (fs.existsSync(path.join(root, bin))) args.binaries.push(bin);
-        const v = newestVsix();
-        if (v) args.vsixes.push(v);
+        addDefaultArtifacts(args);
     }
 
-    if (args.tree) report.sections.tree = scanTree(matchers);
+    if (args.tree) report.sections.tree = scanTree([...matchers, ...phraseMatchers]);
     if (args.history) report.sections.history = scanHistory(matchers);
     if (args.messages) report.sections.messages = scanMessages(matchers);
     if (args.binaries.length) report.sections.binaries = args.binaries.map((b) => scanBinaryFile(b, matchers));
     if (args.vsixes.length) {
         report.sections.vsixes = [];
-        for (const v of args.vsixes) report.sections.vsixes.push(await scanVsixFile(v, matchers));
+        for (const v of args.vsixes) report.sections.vsixes.push(await scanVsixFile(v, [...matchers, ...phraseMatchers]));
     }
 
     // Evaluate status — only hits in OUR OWN files fail the gate. Vendored
@@ -320,7 +361,13 @@ async function main() {
     }
     report.ownFindingCount = ownFindings;
     report.thirdPartyFindingCount = thirdPartyFindings;
-    report.status = ownFindings ? 'failed' : 'passed';
+    report.termsVerified = verified;
+    report.termsWarnings = warnings;
+    // A clean scan with nothing to scan for is NOT a pass. The status and the exit code
+    // differ on purpose, so a caller can never read "unchecked" as "clean".
+    if (!gate.ok) report.status = 'refused-unverified';
+    else if (ownFindings) report.status = 'failed';
+    else report.status = 'passed';
 
     const outDir = path.join(root, '.harmony', 'smoke');
     fs.mkdirSync(outDir, { recursive: true });
@@ -333,6 +380,10 @@ async function main() {
     } else {
         console.log(`Repo source check: ${report.status}`);
         console.log(`Terms file: ${file} (${missing ? 'MISSING' : 'present'}) | needs: ${needles.length} (incl. username "${username}")`);
+        console.log(`Terms: ${describeSources({ verified, sources })}`);
+        for (const w of warnings) console.log(`  WARNING: ${w}`);
+        if (!gate.ok) console.log(gate.message);
+        else if (gate.unverified) console.log(gate.message);
         if (s.tree) console.log(`Tree: ${s.tree.scanned} text files scanned, ${s.tree.ownFindings.length} own hit, ${s.tree.thirdPartyFindings.length} third-party (informational)`);
         if (s.history) console.log(`History: ${s.history.findings.length} needle(s) found in commit diffs`);
         if (s.messages) console.log(`Messages: ${s.messages.commits} commits scanned, ${s.messages.findings.length} hit`);
@@ -346,6 +397,8 @@ async function main() {
         });
         console.log(`Report: ${report.reportPath}`);
     }
+    // 0 = clean, 2 = findings, 3 = refused because nothing was verified.
+    if (report.status === 'refused-unverified') return 3;
     return report.status === 'passed' ? 0 : 2;
 }
 

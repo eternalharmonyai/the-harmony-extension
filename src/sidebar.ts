@@ -334,6 +334,19 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                       await vscode.workspace.getConfiguration('harmony')
                         .update('deepseekThinking', !!msg.value, true);
                       break;
+                    case 'setDeepSeekReasoningEffort': {
+                      // Allow-list: the webview select only offers low/high/max, but a
+                      // stale or tampered postMessage must not write arbitrary strings
+                      // into settings. Rejected values fail loudly, not silently.
+                      const effort = String(msg.value ?? '');
+                      if (effort === 'low' || effort === 'high' || effort === 'max') {
+                        await vscode.workspace.getConfiguration('harmony')
+                          .update('deepseekReasoningEffort', effort, true);
+                      } else {
+                        vscode.window.showWarningMessage(`Harmony: ignored unexpected reasoning-effort value "${effort.slice(0, 20)}".`);
+                      }
+                      break;
+                    }
                     case 'toggleSidebarCompact':
                       await vscode.workspace.getConfiguration('harmony')
                         .update('sidebar.mode', msg.value ? 'compact' : 'full', true);
@@ -344,8 +357,10 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                       if (this.view) this.view.webview.html = this.renderShell(this.view.webview);
                       break;
                     case 'disableSidebarIsolation':
+                      // Isolation exits: 'Switch to full sidebar...' → 'full';
+                      // 'Switch to compact sidebar...' → gentle step-down to 'compact'.
                       await vscode.workspace.getConfiguration('harmony')
-                        .update('sidebar.mode', 'compact', true);
+                        .update('sidebar.mode', msg.target === 'full' ? 'full' : 'compact', true);
                       if (this.view) this.view.webview.html = this.renderShell(this.view.webview);
                       break;
                     case 'configureSidebarMode':
@@ -796,6 +811,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             showDiagnostics: cfg.get<boolean>('showDiagnosticsOnError') ?? true,
             showDeepSeekTrace: !!cfg.get<boolean>('deepseekShowThinking'),
             deepseekThinking: cfg.get<boolean>('deepseekThinking') ?? true,
+            deepseekReasoningEffort: cfg.get<string>('deepseekReasoningEffort') ?? 'high',
             visionModel: (() => {
               const provider = cfg.get<string>('vision.provider') ?? 'auto';
               if (provider === 'auto') return 'auto';
@@ -1124,6 +1140,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
 <body>
   <button id="open-chat">${lm.getString('isolation.openChat')}</button>
   <div class="status">${lm.getString('isolation.title')}</div>
+  <button class="subtle" id="isolation-to-full">${lm.getString('steering.switchToFull')}</button>
   <button class="subtle" id="disable-isolation">${lm.getString('isolation.switchCompact')}</button>
   <button class="subtle" id="write-oom-diagnostics">${lm.getString('steering.writeOomReport')}</button>
   <button class="subtle" id="restore-low-memory-safety">${lm.getString('steering.restoreSettings')}</button>
@@ -1131,7 +1148,8 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   document.getElementById('open-chat').addEventListener('click', () => vscode.postMessage({ type: 'openChat' }));
-  document.getElementById('disable-isolation').addEventListener('click', () => vscode.postMessage({ type: 'disableSidebarIsolation' }));
+  document.getElementById('isolation-to-full').addEventListener('click', () => vscode.postMessage({ type: 'disableSidebarIsolation', target: 'full' }));
+  document.getElementById('disable-isolation').addEventListener('click', () => vscode.postMessage({ type: 'disableSidebarIsolation', target: 'compact' }));
   document.getElementById('write-oom-diagnostics').addEventListener('click', () => vscode.postMessage({ type: 'writeOomDiagnostics' }));
   document.getElementById('restore-low-memory-safety').addEventListener('click', () => vscode.postMessage({ type: 'restoreLowMemorySafetySettings' }));
 </script>
@@ -1235,7 +1253,9 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   .seg-btn + .seg-btn { border-left: 1px solid var(--vscode-input-border); }
   .seg-btn.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
   .provider-row { display: flex; align-items: center; gap: 6px; }
-  .provider-row .name { flex: 1; }
+  .provider-row .name { flex: 1; min-width: 0; }
+  .provider-row .hint { display: inline-block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+  .provider-row button { white-space: nowrap; }
   .provider-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-charts-red); }
   .provider-row .dot.on { background: var(--vscode-charts-green); }
   .fb-item { display: flex; align-items: center; gap: 4px; padding: 3px 4px; font-size: 11px; border-radius: 3px; }
@@ -1312,12 +1332,22 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   <div style="display:flex;gap:4px;margin-top:4px;">
     <select id="deepswarm-provider" style="flex:1;">
       <option value="auto">🤖 ${lm.getString('deepswarm.auto')}</option>
-      <option value="deepseek">🐋 DeepSeek</option>
+      <option value="deepseek">🐋 DeepSeek Coding (V4.1 Flash)</option>
       <option value="gemini">💎 Gemini</option>
       <option value="alibaba">☁️ Qwen (Alibaba)</option>
       <option value="moonshot">🌙 Kimi (Moonshot)</option>
       <option value="kimiCode">🌙 KimiCode (direct)</option>
       <option value="tencent">🔷 Hunyuan (Tencent)</option>
+      <option value="zhipu">🧠 Zhipu / GLM</option>
+      <option value="zhipu-coding">🧠 Zhipu Coding Plan</option>
+      <option value="doubao">🔥 Doubao / Volcengine</option>
+      <option value="doubao-coding">🔥 Doubao Coding Plan</option>
+      <option value="byteplus">🌐 BytePlus (Intl)</option>
+      <option value="byteplus-coding">🌐 BytePlus Coding Plan</option>
+      <option value="stepfun">⚡ StepFun</option>
+      <option value="openai">🟢 OpenAI</option>
+      <option value="claude">🟣 Claude</option>
+      <option value="openrouter">🔀 OpenRouter</option>
     </select>
     <select id="deepswarm-tier" style="width:90px;">
       <option value="auto">${lm.getString('deepswarm.tierAuto')}</option>
@@ -1410,6 +1440,7 @@ ${PROVIDER_IDS.map(p => {
     <label class="row"><input type="checkbox" id="diagnostics"> ${lm.getString('steering.diagnostics')}</label>
     <label class="row"><input type="checkbox" id="deepseek-trace"> ${lm.getString('steering.deepseekTrace')}</label>
     <label class="row"><input type="checkbox" id="deepseek-thinking"> 🧠 ${lm.getString('steering.deepseekThinking')} <span class="hint">${lm.getString('steering.deepseekThinkingHint')}</span></label>
+    <label class="row">${lm.getString('steering.deepseekReasoningEffort')} <select id="deepseek-reasoning-effort" style="width:auto;"><option value="low">low</option><option value="high">high</option><option value="max">max</option></select> <span class="hint">${lm.getString('steering.deepseekReasoningEffortHint')}</span></label>
     <label class="row"><input type="checkbox" id="sidebar-compact"> ${lm.getString('steering.lowMemory')}</label>
     <label class="row"><input type="checkbox" id="error-learning"> 🌸 ${lm.getString('steering.errorLearning')} <span class="hint">${lm.getString('steering.errorLearningHint')}</span></label>
     <div class="disclaimer" id="error-learning-warning" style="display:none;">⚠️ ${lm.getString('steering.errorLearningWarning')}</div>
@@ -1958,6 +1989,7 @@ ${PROVIDER_IDS.map(p => {
 $('triple-check-auto').checked = !!s.tripleCheckAuto;
     $('deepseek-trace').checked = !!s.showDeepSeekTrace;
     $('deepseek-thinking').checked = s.deepseekThinking ?? true;
+    $('deepseek-reasoning-effort').value = s.deepseekReasoningEffort ?? 'high';
     $('sidebar-compact').checked = s.sidebarMode === 'compact';
     // Initialize language segmented control
     document.querySelectorAll('.seg-btn').forEach(btn => {
@@ -2499,6 +2531,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
   $('triple-check-auto').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleTripleCheckAuto', value: e.target.checked }));
   $('deepseek-trace').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleDeepSeekTrace', value: e.target.checked }));
   $('deepseek-thinking').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleDeepSeekThinking', value: e.target.checked }));
+  $('deepseek-reasoning-effort').addEventListener('change', (e) => vscode.postMessage({ type: 'setDeepSeekReasoningEffort', value: e.target.value }));
   $('sidebar-compact').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleSidebarCompact', value: e.target.checked }));
   try { $('language-select').addEventListener('change', (e) => vscode.postMessage({ type: 'setLanguage', value: e.target.value })); } catch { /* language-select may not exist if using segmented control */ }
   // Segmented language control

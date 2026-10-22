@@ -27,6 +27,33 @@ export interface UsageRecord {
     completionTokens: number;
     /** Number of prompt tokens served from DeepSeek cache (from X-DS-Usage-Cached-Tokens header). */
     cachedPromptTokens?: number;
+    /** Characters of the outbound prompt view (the messages array as sent), measured pre-send. */
+    promptChars?: number;
+    /** CJK characters within promptChars (Han + Kana + Hangul). */
+    promptCjkChars?: number;
+    /** Serialized tool-schema characters sent with the request. */
+    toolSchemaChars?: number;
+    /** Number of tool schemas advertised on the request. */
+    toolCount?: number;
+    /** Prompt-estimator generation id ('none' = no estimate ran for this route). */
+    estimatorVersion?: string;
+    /** Opaque id grouping ledger rows by agent turn. */
+    turnId?: string;
+    /** 1-based step index within the turn. */
+    stepId?: number;
+    /** Whether the provider reported usage (separates failed/unreported rows from real 0s). */
+    usageReported?: boolean;
+    /**
+     * True when the request was retried WITHOUT its tools after a rejection. A row
+     * carrying this is a degraded answer, not a normal call.
+     */
+    toolsDroppedForRetry?: boolean;
+    /** Short, server-derived reason for the rejection that forced the tool-less retry. */
+    degradationReason?: string;
+    /** Whether the step completed or failed. */
+    stepOutcome?: 'completed' | 'failed';
+    /** Provider-reported served model id (best-effort). */
+    servedModel?: string;
     durationMs?: number;
     billableUnits?: number;
     billableUnitLabel?: string;
@@ -66,6 +93,17 @@ interface ProviderLedgerEntry {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    cachedPromptTokens?: number;
+    promptChars?: number;
+    promptCjkChars?: number;
+    toolSchemaChars?: number;
+    toolCount?: number;
+    estimatorVersion?: string;
+    turnId?: string;
+    stepId?: number;
+    usageReported?: boolean;
+    stepOutcome?: 'completed' | 'failed';
+    servedModel?: string;
     durationMs?: number;
     latencyBand?: 'normal' | 'delayed' | 'slow';
     billableUnits?: number;
@@ -172,6 +210,16 @@ function providerPolicySnapshot(): ProviderPolicySnapshot {
     };
 }
 
+// Track usage ledger write health so failures surface once per session.
+let ledgerWriteFailureCount = 0;
+let ledgerWriteFailureLast: string | undefined;
+let ledgerWriteFailureWarned = false;
+
+/** Health snapshot for the usage ledger writer (visible, not silent). */
+export function getLedgerWriteHealth(): { failures: number; lastError?: string } {
+    return { failures: ledgerWriteFailureCount, lastError: ledgerWriteFailureLast };
+}
+
 async function appendProviderLedger(entry: ProviderLedgerEntry): Promise<void> {
     if (!entry.policy.accountingEnabled) return;
     const target = ledgerPath();
@@ -184,7 +232,18 @@ async function appendProviderLedger(entry: ProviderLedgerEntry): Promise<void> {
         if (lines.length > MAX_LEDGER_LINES) {
             await fs.writeFile(target, lines.slice(-MAX_LEDGER_LINES).join('\n') + '\n', 'utf8');
         }
-    } catch { /* accounting must never break a provider response */ }
+    } catch (err: any) {
+        // Accounting never breaks a provider response, but a failing ledger write
+        // surfaces a one-time warning per session.
+        ledgerWriteFailureCount += 1;
+        ledgerWriteFailureLast = err?.message ?? String(err);
+        if (!ledgerWriteFailureWarned) {
+            ledgerWriteFailureWarned = true;
+            void vscode.window.showWarningMessage(
+                `Harmony: the usage ledger could not be written (${ledgerWriteFailureLast}). Cost accounting may be incomplete this session.`
+            );
+        }
+    }
 }
 
 function notifyUsageListeners(): void {
@@ -216,6 +275,17 @@ export function recordUsage(rec: UsageRecord): void {
         promptTokens: rec.promptTokens,
         completionTokens: rec.completionTokens,
         totalTokens: rec.promptTokens + rec.completionTokens,
+        cachedPromptTokens: rec.cachedPromptTokens,
+        promptChars: rec.promptChars,
+        promptCjkChars: rec.promptCjkChars,
+        toolSchemaChars: rec.toolSchemaChars,
+        toolCount: rec.toolCount,
+        estimatorVersion: rec.estimatorVersion,
+        turnId: rec.turnId,
+        stepId: rec.stepId,
+        usageReported: rec.usageReported,
+        stepOutcome: rec.stepOutcome,
+        servedModel: rec.servedModel,
         durationMs: rec.durationMs,
         latencyBand: latencyBand(rec.durationMs),
         billableUnits: rec.billableUnits,
@@ -271,7 +341,7 @@ export function estimateCost(provider: UsageProviderId, model: string, prompt: n
         if (lower.includes('pro') || lower.includes('reasoner') || lower.includes('r1')) {
             pM = 0.55; cM = 2.19;
         } else {
-            // DeepSeek cache pricing: cached input ~90% off ($0.014/M vs $0.14/M)
+            // DeepSeek cache pricing: cached input is substantially cheaper than uncached
             pM = 0.14; cM = 0.28;
         }
         // Apply cache discount for DeepSeek: cached prompt tokens are 10x cheaper

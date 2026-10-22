@@ -96,6 +96,7 @@ const TENCENT_MODELS: ModelMeta[] = [
 ];
 
 const GEMINI_MODELS: ModelMeta[] = [
+    { id: 'gemini-4-argon', label: 'gemini-4-argon (frontier, very expensive)', labelZh: 'gemini-4-argon（前沿，超贵）', aliases: ['argon', 'gemini-4'], detail: 'Google frontier flagship for the hardest end-to-end work. Uses your Gemini API key.' },
     { id: 'gemini-3.8-flash', label: 'gemini-3.8-flash (newest, fast, multimodal)', labelZh: 'gemini-3.8-flash（最新，快速，多模态）', aliases: ['gemini-3.8', 'g38'], detail: 'Google Gemini 3.8 Flash — newest release. Uses your Gemini API key.' },
     { id: 'gemini-3.7-flash', label: 'gemini-3.7-flash (fast, multimodal)', labelZh: 'gemini-3.7-flash（快速，多模态）', aliases: ['gemini-3.7', 'g37'], detail: 'Google Gemini 3.7 Flash. Uses your Gemini API key.' },
     { id: 'gemini-3.6-flash', label: 'gemini-3.6-flash (fast, multimodal)', labelZh: 'gemini-3.6-flash（快速，多模态）', aliases: ['gemini-3.6', 'g36'], detail: 'Google Gemini 3.6 Flash. Uses your Gemini API key.' },
@@ -120,19 +121,19 @@ const ZHIPU_CODING_MODELS: ModelMeta[] = [
 ];
 
 const OPENAI_MODELS: ModelMeta[] = [
-    { id: 'gpt-6-astra', label: 'gpt-6-astra (frontier, very expensive)', labelZh: 'gpt-6-astra（前沿，超贵）', aliases: ['astra', 'gpt-6'], detail: 'OpenAI frontier flagship for the hardest end-to-end work. $10/$50 per MTok. Uses your OpenAI API key.' },
-    { id: 'gpt-5.6-sol', label: 'gpt-5.6-sol (flagship heavy/coding)', labelZh: 'gpt-5.6-sol（旗舰，重推理/编程）', aliases: ['gpt-5.6', 'sol', 'gpt'], detail: 'OpenAI flagship for complex professional + coding work (alias gpt-5.6). $4/$20 per MTok. Uses your OpenAI API key.' },
-    { id: 'gpt-5.6-terra', label: 'gpt-5.6-terra (balanced mid)', labelZh: 'gpt-5.6-terra（均衡实用）', aliases: ['terra'], detail: 'Balanced intelligence and cost. $2/$12 per MTok. Uses your OpenAI API key.' },
-    { id: 'gpt-5.6-luna', label: 'gpt-5.6-luna (light, cheap)', labelZh: 'gpt-5.6-luna（轻量，便宜）', aliases: ['luna', 'openai'], detail: 'Cost-sensitive lightweight tier. $0.20/$1.20 per MTok. Uses your OpenAI API key.' },
+    { id: 'gpt-6-astra', label: 'gpt-6-astra (frontier, very expensive)', labelZh: 'gpt-6-astra（前沿，超贵）', aliases: ['astra', 'gpt-6'], detail: 'OpenAI frontier flagship for the hardest end-to-end work. Uses your OpenAI API key.' },
+    { id: 'gpt-5.6-sol', label: 'gpt-5.6-sol (flagship heavy/coding)', labelZh: 'gpt-5.6-sol（旗舰，重推理/编程）', aliases: ['gpt-5.6', 'sol', 'gpt'], detail: 'OpenAI flagship for complex professional + coding work (alias gpt-5.6). Uses your OpenAI API key.' },
+    { id: 'gpt-5.6-terra', label: 'gpt-5.6-terra (balanced mid)', labelZh: 'gpt-5.6-terra（均衡实用）', aliases: ['terra'], detail: 'Balanced intelligence and cost. Uses your OpenAI API key.' },
+    { id: 'gpt-5.6-luna', label: 'gpt-5.6-luna (light, cheap)', labelZh: 'gpt-5.6-luna（轻量，便宜）', aliases: ['luna', 'openai'], detail: 'Cost-sensitive lightweight tier. Uses your OpenAI API key.' },
     { id: 'gpt-5', label: 'gpt-5 (legacy)', labelZh: 'gpt-5（上一代）', aliases: ['gpt-5'], detail: 'Previous-generation OpenAI flagship. Kept for compatibility.', featured: false },
     { id: 'o4', label: 'o4 (legacy reasoning)', labelZh: 'o4（上一代推理）', aliases: ['o4'], detail: 'Legacy reasoning model. Hidden from the dropdown.', featured: false },
 ];
 
 const CLAUDE_MODELS: ModelMeta[] = [
-    { id: 'claude-fable-5-1', label: 'claude-fable-5-1 (frontier, very expensive)', labelZh: 'claude-fable-5-1（前沿，超贵）', aliases: ['fable', 'fable-5.1'], detail: 'Anthropic frontier for demanding reasoning and long-horizon agentic work. $10/$50 per MTok. Uses your Anthropic API key.' },
-    { id: 'claude-opus-5', label: 'claude-opus-5 (coding, enterprise)', labelZh: 'claude-opus-5（编程，企业级）', aliases: ['opus', 'claude-opus', 'claude'], detail: 'Complex agentic coding and enterprise work. $5/$25 per MTok. Uses your Anthropic API key.' },
-    { id: 'claude-sonnet-5', label: 'claude-sonnet-5 (balanced mid)', labelZh: 'claude-sonnet-5（均衡实用）', aliases: ['sonnet', 'claude-sonnet'], detail: 'Best combination of speed and intelligence. $2/$10 per MTok. Uses your Anthropic API key.' },
-    { id: 'claude-haiku-4-5-20251001', label: 'claude-haiku-4.5 (fast, light)', labelZh: 'claude-haiku-4.5（快速轻量）', aliases: ['haiku', 'claude-haiku'], detail: 'Fastest model with near-frontier intelligence. $1/$5 per MTok. Uses your Anthropic API key.' },
+    { id: 'claude-fable-5-1', label: 'claude-fable-5-1 (frontier, very expensive)', labelZh: 'claude-fable-5-1（前沿，超贵）', aliases: ['fable', 'fable-5.1'], detail: 'Anthropic frontier for demanding reasoning and long-horizon agentic work. Uses your Anthropic API key.' },
+    { id: 'claude-opus-5', label: 'claude-opus-5 (coding, enterprise)', labelZh: 'claude-opus-5（编程，企业级）', aliases: ['opus', 'claude-opus', 'claude'], detail: 'Complex agentic coding and enterprise work. Uses your Anthropic API key.' },
+    { id: 'claude-sonnet-5', label: 'claude-sonnet-5 (balanced mid)', labelZh: 'claude-sonnet-5（均衡实用）', aliases: ['sonnet', 'claude-sonnet'], detail: 'Best combination of speed and intelligence. Uses your Anthropic API key.' },
+    { id: 'claude-haiku-4-5-20251001', label: 'claude-haiku-4.5 (fast, light)', labelZh: 'claude-haiku-4.5（快速轻量）', aliases: ['haiku', 'claude-haiku'], detail: 'Fastest model with near-frontier intelligence. Uses your Anthropic API key.' },
     { id: 'claude-opus-4', label: 'claude-opus-4 (legacy)', labelZh: 'claude-opus-4（上一代）', aliases: ['claude-opus-4'], detail: 'Previous-generation Anthropic flagship. Kept for compatibility.', featured: false },
 ];
 
@@ -143,9 +144,9 @@ const OPENROUTER_MODELS: ModelMeta[] = [
 ];
 
 const DOUBAO_MODELS: ModelMeta[] = [
-    { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'ByteDance flagship — auto-updates to the latest version weekly (not version-pinned; outputs may drift). Activate in Ark console (火山方舟) first. ¥6/M input, ¥30/M output.' },
-    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship snapshot. Best quality for hard reasoning tasks. Activate in Ark console first. ¥6/M input, ¥30/M output.' },
-    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（速度快，性价比高）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version. Activate in Ark console first. ¥3/M input, ¥15/M output — excellent value (高性价比) for routine tasks.' },
+    { id: 'doubao-seed-evolving', label: 'Seed-Evolving (always latest, weekly updates)', labelZh: 'Seed-Evolving（持续更新，每周迭代）', aliases: ['doubao', 'seed-evolving'], detail: 'ByteDance flagship — auto-updates to the latest version weekly (not version-pinned; outputs may drift). Activate in Ark console (火山方舟) first.' },
+    { id: 'doubao-seed-2-1-pro', label: 'Seed-2.1-pro (flagship, stable)', labelZh: 'Seed-2.1-pro（旗舰稳定版）', aliases: ['seed-pro', 'doubao-pro'], detail: 'Stable flagship snapshot. Best quality for hard reasoning tasks. Activate in Ark console first.' },
+    { id: 'doubao-seed-2-1-turbo', label: 'Seed-2.1-turbo (fast, cost-efficient)', labelZh: 'Seed-2.1-turbo（速度快，性价比高）', aliases: ['seed-turbo', 'doubao-turbo'], detail: 'Faster, lower-cost version. Activate in Ark console first — good value (高性价比) for routine tasks.' },
     { id: 'doubao-seed-code', label: 'Seed-Code (coding-specialized, Coding Plan)', labelZh: 'Seed-Code（编程专精，编码计划）', aliases: ['doubao-code', 'seed-code'], detail: 'Coding-specialized Doubao model. ~256K context, optimized for agentic programming. Available via the Volcano Engine Coding Plan (编程计划) — same base URL and key as standard Doubao. Verify exact model ID via Discover Models.' },
 ];
 
@@ -159,7 +160,7 @@ const DOUBAO_CODING_MODELS: ModelMeta[] = [
 ];
 
 const STEPFUN_MODELS: ModelMeta[] = [
-    { id: 'step-3.7-flash', label: 'step-3.7-flash (MoE, multimodal, agent/coding)', labelZh: 'step-3.7-flash（MoE，多模态，智能体/编程）', aliases: ['stepfun', 'step-flash'], detail: 'StepFun (阶跃星辰) flagship. 198B MoE architecture, 256K context, native image/video, tool calling, reasoning effort control. $0.20/M input, $1.15/M output. Verify exact model ID via Discover Models.' },
+    { id: 'step-3.7-flash', label: 'step-3.7-flash (MoE, multimodal, agent/coding)', labelZh: 'step-3.7-flash（MoE，多模态，智能体/编程）', aliases: ['stepfun', 'step-flash'], detail: 'StepFun (阶跃星辰) flagship. 198B MoE architecture, 256K context, native image/video, tool calling, reasoning effort control. Verify exact model ID via Discover Models.' },
 ];
 
 const BYTEPLUS_MODELS: ModelMeta[] = [

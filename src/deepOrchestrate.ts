@@ -118,10 +118,11 @@ const REVIEWER_CONFIGS: Record<string, ReviewerConfig> = {
     },
     'gemini': {
         provider: 'gemini', group: 'Gemini',
-        endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',
-        model: 'gemini-2.0-flash-lite',
+        // Lightweight Gemini reviewer model with minimal thinking budget.
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent',
+        model: 'gemini-3.1-flash-lite',
         authHeader: (_key) => ({}),
-        buildBody: (prompt) => ({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 200, temperature: 0.1 } }),
+        buildBody: (prompt) => ({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 200, thinkingConfig: { thinkingLevel: 'MINIMAL' } } }),
     },
     'tencent': {
         provider: 'tencent', group: 'Hunyuan',
@@ -132,12 +133,18 @@ const REVIEWER_CONFIGS: Record<string, ReviewerConfig> = {
     },
 };
 
+/** A reviewer excluded from consensus must be visible in the result — a silent
+ *  exclusion hides a dead probe for months.
+ *  The list is per-run, never shared between runs. */
+type ReviewerExclusion = { provider: string; group: string; reason: string };
+
 /** Call one reviewer model and get its verdict. Returns undefined if the call fails (caller excludes from consensus). */
 async function callReviewerModel(
-    provider: string, apiKey: string, reviewPrompt: string, timeoutMs: number
+    provider: string, apiKey: string, reviewPrompt: string, timeoutMs: number,
+    exclusions: ReviewerExclusion[]
 ): Promise<ReviewVote | undefined> {
     const config = REVIEWER_CONFIGS[provider];
-    if (!config) return undefined;  // Unconfigured provider — excluded from consensus
+    if (!config) { exclusions.push({ provider, group: provider, reason: 'no reviewer config registered' }); return undefined; }  // Unconfigured provider — excluded from consensus
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -153,12 +160,16 @@ async function callReviewerModel(
         }
         const body = JSON.stringify(config.buildBody(reviewPrompt));
         const res = await fetch(url, { method: 'POST', headers, body, signal: controller.signal as any });
-        if (!res.ok) return undefined;  // API error — excluded from consensus (fail-closed)
+        if (!res.ok) { exclusions.push({ provider, group: config.group, reason: `HTTP ${res.status}` }); return undefined; }  // API error — excluded from consensus (fail-closed)
         const json: any = await res.json();
         const text = extractResponseText(json, provider);
         const verdict = parseReviewVerdict(text, config.group, provider);
         return verdict;
-    } catch {
+    } catch (e) {
+        const reason = e instanceof Error && e.name === 'AbortError'
+            ? `timed out after ${Math.round(timeoutMs / 1000)}s`
+            : (e instanceof Error ? e.message : String(e));
+        exclusions.push({ provider, group: config.group, reason });
         return undefined;  // Timeout/network error — excluded from consensus (fail-closed, not fail-open)
     } finally {
         clearTimeout(timer);
@@ -191,7 +202,8 @@ async function runMultiModelReview(
     diff: string,
     relPath: string,
     instruction: string,
-): Promise<{ votes: ReviewVote[]; consensus: boolean; estimatedCost: number } | null> {
+): Promise<{ votes: ReviewVote[]; consensus: boolean; estimatedCost: number; attempts: number; exclusions: ReviewerExclusion[] } | null> {
+    const runExclusions: ReviewerExclusion[] = [];
     const reviewPrompt = [
         `CODE REVIEW — Vote APPROVE or REJECT with brief concerns.`,
         ``,
@@ -217,7 +229,7 @@ async function runMultiModelReview(
         if (!apiKey) continue;  // No key — skip this reviewer (will fall back to checklist if all skipped)
         anyKeyFound = true;
         attemptedCount++;
-        const vote = await callReviewerModel(provider, apiKey, reviewPrompt, 15000);
+        const vote = await callReviewerModel(provider, apiKey, reviewPrompt, 15000, runExclusions);
         if (vote) {
             votes.push(vote);  // Only count successful responses
         }
@@ -225,12 +237,16 @@ async function runMultiModelReview(
     }
 
     if (!anyKeyFound) return null;  // No keys at all — fall back to checklist mode
-    if (votes.length === 0) return null;  // All calls failed — fall back to checklist mode
+    if (votes.length === 0) {
+        // All calls failed: never mask real failures as "no API keys" — surface
+        // the attempt and its exclusions.
+        return { votes: [], consensus: false, estimatedCost: attemptedCount * 0.002, attempts: attemptedCount, exclusions: [...runExclusions] };
+    }
 
     const approvals = votes.filter(v => v.approved).length;
-    const consensus = approvals >= Math.ceil(votes.length * 0.67);  // 2-of-3 or majority
+    const consensus = votes.length > 0 && approvals >= Math.ceil(votes.length * 0.67);  // 2-of-3 or majority
     const estimatedCost = attemptedCount * 0.002;  // ~$0.002 per attempted review call
-    return { votes, consensus, estimatedCost };
+    return { votes, consensus, estimatedCost, attempts: attemptedCount, exclusions: [...runExclusions] };
 }
 
 // ── Post-apply verification ────────────────────────────────────────────────
@@ -532,7 +548,23 @@ async function runDeepOrchestratePipeline(
             const approvalCount = reviewResult.votes.filter(v => v.approved).length;
             output += `\n**Approvals:** ${approvalCount}/${reviewResult.votes.length}\n`;
             output += `**Consensus:** ${consensus ? '✅ REACHED' : '❌ NOT REACHED'}\n`;
-            output += `> Approx. ${reviewResult.votes.length} model call(s)\n`;
+            output += `> Approx. ${reviewResult.attempts} model call(s)\n`;
+            if (reviewResult.exclusions.length > 0) {
+                // Surface any reviewer that failed or timed out during consensus.
+                output += `\n**⚠️ Excluded from consensus (${reviewResult.exclusions.length}):**\n`;
+                for (const ex of reviewResult.exclusions) {
+                    output += `- **${ex.group}** (${ex.provider}) — ${ex.reason}\n`;
+                }
+            }
+            if (reviewResult.votes.length === 0) {
+                // nobody voted — show the checklist
+                // the reviewers would have used, so the result stays actionable.
+                const noVoteChecklist = reviewerPairs.map(([provider, group]) => {
+                    const checks = REVIEW_CHECKS[group] || ['General code review'];
+                    return `- **${group}** (${provider}): ${checks.join(', ')}`;
+                }).join('\n');
+                output += `\n**Review checklist (no votes recorded):**\n${noVoteChecklist}\n`;
+            }
         } else {
             // No API keys — fall back to checklist mode
             const reviewerLines = reviewerPairs.map(([provider, group]) => {
@@ -572,7 +604,7 @@ async function runDeepOrchestratePipeline(
         await appendAudit(workspaceUri, {
             timestamp: new Date().toISOString(), operationId, filePath,
             instruction: input.editInstruction.slice(0, 200),
-            dryRun: false, consensus: false, applied: false,
+            dryRun: false, consensus, applied: false,
         });
 
         await releaseWorkspaceLock(workspaceUri);

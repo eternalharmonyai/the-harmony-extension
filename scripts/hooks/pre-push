@@ -1,0 +1,158 @@
+#!/bin/bash
+# Harmony Privacy Gate - Pre-Push Hook
+#
+# Scans outgoing commits and tags against the local protected-term list in
+# $HARMONY_CHECK_DIR (default ~/.harmony-checks) before pushing to any hosted
+# git remote. Install with: node scripts/install-hooks.js
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+REMOTE_NAME="${1:-}"
+REMOTE_URL="${2:-}"
+
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
+lower() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]'; }
+REMOTE_NAME_LC=$(lower "$REMOTE_NAME")
+REMOTE_URL_LC=$(lower "$REMOTE_URL")
+
+# Gate the DESTINATION, never the nickname — every push to a hosted git remote is scanned.
+gated=0
+[ -n "$REMOTE_NAME_LC" ] && gated=1
+case "$REMOTE_URL_LC" in
+    http://*|https://*|git@*|ssh://*) gated=1 ;;
+esac
+
+if [ "$gated" -eq 0 ]; then
+    exit 0
+fi
+
+# ---- Term list: ONE primary location, then legacy fallbacks (warned) -------------
+CHECK_DIR="${HARMONY_CHECK_DIR:-$HOME/.harmony-checks}"
+LEGACY_USED=""
+
+# An EXPLICIT override is authoritative: if the operator names a file, that file is the
+# answer. Falling through to a legacy list when an explicit path is missing would make
+# the gate's behaviour depend on what happens to exist - which is how a check quietly
+# stops checking. Explicit override missing => the gate below fires.
+if [ -n "${HARMONY_PRIVATE_TERMS_FILE:-}" ]; then
+    FULL_TERMS="$HARMONY_PRIVATE_TERMS_FILE"
+else
+    FULL_TERMS="$CHECK_DIR/terms.txt"
+    if [ ! -f "$FULL_TERMS" ]; then
+        for cand in "$HOME/.harmony-hygiene/private-terms.txt" "$GIT_ROOT/.harmony/private-terms.txt"; do
+            if [ -f "$cand" ]; then
+                FULL_TERMS="$cand"
+                LEGACY_USED="$cand"
+                break
+            fi
+        done
+    fi
+fi
+
+if [ -z "${FULL_TERMS:-}" ] || [ ! -f "$FULL_TERMS" ]; then
+    if [ "${HARMONY_ALLOW_UNVERIFIED:-0}" = "1" ]; then
+        echo -e "${YELLOW}Harmony Privacy Gate: UNVERIFIED - no term list at $CHECK_DIR/terms.txt.${NC}" >&2
+        echo -e "${YELLOW}  HARMONY_ALLOW_UNVERIFIED=1 is set, so this push proceeds WITHOUT checking${NC}" >&2
+        echo -e "${YELLOW}  for private terms. This is not a clean result - it is an unchecked one.${NC}" >&2
+        exit 0
+    fi
+    echo "" >&2
+    echo -e "${RED}=== HARMONY PRIVACY GATE: PUSH BLOCKED (nothing to check with) ===${NC}" >&2
+    echo -e "${RED}No term list found. Expected: $CHECK_DIR/terms.txt${NC}" >&2
+    echo -e "${RED}A gate that reports clean because its list is missing is not a gate.${NC}" >&2
+    echo "" >&2
+    echo -e "${YELLOW}Fix: create $CHECK_DIR/terms.txt with one term per line,${NC}" >&2
+    echo -e "${YELLOW}     or set HARMONY_CHECK_DIR to a directory that has one,${NC}" >&2
+    echo -e "${YELLOW}     or set HARMONY_ALLOW_UNVERIFIED=1 to push anyway (recorded as unchecked).${NC}" >&2
+    echo "" >&2
+    exit 1
+fi
+
+if [ -n "$LEGACY_USED" ]; then
+    echo -e "${YELLOW}Harmony Privacy Gate: using LEGACY term list $LEGACY_USED${NC}" >&2
+    echo -e "${YELLOW}  Move these lines into $CHECK_DIR/terms.txt so all checkers share one list.${NC}" >&2
+fi
+
+FOUND=0
+
+# A comment-free copy of the term list. `grep -f` reads one pattern per line, so
+# comments and blank lines must be stripped first or they become patterns themselves.
+# The trailing-whitespace strip also removes a stray CR, which would turn every
+# pattern into one that can never match.
+TERMS_CLEAN=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/harmony-terms-$$")
+trap 'rm -f "$TERMS_CLEAN"' EXIT
+sed 's/[[:space:]]*$//' "$FULL_TERMS" | grep -v -e '^#' -e '^$' > "$TERMS_CLEAN" 2>/dev/null || true
+if [ ! -s "$TERMS_CLEAN" ]; then
+    echo "" >&2
+    echo -e "${RED}=== HARMONY PRIVACY GATE: PUSH BLOCKED (no patterns to check with) ===${NC}" >&2
+    echo -e "${RED}$FULL_TERMS exists but yields no patterns once comments are removed.${NC}" >&2
+    echo "" >&2
+    exit 1
+fi
+
+# NOTE: this loop reads refs from STDIN, which git supplies during a real push.
+# Running the hook by hand without stdin will block - redirect from /dev/null.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -z "${local_sha:-}" ] && continue
+    if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then continue; fi
+
+    # Resolve the ref to the COMMIT we will actually scan. A tag push names a tag
+    # OBJECT, and `git show <tag-object>:path` fails - which used to look like clean.
+    SCAN_COMMIT=$(git rev-parse "$local_sha^{commit}" 2>/dev/null || true)
+    if [ -z "${SCAN_COMMIT:-}" ]; then
+        echo "" >&2
+        echo -e "${RED}=== HARMONY PRIVACY GATE: PUSH BLOCKED (ref cannot be resolved) ===${NC}" >&2
+        echo -e "${RED}Could not resolve $local_ref ($local_sha) to a commit.${NC}" >&2
+        echo -e "${RED}An unreadable ref is not a clean one.${NC}" >&2
+        echo "" >&2
+        exit 1
+    fi
+
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+        # NEW ref: there is no common ancestor to diff against. `git diff <commit>`
+        # compares that commit to the WORKING TREE, so a clean tree produced an empty
+        # list and the whole gate silently skipped the push. Scan the tree instead.
+        CHANGED_FILES=$(git ls-tree -r --name-only "$SCAN_COMMIT" 2>/dev/null || true)
+        if [ -z "$CHANGED_FILES" ]; then
+            CHANGED_FILES=$(git show --pretty=format: --name-only "$SCAN_COMMIT" 2>/dev/null || true)
+        fi
+    else
+        CHANGED_FILES=$(git diff --name-only "$remote_sha..$local_sha" 2>/dev/null || true)
+    fi
+    [ -z "$CHANGED_FILES" ] && continue
+
+    # One pass per file, with the WHOLE list supplied by -f. TWO passes, deliberately
+    # (see scripts/check-repo.js:137 - the term list's lines are regex patterns and
+    # matching is CASE-SENSITIVE). A fixed-string-only matcher would silently stop
+    # matching every bracketed case-fold pattern; a regex-only matcher loses the
+    # backslash in path-like terms, because an escape before an ordinary character is
+    # undefined in POSIX regex. Running both is strictly more finds, and over-gating
+    # is the safe direction for a privacy gate.
+    while IFS= read -r file; do
+        [ -z "$file" ] && continue
+        MATCHES=$(git show "$SCAN_COMMIT:$file" 2>/dev/null | grep -HnwI -f "$TERMS_CLEAN" --label="$file" 2>/dev/null || true)
+        MATCHES_F=$(git show "$SCAN_COMMIT:$file" 2>/dev/null | grep -HnwIF -f "$TERMS_CLEAN" --label="$file" 2>/dev/null || true)
+        [ -z "$MATCHES" ] && MATCHES="$MATCHES_F"
+        if [ -n "$MATCHES" ]; then
+            [ $FOUND -eq 0 ] && { echo ""; echo -e "${RED}=== HARMONY PRIVACY GATE: PUSH BLOCKED ===${NC}"; echo -e "${RED}Private terms found in commits being pushed:${NC}"; echo ""; }
+            echo "$MATCHES"
+            FOUND=1
+        fi
+    done <<< "$CHANGED_FILES"
+done
+
+if [ $FOUND -eq 1 ]; then
+    echo ""
+    echo -e "${RED}Destination: $REMOTE_URL${NC}"
+    echo -e "${YELLOW}Remove private terms, or override deliberately: git push --no-verify${NC}"
+    echo ""
+    exit 1
+fi
+
+echo -e "${GREEN}Harmony Privacy Gate: push to $REMOTE_URL passed - no private terms found.${NC}"
+exit 0

@@ -1,7 +1,5 @@
 # Local state, generated archives, and package artifacts.
 .gitignore
-# Console-redirect artifacts some tooling leaves in the workspace root
-# (e.g. "code --list-extensions > exts.txt", or "> $null" under cmd.exe).
 exts.txt
 $null
 .harmony/**
@@ -13,7 +11,7 @@ $null
 **/*.md
 !README.md
 !README.zh-CN.md
-# docs/: ship the repair guide and provider-model discovery guide
+# Shipped documentation guides.
 docs/*.md
 !docs/LIFELINE.md
 !docs/LIFELINE.zh-CN.md
@@ -46,9 +44,12 @@ _temp_extract_*/**
 extension/
 .github/
 
-# Dev/test scripts and specs (not shipped in the extension).
+# Dev/test scripts and specs.
 scripts/**
 spec/**
+
+# Runtime OCR helper script.
+!scripts/ocr_text.py
 
 # Generated dependencies/build outputs.
 companion-extensions/**
@@ -56,7 +57,7 @@ native-ui/node_modules/**
 native-ui/dist/**
 native-ui/src-tauri/target/**
 
-# Native build artifacts and source that should never ship in the VSIX.
+# Native build artifacts and source.
 **/*.pdb
 **/*.iobj
 **/*.ipdb
@@ -67,12 +68,20 @@ native-ui/src-tauri/target/**
 node_modules/better-sqlite3/deps/**
 node_modules/duckdb/src/**
 
-# Backups should never ship.
+# Backups and scratch files.
 _*.js
 *.backup*
 **/*.backup*
+*.bak
+**/*.bak
+*.draft.*
+**/*.draft.*
+*.verify.*
+**/*.verify.*
+*.sources.*/**
+**/*.sources.*/**
 
-# Editor workspace files can embed absolute local paths.
+# Workspace and cache files.
 *.code-workspace
-__pycache__/**  
-*.pyc  
+__pycache__/**
+*.pyc

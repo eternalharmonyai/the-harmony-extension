@@ -825,11 +825,27 @@ const NON_INTERACTIVE_TOOLS: Record<string, (args: any) => Promise<ToolResult>> 
  * by the chat view directly.
  */
 export async function executeTool(call: ToolCall): Promise<ToolResult | null> {
-    const handler = NON_INTERACTIVE_TOOLS[call.name];
-    if (!handler) return null;
-    return await handler({ ...call.arguments, _id: call.id });
+    if (isInteractiveTool(call.name)) return null;
+    const stripped = call.name.replace(/^harmony_/, '');
+    const handler = NON_INTERACTIVE_TOOLS[call.name] ?? NON_INTERACTIVE_TOOLS[stripped];
+    if (handler) {
+        return await handler({ ...call.arguments, _id: call.id });
+    }
+    try {
+        const { invokeHeadlessHarmonyTool } = await import('./host/vscodeHostShim');
+        const res = await invokeHeadlessHarmonyTool(call.name, (call.arguments ?? {}) as Record<string, unknown>);
+        if (res.result.startsWith('Unknown Harmony tool:')) return null;
+        return {
+            tool_call_id: call.id,
+            ok: res.ok,
+            result: res.result,
+        };
+    } catch {
+        return null;
+    }
 }
 
 export function isInteractiveTool(name: string): boolean {
-    return name === 'ask_question' || name === 'final_answer';
+    const clean = name.replace(/^harmony_/, '');
+    return clean === 'ask_question' || clean === 'ask_questions' || clean === 'ask_harmony' || clean === 'final_answer';
 }

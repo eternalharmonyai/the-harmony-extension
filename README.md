@@ -27,7 +27,7 @@ Harmony ships capabilities no other AI coding collaborator offers today. Each on
 | 🔗 [Cross-Chat Continuity](#cross-chat-continuity) | One context thread across Copilot, Harmony, Gemini, and the terminal — pick up where you left off. |
 | 🛡️ [Reversible Effect Ledger](#effect-ledger) | Every tracked mutation is recorded and rollback-able — undo file writes, stop spawned processes, recover from interruption. |
 | 🛡️ [Self-Healing Harness](#self-healing-harness) | SHA256-verified atomic edits with checkpointing — partial writes are impossible, failed edits roll back. |
-| 🧠 [HarmonyHub](#harmonyhub) | Local-first sovereign memory — your context never leaves your machine. |
+| 🧠 [HarmonyHub](#harmonyhub) | Local-first sovereign memory — the memory index stays on your machine. |
 | 🌐 [Translation Hub](#translation-hub) | Multi-model consensus EN↔ZH translation that guards against single-model errors — built for technical standards docs. |
 | 🌸 [CareBloom](#carebloom) | Self-improving tool usage, learned locally with zero extra API calls *(default off)*. |
 | 🎨 [Creative Tools](#creative-tools) | Image generation, canvas editing, and video generation through a local creative backend. |
@@ -39,7 +39,7 @@ Harmony ships capabilities no other AI coding collaborator offers today. Each on
 ┌─────────────────────────────────────────────────┐
 │  VS Code / Cursor                               │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │ @harmony │  │ Sidebar  │  │ 191+ Tools   │  │
+│  │ @harmony │  │ Sidebar  │  │ 196+ Tools   │  │
 │  │   Chat   │  │ Controls │  │ (primitives, │  │
 │  │Participant│  │ & Board  │  │ swarm, git,  │  │
 │  │          │  │          │  │ browser, ...) │  │
@@ -69,7 +69,7 @@ Harmony ships capabilities no other AI coding collaborator offers today. Each on
 └─────────────────────────────────────────────────┘
 ```
 
-The chat interface, sidebar, 191+ tools and 64 commands run inside VS Code. The 15 swarm primitives (convergence, memory, reasoning, planning, skills) form the cognitive foundation. AI model calls are routed through Harmony's own provider layer to external APIs via your API keys.
+The chat interface, sidebar, 196+ tools and 65 commands run inside VS Code. The 15 swarm primitives (convergence, memory, reasoning, planning, skills) form the cognitive foundation. AI model calls are routed through Harmony's own provider layer to external APIs via your API keys.
 
 ### Provider access — what makes Harmony different
 
@@ -78,7 +78,7 @@ Harmony connects you directly to a diverse set of AI providers through your own 
 | Capability | Detail |
 |:---|:---|
 | **Broader provider reach** | DeepSeek, Moonshot/Kimi, Kimi Code, Alibaba/Qwen, Zhipu/GLM, Zhipu Coding Plan, Tencent, ByteDance/Doubao, and StepFun — alongside Gemini, OpenAI, OpenRouter, and Anthropic/Claude — all from one extension |
-| **Your keys, your choice** | You decide which providers to configure. No keys = no external calls. Add providers incrementally as you need them. |
+| **Your keys, your choice** | You decide which providers to configure. No API key means no *model* call to that provider — but it is **not** a fully offline mode. See [Network activity that needs no API key](#network-activity-that-needs-no-api-key). Add providers incrementally as you need them. |
 | **Copilot cross-play** | Use VS Code Copilot for everyday coding while Harmony handles orchestration, multi-model consensus, and document translation |
 | **Local models (planned)** | Native local-first operation is on the roadmap. Today Harmony requires API keys; local model support is in development. |
 
@@ -98,6 +98,23 @@ Each AI provider supports up to **4 API key slots**, allowing different keys for
 The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each provider. A green pill means a key is configured for that slot; a gray pill means no key is set. Click any pill to set or change the key for that slot.
 
 **Legacy key migration:** If you previously configured a single API key for a provider, Harmony automatically migrates it to slot 0 (Chat) on first launch. No manual reconfiguration is needed — your existing keys continue to work.
+
+## What's New in v0.4.16
+
+*v0.4.16 adds the Gemini 4 Argon frontier model, makes DeepSeek's native picker models genuinely agent-capable, adds DeepSeek Coding / Flash (V4.1) to collaborative Agent and Swarm selectors, makes long turns more stable, and makes Harmony's network behaviour and capabilities explicit.*
+
+- **Gemini 4 Argon** (`gemini-4-argon`) — the frontier option in the Gemini picker, mapped to the premium tier and routed natively with the same thinking rules as the other 2.5+ models. The premium cost confirmation applies before it is used.
+- **Tool calling works in the native DeepSeek picker** — `options.tools` is sent, streamed `delta.tool_calls` fragments are reassembled (even when a server omits `index`), and `LanguageModelToolCallPart` values are reported back so Agent mode actually invokes tools. The reassembly logic lives in its own unit-tested module.
+- **DeepSeek Coding / Flash (V4.1) in Agent & Swarm selectors** — `deepseek-flash` (V4.1) is now directly selectable as a coding option in the collaborative Agents selector, Swarm defaults, and the DeepSwarm sidebar dropdown, and serves as the default DeepSeek model across `coding`, `light`, and `mid` tiers.
+- **Mid-session whispers no longer break tool turns** — tool results are pushed before any pending whisper in the same turn, preventing `HTTP 400` message-ordering rejections on OpenAI-compatible servers.
+- **Truthful retry & ledger visibility** — tool-less fallback retries report the server's actual status and reason rather than mislabelling every failure as a schema error, and record `toolsDroppedForRetry` + `degradationReason` in the usage ledger.
+- **Costs you can verify yourself** — model descriptions no longer print fixed per-token prices; the premium confirmation points you at your provider's current pricing instead.
+- **Long-turn stability** — in-turn context compaction shrinks the oldest tool output when a turn outgrows the context guard, without removing messages or breaking tool-call pairing. Memory-health notices are now classified, so benign states stop raising false alarms.
+- **IT/Network, WordPress/Hosting & Cloud connector tools + headless host shim** — adds `harmony_dns_ssl_probe`, `harmony_net_path_audit`, `harmony_wp_site_diagnostic`, `harmony_wp_rest_client`, and `harmony_cloud_connector` (Supabase, Cloudflare, Netlify, Firebase, and Google Cloud API enablement checks), plus `vscodeHostShim.ts` so all 196 registered tools can also execute headlessly outside the VS Code extension host.
+- **OCR** — the native OCR helper now ships with the extension, with accurate requirements in both languages.
+- **Documentation** — both READMEs now state exactly what runs locally and what uses the network, including the features that make outbound requests before you add any API key.
+
+Full detail: [release-notes-v0.4.16.md](release-notes-v0.4.16.md)
 
 ## What's New in v0.4.15
 
@@ -302,7 +319,7 @@ DeepSeek requests are ordered for stable prefix caching — system message first
 
 ### 🤖 DeepSeek in the native model picker
 
-Harmony registers **DeepSeek V4 Flash**, **DeepSeek V4 Pro**, and **DeepSeek V4 Flash Vision** (experimental multimodal) as native VS Code language models, so they appear in Copilot Chat's model picker for anyone who installs the extension — each user only needs their own DeepSeek API key. **Note:** these picker entries are plain DeepSeek chat completions. The full `harmony_*` tool loop is available through `@harmony` via the sidebar / direct-provider route, not the native picker.
+Harmony registers **DeepSeek V4 Flash**, **DeepSeek V4 Pro**, and **DeepSeek V4 Flash Vision** (experimental multimodal) as native VS Code language models, so they appear in Copilot Chat's model picker for anyone who installs the extension — each user only needs their own DeepSeek API key. **Note:** these picker entries are plain DeepSeek chat completions. The full `harmony_*` tool loop is available through `@harmony` via the sidebar / direct-provider route, not the native picker. *(Superseded in v0.4.16 — the picker path now forwards tools, so this no longer applies.)*
 
 ### 🩺 Harmony: LM Check
 
@@ -337,12 +354,27 @@ Harmony is a **multi-provider AI orchestration tool**. Every feature that calls 
 
 | Principle | Why it matters |
 |:---|:---|
-| **You control the keys** | Harmony only calls providers you've explicitly configured with API keys. No keys = no external calls. Add keys one at a time and test each before adding more. |
+| **You control the keys** | Harmony calls a provider directly only once you've added its API key. **The default route uses VS Code's own language models** (for example Copilot), which need no Harmony key. Add keys one at a time and test each before adding more. |
 | **Multi-provider = multiplied costs** | Swarm, DeepSwarm, Orchestration, and Translation all call multiple models per operation. A single "translate this document" request can trigger dozens of API calls. |
 | **Guardrails are best-effort, not guarantees** | Harmony includes cost guardrails to help manage spend, but provider pricing changes without notice, prompt sizes vary, and cache behavior differs per provider. No automated cap is foolproof. |
 | **You are responsible for your API bills** | Review your provider billing dashboards regularly. Harmony cannot predict, cap, or refund provider charges. |
 | **If you're not sure, don't use it** | If you don't fully understand what a feature does, what providers it calls, or what it might cost — **do not use that feature.** Reach out to the Harmony community or the repository maintainers before configuring anything you're uncertain about. |
 | **Abandon if uncertain** | It is always safer to walk away from a feature than to use it without understanding the consequences. No feature is worth an unexpected API bill. |
+
+### Network activity that needs no API key
+
+Harmony is built around your own API keys, but a few features make outbound network requests even before you add a single key:
+
+| Feature | What it does online | How to stop it |
+|:---|:---|:---|
+| **Chat through VS Code's language models** (the default route) | Sends your messages to the model you picked in VS Code (for example Copilot), under that service's terms | Set `harmony.modelProvider` to a provider you configured |
+| **Startup network check** | Looks up provider and Copilot hostnames (DNS only) to detect local redirects | `harmony.networkCheckOnStartup` → off (default is **on**) |
+| **Web search / page fetch** | Retrieves pages you or a tool ask for | Use only when you choose to |
+| **Browser tools** | Opens the URLs you point them at; downloads Playwright and a Chromium browser on first use | Use only when you choose to |
+| **HarmonyHub model download** | Fetches embedding models on first use | Don't enable the Hub, or pre-seed the models |
+| **Creative backend** | The bundled generators run offline; the optional `rembg` background remover fetches a model when you install it | Leave the creative backend off |
+
+Your **chat and document content** is sent only along the route you chose — VS Code's own language models by default, or the providers you configured. Those services do receive it, and their retention policies are theirs, not ours.
 
 ## Settings
 
@@ -437,7 +469,7 @@ The Harmony sidebar's HarmonyHub section gives you two explicit, independent con
 
 > **❗ Expect this prompt 5–7 times on first run — approve every one.** HarmonyHub will not work if it is blocked, and Windows remembers a "Block".
 
-The first time HarmonyHub runs, Windows Defender Firewall may show **5–7** approval dialogs. This is normal — Windows prompts for any application that opens a local network port, even one bound strictly to `127.0.0.1` (loopback). No traffic leaves your machine.
+The first time HarmonyHub runs, Windows Defender Firewall may show **5–7** approval dialogs. This is normal — Windows prompts for any application that opens a local network port, even one bound strictly to `127.0.0.1` (loopback). The Hub listens only on loopback, so nothing on this port is reachable from another machine.
 
 - **Verify each dialog shows "HarmonyHub"** before clicking **Allow access**.
 - You must approve all of them for the daemon to function.
@@ -534,7 +566,7 @@ Harmony includes a document translation pipeline for English ↔ Chinese (EN↔Z
 - **Standards-Aware**: Preserves Chinese standards numbering (3.1.2, GB/T 50378, CJJ 94, JGJ 16)
 - **Multi-Format**: Accepts .md, .txt, .html, .pdf, .docx files
 - **Audit Trail**: Dispute ledger tracks every contested term choice
-- **Encrypted at Rest**: Glossary and checkpoints encrypted with AES-256-GCM
+- **Encrypted at Rest**: the glossary is encrypted with AES-256-GCM using a key derived from this machine; pipeline checkpoints are stored as plain JSON
 - **Batch Mode**: Process entire folders with per-document cost guardrails
 
 ### ⚠️ Important — Costs & Limitations
@@ -546,7 +578,7 @@ Harmony includes a document translation pipeline for English ↔ Chinese (EN↔Z
 | **Costs** | Multi-model translation incurs API charges across multiple providers per document. Costs vary significantly by document size, provider, model tier, and current provider pricing. |
 | **Guardrails** | Best-effort cost guardrails are in place per document and per batch, but provider pricing can change without notice — guardrails may not prevent all charges. |
 | **Accuracy** | AI-generated translations — always review by a qualified human translator for critical, legal, or technical content |
-| **Privacy** | Content is transmitted to AI providers for processing only; no data is retained by Harmony or the providers |
+| **Privacy** | Content is sent to the AI providers you configured so they can process it. Harmony keeps its working files on this machine in `.harmony/`: the glossary (encrypted), pipeline checkpoints and dispute ledgers. Provider retention and training policies are set by each provider and vary — review their terms. |
 
 ### 🔄 Provider Fallback Configuration
 
@@ -610,15 +642,19 @@ To enable the full harness:
 
 When you attach a screenshot via the Harmony Compose panel, Harmony automatically runs **free local OCR** before deciding whether to call a paid vision model. If OCR extracts usable text, no vision API call is made — you get instant, free text extraction.
 
-**Cross-platform:** Tesseract.js provides OCR fallback on all platforms (macOS, Linux, Windows). Windows additionally gets a native OCR layer via Windows.Media.Ocr for faster, offline extraction — like having Windows Snipping Tool built into Harmony.
+**How it works:** Harmony first tries a **native OCR layer** that runs fully offline through your operating system's own engine — `Windows.Media.Ocr` on Windows, Apple's Vision framework on macOS. If that layer is unavailable, Harmony falls back to **Tesseract.js**.
 
 **Requirements:**
 
-- **All platforms:** Tesseract.js is bundled with the extension (no setup needed).
-- **Windows (optional native layer):** Install `pip install winocr Pillow` for faster native OCR.
-- **macOS (optional native layer):** Install `pip install pyobjc` for Apple VisionKit OCR.
+- **Python on your PATH** — the native OCR layer is invoked through a small bundled Python script.
+- **Windows:** `pip install winocr Pillow` enables the native layer (`Windows.Media.Ocr`).
+- **macOS:** `pip install pyobjc` enables the native layer (Apple Vision).
+- **Tesseract.js fallback:** requires a Tesseract language file (for example `eng.traineddata`) that Harmony does **not** bundle. If you want the fallback available, supply the language data yourself.
+- Verify your setup any time with `harmony_check_python` from `@harmony`.
 
-No API keys. No cloud. No cost. The OCR runs entirely on your machine. If OCR finds no text or the result is ambiguous, Harmony falls through to the vision model as usual.
+**Platform note:** once the native layer is installed, OCR is fully local on Windows and macOS. Linux has no native layer, so OCR there depends on the Tesseract.js fallback and its language data.
+
+No API keys. No cloud. No cost. Everything runs on your machine. If OCR finds no text, or the result is ambiguous, Harmony falls through to the vision model as usual.
 
 ## Image Analysis & Vision Providers
 
@@ -905,7 +941,7 @@ Harmony speaks Chinese. Full i18n with `locales/zh.json`, `package.nls.zh-cn.jso
 
 **Privacy:** Harmony stores API keys in VS Code Secret Storage. Chat history, continuity handoffs, and tool-call metadata are stored locally under `.harmony/`. Harmony sends no telemetry, analytics, or usage data to any third party. Provider API calls are subject to each provider's respective privacy policy.
 
-**Bad Actors:** Harmony is an open-source developer tool. It is not designed to circumvent provider rate limits, terms of service, or local security boundaries. If you use Harmony in ways that violate a provider's acceptable use policy, you assume full responsibility.
+**Bad Actors:** Harmony is a source-available developer tool (Hippocratic License 3.0). It is not designed to circumvent provider rate limits, terms of service, or local security boundaries. If you use Harmony in ways that violate a provider's acceptable use policy, you assume full responsibility.
 
 ## Package Artifacts
 
