@@ -694,3 +694,83 @@ export async function cleanupStaleSprouts(): Promise<void> {
         }
     } catch { /* directory may not exist */ }
 }
+
+// ── Autonomous Antibody Crystallizer (Leap VI) ─────────────────────────────
+// When a multi-attempt struggle resolves with a passing check, crystallize the
+// `(problem, solution, executable check)` into `.harmony/swe-kb-personal/antibodies.jsonl`
+// so future pre-flight queries can surface proven immunity at zero token cost.
+
+export interface SweAntibodyRecord {
+    id: string;
+    timestamp: string;
+    tool: string;
+    target: string;
+    problemSignature: string;
+    solutionSummary: string;
+    check: {
+        kind: 'compile' | 'test' | 'oracle' | 'manual';
+        ref: string;
+        passedAt: string;
+    };
+    verified: boolean;
+}
+
+export async function harvestResolvedAntibody(
+    input: {
+        tool: string;
+        target: string;
+        problemSignature: string;
+        solutionSummary: string;
+        checkKind?: 'compile' | 'test' | 'oracle' | 'manual';
+        checkRef?: string;
+    },
+    customRoot?: string
+): Promise<SweAntibodyRecord | undefined> {
+    const root = customRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) return undefined;
+    const kbDir = path.join(root, '.harmony', 'swe-kb-personal');
+    await fs.mkdir(kbDir, { recursive: true });
+    const kbFile = path.join(kbDir, 'antibodies.jsonl');
+    const now = new Date().toISOString();
+    const record: SweAntibodyRecord = {
+        id: `swe-local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        tool: input.tool,
+        target: normalizePath(input.target),
+        problemSignature: sanitizeOutcome(input.problemSignature),
+        solutionSummary: input.solutionSummary.trim().slice(0, 600),
+        check: {
+            kind: input.checkKind ?? 'oracle',
+            ref: input.checkRef ?? 'oracle-pass',
+            passedAt: now,
+        },
+        verified: true,
+    };
+    await fs.appendFile(kbFile, JSON.stringify(record) + '\n', 'utf8');
+    return record;
+}
+
+export async function queryAntibodiesForTarget(
+    targetOrQuery: string,
+    customRoot?: string
+): Promise<SweAntibodyRecord[]> {
+    const root = customRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) return [];
+    const kbFile = path.join(root, '.harmony', 'swe-kb-personal', 'antibodies.jsonl');
+    try {
+        const raw = await fs.readFile(kbFile, 'utf8');
+        const needle = normalizePath(targetOrQuery).toLowerCase();
+        const rows = raw
+            .split(/\r?\n/)
+            .filter(Boolean)
+            .map(line => JSON.parse(line) as SweAntibodyRecord);
+        return rows.filter(r =>
+            r.target.toLowerCase().includes(needle)
+            || r.problemSignature.toLowerCase().includes(needle)
+            || r.solutionSummary.toLowerCase().includes(needle)
+        ).slice(-10);
+    } catch {
+        return [];
+    }
+}
+

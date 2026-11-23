@@ -19,10 +19,70 @@ function joinPieces(...parts) {
     return parts.join('');
 }
 
+const BOOLEAN_CLI_FLAGS = new Set([
+    'help',
+    'h',
+    'json',
+    'open',
+    'no-open',
+    'tauri',
+    'dry-run',
+    'confirm',
+    'execute',
+    'broker',
+    'propose',
+    'apply',
+    'all',
+    'ignored',
+    'latest',
+    'keep',
+    'serve',
+    'live',
+    'package-only',
+    'skip-self-healing-package-preflight',
+]);
+
+const VALUE_CLI_FLAGS = new Set([
+    'workspace',
+    'port',
+    'tool',
+    'input',
+    'ask',
+    'provider',
+    'tier',
+    'id',
+    'path',
+    'paths',
+    'label',
+    'mode',
+    'surface',
+    'stale-ms',
+    'limit',
+    'command',
+    'action',
+    'slot',
+    'key',
+    'model',
+    'url',
+    'message',
+    'room',
+    'from',
+    'body',
+]);
+
 function parseOptions(argv) {
     const options = { _: [] };
     for (let index = 0; index < argv.length; index++) {
         const arg = argv[index];
+        if (arg === '--') {
+            options._.push(...argv.slice(index + 1));
+            break;
+        }
+        if (arg === '-h' || arg === '-?') {
+            options.h = true;
+            options.help = true;
+            continue;
+        }
         if (!arg.startsWith('--')) {
             options._.push(arg);
             continue;
@@ -30,11 +90,17 @@ function parseOptions(argv) {
         const raw = arg.slice(2);
         const eq = raw.indexOf('=');
         if (eq >= 0) {
-            options[raw.slice(0, eq)] = raw.slice(eq + 1);
+            const flag = raw.slice(0, eq);
+            const val = raw.slice(eq + 1);
+            options[flag] = BOOLEAN_CLI_FLAGS.has(flag) ? val !== 'false' && val !== '0' : val;
+            continue;
+        }
+        if (BOOLEAN_CLI_FLAGS.has(raw)) {
+            options[raw] = true;
             continue;
         }
         const next = argv[index + 1];
-        if (next && !next.startsWith('--')) {
+        if (next !== undefined && (VALUE_CLI_FLAGS.has(raw) || !next.startsWith('-'))) {
             options[raw] = next;
             index++;
         } else {
@@ -207,7 +273,7 @@ function isPidAlive(pid) {
     }
 }
 
-async function requestJson(rawUrl, timeoutMs = 1500) {
+async function requestJson(rawUrl, timeoutMs = 1500, _retried = false) {
     const url = new URL(rawUrl);
     const lib = url.protocol === 'https:' ? https : http;
     return await new Promise((resolve, reject) => {
@@ -217,11 +283,20 @@ async function requestJson(rawUrl, timeoutMs = 1500) {
             path: url.pathname + url.search,
             method: 'GET',
             timeout: timeoutMs,
+            headers: {
+                ...hubAuthHeaders(),
+            },
         }, res => {
             let data = '';
             res.on('data', chunk => { data += chunk; });
             res.on('end', () => {
-                if ((res.statusCode || 0) < 200 || (res.statusCode || 0) >= 300) {
+                const code = res.statusCode || 0;
+                if (code === 401 && !_retried) {
+                    hubAuthTokenCache = undefined;
+                    requestJson(rawUrl, timeoutMs, true).then(resolve, reject);
+                    return;
+                }
+                if (code < 200 || code >= 300) {
                     reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
                     return;
                 }
@@ -1147,7 +1222,26 @@ async function checkHubSupervisor(root, options) {
         const response = await requestJson(url, Number(options.timeout || 1500));
         return { url, online: true, response };
     } catch (error) {
-        return { url, online: false, error: error && error.message ? error.message : String(error) };
+        const msg = error && error.message ? error.message : String(error);
+        if (/^HTTP 404\b/i.test(msg)) {
+            const heartbeats = await readSupervisor(root);
+            const locks = await readLocks(root);
+            const managedProcesses = await readManagedProcesses(root);
+            return {
+                url,
+                online: true,
+                source: 'local-supervisor-fallback',
+                response: {
+                    generatedAt: new Date().toISOString(),
+                    heartbeats,
+                    active: heartbeats.filter(item => item.status === 'active').length,
+                    stale: heartbeats.filter(item => item.status === 'stale').length,
+                    locks,
+                    managedProcesses,
+                },
+            };
+        }
+        return { url, online: false, error: msg };
     }
 }
 
@@ -5358,12 +5452,12 @@ function renderDashboard(state) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Harmony Supervisor Dashboard</title>
 <style>
-:root{--bg:#f6f2ea;--ink:#23201b;--muted:#6e675e;--line:#d8cfc0;--accent:#166a5a;--warn:#9b4c16;--danger:#8f1d1d;--panel:#fffaf0}
-*{box-sizing:border-box}body{margin:0;font-family:Georgia,'Times New Roman',serif;background:linear-gradient(135deg,#f6f2ea,#e7f0ea);color:var(--ink)}
+:root{color-scheme:dark;--bg:#0f141c;--ink:#f1f5f9;--muted:#94a3b8;--line:#334155;--accent:#38bdf8;--warn:#f59e0b;--danger:#ef4444;--panel:#171f2c}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#0f141c,#131b26);color:var(--ink)}
 main{max-width:1100px;margin:0 auto;padding:32px}h1{font-size:34px;margin:0 0 8px}h2{font-size:20px;margin:24px 0 10px}.meta{color:var(--muted);margin-bottom:20px}
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.metric{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}.metric strong{display:block;font-size:24px;color:var(--accent)}
 table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}th,td{text-align:left;border-bottom:1px solid var(--line);padding:9px 10px}th{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:0}
-section{margin-top:22px}code{background:#eee5d7;padding:2px 5px;border-radius:4px}ul{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin:0;padding:14px 14px 14px 30px}
+section{margin-top:22px}code{background:#1e293b;color:#38bdf8;padding:2px 5px;border-radius:4px}ul{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin:0;padding:14px 14px 14px 30px}
 .health{border:1px solid var(--line);border-left:6px solid var(--accent);background:var(--panel);border-radius:8px;padding:14px;margin:18px 0}.health.warn{border-left-color:var(--warn)}.health.block{border-left-color:var(--danger)}.health strong{color:var(--accent)}.health.warn strong{color:var(--warn)}.health.block strong{color:var(--danger)}
 @media(max-width:760px){main{padding:20px}.grid{grid-template-columns:1fr 1fr}table{font-size:13px}}
 </style>
@@ -5406,13 +5500,13 @@ function renderLiveDashboardShell(initialState, options) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Harmony Floating Shell</title>
 <style>
-:root{--bg:#101411;--panel:#f8f3e8;--ink:#1f251f;--muted:#6f766e;--line:#d4c8b6;--accent:#1d7663;--warn:#aa611d;--danger:#b02a32;--chip:#e8efe6}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:Optima,Candara,'Segoe UI',sans-serif;background:radial-gradient(circle at 20% 10%,#dfeee4 0,#f6f1e7 34%,#d7e2dc 100%);color:var(--ink)}
-main{max-width:1180px;margin:0 auto;padding:24px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}.title h1{font-family:Georgia,'Times New Roman',serif;font-size:34px;line-height:1;margin:0 0 8px}.title p{margin:0;color:var(--muted)}
-.badge{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(29,118,99,.35);background:rgba(248,243,232,.76);border-radius:999px;padding:8px 12px;font-size:13px}.dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px rgba(29,118,99,.14)}
-.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.metric,.panel{background:rgba(248,243,232,.9);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 32px rgba(31,37,31,.08)}.metric{padding:14px}.metric span{display:block;color:var(--muted);font-size:13px}.metric strong{display:block;font-family:Georgia,'Times New Roman',serif;font-size:26px;margin-top:4px;color:var(--accent)}
-.panel{margin-top:14px;padding:16px}.panel h2{font-size:17px;margin:0 0 10px}.health{border-left:6px solid var(--accent)}.health.warn{border-left-color:var(--warn)}.health.block{border-left-color:var(--danger)}
-table{width:100%;border-collapse:collapse}th,td{text-align:left;border-bottom:1px solid var(--line);padding:8px 6px;vertical-align:top}th{font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:0}tr:last-child td{border-bottom:0}.list{display:grid;gap:7px;margin:0;padding:0;list-style:none}.list li{background:var(--chip);border-radius:6px;padding:8px 10px}.muted{color:var(--muted)}.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}button{border:1px solid var(--accent);background:var(--accent);color:white;border-radius:6px;padding:8px 12px;font:inherit;cursor:pointer}button:disabled{opacity:.6;cursor:default}code{background:#efe7d8;border-radius:4px;padding:2px 5px}
+:root{color-scheme:dark;--bg:#0f141c;--panel:#171f2c;--ink:#f1f5f9;--muted:#94a3b8;--line:#334155;--accent:#38bdf8;--warn:#f59e0b;--danger:#ef4444;--chip:#1e293b}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:radial-gradient(circle at 20% 10%,#17253b 0,#0f141c 45%,#0b0f16 100%);color:var(--ink)}
+main{max-width:1180px;margin:0 auto;padding:24px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}.title h1{font-size:32px;line-height:1;margin:0 0 8px;color:var(--ink)}.title p{margin:0;color:var(--muted)}
+.badge{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(56,189,248,.35);background:rgba(23,31,44,.9);border-radius:999px;padding:8px 12px;font-size:13px;color:var(--accent)}.dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.2)}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.metric,.panel{background:rgba(23,31,44,.94);border:1px solid var(--line);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,.35)}.metric{padding:14px}.metric span{display:block;color:var(--muted);font-size:13px}.metric strong{display:block;font-size:26px;margin-top:4px;color:var(--accent)}
+.panel{margin-top:14px;padding:16px}.panel h2{font-size:17px;margin:0 0 10px;color:var(--ink)}.health{border-left:6px solid #22c55e}.health.warn{border-left-color:var(--warn)}.health.block{border-left-color:var(--danger)}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;border-bottom:1px solid var(--line);padding:8px 6px;vertical-align:top}th{font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:0}tr:last-child td{border-bottom:0}.list{display:grid;gap:7px;margin:0;padding:0;list-style:none}.list li{background:var(--chip);border-radius:6px;padding:8px 10px}.muted{color:var(--muted)}.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}button{border:none;background:linear-gradient(135deg,#0284c7,#7c3aed);color:white;font-weight:600;border-radius:6px;padding:8px 14px;font:inherit;cursor:pointer}button:disabled{opacity:.6;cursor:default}code{background:#1e293b;color:#38bdf8;border-radius:4px;padding:2px 6px}
 @media(max-width:860px){main{padding:16px}.top{display:block}.badge{margin-top:12px}.grid{grid-template-columns:1fr 1fr}table{font-size:13px}}
 @media(max-width:560px){.grid{grid-template-columns:1fr}.title h1{font-size:28px}}
 </style>
@@ -17233,16 +17327,60 @@ async function commandReleaseReceipt(root, options) {
     return receipt.status === 'passed' ? 0 : 2;
 }
 
+// Whole-segment excludes: matched at ANY depth. Kept identical to
+// PRE_ACTION_SNAPSHOT_EXCLUDED_PARTS in src/snapshotUtils.ts — these two copies must agree.
 const SNAPSHOT_EXCLUDED_PARTS = new Set([
-    '.git', '.harmony', 'node_modules', 'out', 'dist', 'build', 'target', '.venv', 'venv', '__pycache__', '.next', '.cache',
+    '.git', 'node_modules', 'out', 'dist', 'build', 'target', '.venv', 'venv', '__pycache__', '.next', '.cache',
 ]);
+
+// Root-anchored prefix excludes. `.harmony` is deliberately NOT excluded wholesale: notes, plans and
+// handoffs live there and must be snapshot- and restore-able. Only subtrees that must never be copied
+// are listed (recursive snapshot stores, generated media, private material, live-written state).
+const SNAPSHOT_EXCLUDED_PREFIXES = [
+    '.harmony/snapshots',
+    '.harmony/pre_edit',
+    '.harmony/backups',
+    '.harmony/assets',
+    '.harmony/screenshots',
+    '.harmony/raster',
+    '.harmony/canvas',
+    '.harmony/private',
+    '.harmony/continuity',
+    '.harmony/processes',
+    '.harmony/locks',
+    '.harmony/supervisor',
+    '.harmony/operations',
+    '.harmony/swarm',
+    '.harmony/release',
+    '.harmony/inbox',
+    '.harmony/todo.json',
+    '.harmony/todos-archive.json',
+    '.harmony/diagnostics',
+    '.harmony/source-ledger.json',
+    '.harmony/memory.jsonl',
+    // Measured 2026-11-20: these subtrees are LARGER than the ones we deliberately include, so
+    // leaving them walkable would burn the CLI's 200-file budget on machine output instead of source.
+    '.harmony/hygiene',          // 29 MB  — bundled executables
+    '.harmony/history',          // 3.1 MB — chat ledgers
+    '.harmony/memory-preserved', // 2.1 MB
+    '.harmony/provider-usage',   // 1.7 MB — usage ledger
+    '.harmony/smoke',            // 1.5 MB — smoke receipts
+    '.harmony/staging',          // 467 KB
+    '.harmony/nls',              // 49 KB  — generated strings
+    '.harmony/consensus',        // 59 KB
+    '.harmony/tavily-archive',   // 35 KB
+    '.harmony/ask-answers',      // append-only Ask answer receipts
+];
 const SNAPSHOT_TEXT_EXTS = new Set([
     '.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.txt', '.yml', '.yaml', '.toml', '.ps1', '.css', '.html', '.rs', '.py', '.cs', '.go', '.java', '.xml',
 ]);
 
 function shouldSkipSnapshotPath(relativePath) {
-    const parts = normalizePath(relativePath).split('/').filter(Boolean).map(part => part.toLowerCase());
-    return parts.some(part => SNAPSHOT_EXCLUDED_PARTS.has(part) || part.includes('secret') || part.includes('credential') || part.includes('key'));
+    const normalized = normalizePath(relativePath).toLowerCase();
+    const parts = normalized.split('/').filter(Boolean);
+    if (parts.some(part => SNAPSHOT_EXCLUDED_PARTS.has(part))) return true;
+    if (parts.some(part => part.includes('secret') || part.includes('credential') || part.includes('key'))) return true;
+    return SNAPSHOT_EXCLUDED_PREFIXES.some(prefix => normalized === prefix || normalized.startsWith(`${prefix}/`));
 }
 
 function safeWorkspaceRestoreTarget(root, relativePath) {
@@ -17415,7 +17553,7 @@ async function createSnapshot(root, options) {
             maxFiles: Number(options['max-files'] || 200),
             maxBytes: Number(options['max-bytes'] || 256 * 1024),
         },
-        excludes: Array.from(SNAPSHOT_EXCLUDED_PARTS),
+        excludes: [...Array.from(SNAPSHOT_EXCLUDED_PARTS), ...SNAPSHOT_EXCLUDED_PREFIXES],
         files: [],
     };
     const walkOptions = {
@@ -17749,7 +17887,7 @@ async function main() {
     const command = options._[0] || 'help';
     const subcommand = options._[1] || '';
     const root = workspaceRoot(options);
-    if (command === 'help' || command === '--help' || command === '-h') {
+    if (options.help || options.h || command === 'help' || command === '--help' || command === '-h') {
         printHelp();
         return 0;
     }
@@ -17812,8 +17950,70 @@ async function main() {
     }
     if (command === 'resume-brief') return await commandResumeBrief(root, subcommand || 'create', options);
     if (command === 'seat-handoff') return await commandSeatHandoff(root, subcommand || 'create', options);
-    if (command === 'tools' && (subcommand === 'list' || !subcommand)) {
-        await commandTools(options);
+    if (command === 'tools') {
+        if (subcommand === 'invoke' || options.tool) {
+            const shimPath = path.resolve(__dirname, '..', 'out', 'host', 'vscodeHostShim.js');
+            if (!fs.existsSync(shimPath)) {
+                throw new Error('Compiled host shim not found at out/host/vscodeHostShim.js. Run "npm run compile" first.');
+            }
+            const shim = require(shimPath);
+            const toolName = String(options.tool || options._[2] || '').trim();
+            if (!toolName) {
+                throw new Error('tools invoke requires --tool <name> [--input <json>]');
+            }
+            let inputObj = {};
+            if (typeof options.input === 'string' && options.input.trim()) {
+                try {
+                    inputObj = JSON.parse(options.input);
+                } catch (err) {
+                    throw new Error(`Invalid JSON for --input: ${err && err.message ? err.message : String(err)}`);
+                }
+                if (!inputObj || typeof inputObj !== 'object' || Array.isArray(inputObj)) {
+                    throw new Error('--input must be a JSON object.');
+                }
+            }
+            const invoked = await shim.invokeHeadlessHarmonyTool(toolName, inputObj, root);
+            if (options.json) printJson(invoked);
+            else process.stdout.write(invoked.result + os.EOL);
+            return invoked.ok ? 0 : 1;
+        }
+        if (subcommand === 'list' || !subcommand) {
+            await commandTools(options);
+            return 0;
+        }
+    }
+    if (command === 'desktop') {
+        const standalonePath = path.resolve(__dirname, '..', 'out', 'host', 'standaloneServer.js');
+        if (!fs.existsSync(standalonePath)) {
+            throw new Error('Compiled standalone server not found at out/host/standaloneServer.js. Run "npm run compile" first.');
+        }
+        const standalone = require(standalonePath);
+        const rawPort = options.port !== undefined ? String(options.port).trim() : '8789';
+        const port = /^\d+$/.test(rawPort) ? Number(rawPort) : NaN;
+        if (!Number.isInteger(port) || port < 0 || port > 65535) {
+            throw new Error(`Invalid --port value: ${options.port}. Expected an integer between 0 and 65535.`);
+        }
+        const handle = await standalone.startStandaloneDesktopServer({
+            workspaceRoot: root,
+            port,
+            openAppWindow: !options['no-open'],
+            preferTauriControlWindow: Boolean(options.tauri),
+        });
+        if (options.json) {
+            printJson({ url: handle.url, port: handle.port, workspace: handle.workspaceRoot, toolCount: handle.toolCount, reused: Boolean(handle.reused) });
+        } else {
+            process.stdout.write(`Harmony Standalone Desktop ${handle.reused ? 'already running (reused)' : 'running'} at ${handle.url} (${handle.toolCount} tools)${os.EOL}`);
+        }
+        if (handle.reused) {
+            return 0;
+        }
+        await new Promise(resolve => {
+            const shutdown = () => {
+                handle.close().finally(resolve);
+            };
+            process.once('SIGINT', shutdown);
+            process.once('SIGTERM', shutdown);
+        });
         return 0;
     }
     if (command === 'ui') {

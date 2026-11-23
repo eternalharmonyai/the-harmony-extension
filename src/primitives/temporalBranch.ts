@@ -67,3 +67,54 @@ export class TemporalBranchTool extends BasePrimitive<TemporalBranchInput> {
         } catch (e: any) { return textResult(JSON.stringify({ error: 'temporal branch error', detail: e?.message ?? String(e) }, null, 2)); }
     }
 }
+
+// ── Shadow Worktree Sandbox Helper (Chronos v2 — Leap II) ───────────────────
+// Creates and cleans up isolated shadow overlays under `.harmony/worktrees/<branchId>`
+// so competing counterfactual branches can edit and test files in parallel
+// without dirtying the operator's primary worktree.
+
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
+export interface ShadowSandbox {
+    branchId: string;
+    sandboxDir: string;
+    copiedFiles: string[];
+}
+
+export async function createShadowSandbox(
+    branchId: string,
+    targetRelPaths: ReadonlyArray<string>,
+    customRoot?: string
+): Promise<ShadowSandbox> {
+    const root = customRoot ?? workspaceRoot();
+    if (!root) throw new Error('No workspace root');
+    const safeId = branchId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 64) || 'branch';
+    const sandboxDir = path.join(root, '.harmony', 'worktrees', safeId);
+    await fs.mkdir(sandboxDir, { recursive: true });
+    const copiedFiles: string[] = [];
+    for (const rel of targetRelPaths) {
+        if (!rel || rel.includes('..') || path.isAbsolute(rel)) continue;
+        const srcPath = path.join(root, rel);
+        const dstPath = path.join(sandboxDir, rel);
+        try {
+            const content = await fs.readFile(srcPath);
+            await fs.mkdir(path.dirname(dstPath), { recursive: true });
+            await fs.writeFile(dstPath, content);
+            copiedFiles.push(rel.replace(/\\/g, '/'));
+        } catch {
+            // File may be newly created by the branch; ensure parent dir exists.
+            await fs.mkdir(path.dirname(dstPath), { recursive: true });
+        }
+    }
+    return { branchId: safeId, sandboxDir, copiedFiles };
+}
+
+export async function removeShadowSandbox(branchId: string, customRoot?: string): Promise<void> {
+    const root = customRoot ?? workspaceRoot();
+    if (!root) return;
+    const safeId = branchId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 64) || 'branch';
+    const sandboxDir = path.join(root, '.harmony', 'worktrees', safeId);
+    await fs.rm(sandboxDir, { recursive: true, force: true });
+}
+

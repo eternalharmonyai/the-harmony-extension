@@ -40,9 +40,11 @@ import { registerCloudConnectorTools } from './cloudConnectorTools';
 import { registerChatHistoryProvider, HARMONY_HISTORY_SCHEME } from './chatHistory';
 import { registerHarmonyParticipant } from './chatParticipant';
 import { registerDeepSeekProvider } from './deepseekProvider';
+import { createBoundedOutputChannel, harmonyDebugChannel } from './rendererShield';
 import { registerHarmonyView } from './sidebar';
 import { openComposeView } from './composeView';
 import { CollabDirectProvider, CollabModelPreset, collabTierForPreset, consult, countProviderKeys, discoverModels, EndpointProviderId, getCollabDirectProvider, getCollabModelPreset, getProviderKeys, invalidateKeyCache, isProviderId, KEY_SLOTS, migrateLegacyToSlots, modelFor, providerDisplayName, providerEndpointInfo, PROVIDER_IDS, ProviderId, resolveCollabModel, secretKeyFor, setProviderKeys, Tier } from './providers';
+import { clearVertexVaultCredentials, getVertexVaultDisplayPath, invalidateVertexTokenCache, readVertexVaultSummary, writeVertexVaultCredentials } from './vertexAuth';
 import { clearUsage, onUsageChange, summarize as summarizeUsage, totalCalls, totalTokens } from './costTracker';
 import { listSessions, deleteSession } from './sessions';
 import { createHandoffPacket } from './memory';
@@ -714,8 +716,11 @@ async function restoreLowMemorySafetySettings(context: vscode.ExtensionContext):
 
 // ─── Hub helpers ─────────────────────────────────────────────────────────────
 
-/** Dedicated output channel so Hub indexing results/errors are visible (never silent). */
-const hubOutput = vscode.window.createOutputChannel('Harmony Hub');
+/** Lazy bounded output channel so Hub indexing logs/errors stay visible (Rule 6) without bloating Renderer Monaco buffers. */
+const hubOutput = createBoundedOutputChannel(
+    () => vscode.window.createOutputChannel('Harmony Hub'),
+    { name: 'Harmony Hub', ignoreDispose: true }
+);
 
 function hubUrl(): string {
     return vscode.workspace.getConfiguration('harmony').get<string>('hub.url') ?? 'http://127.0.0.1:7878';
@@ -2997,11 +3002,12 @@ export function activate(context: vscode.ExtensionContext) {
             ? `Resolved now: **${providerLabel(resolved.provider)} / ${resolved.tier} / ${resolved.model}**.`
             : `Resolved now: **no matching provider key saved**.`;
         const geminiFreeQuota = cfg.get<boolean>('gemini.useFreeQuota') === true ? 'enabled' : 'disabled';
+        const geminiEp = providerEndpointInfo('gemini');
         agentsBar.tooltip = new vscode.MarkdownString(
             `**Collaborative Agents model profile** controls the model group/tier used by Harmony direct sub-agent calls and default worker agents.\n\n` +
             `${resolvedLine}\n\n` +
             `Route source still comes from **Route:**. Primary chat model still comes from **Harmony:**.\n\n` +
-            `Gemini uses the Google Generative Language / AI Studio key stored as \`harmony.geminiApiKey\`. Vertex AI uses a different auth path and is not wired here yet. Gemini free-quota mode is **${geminiFreeQuota}**.`
+            `Gemini backend: **${geminiEp.label}** (\`harmony.geminiApiKey\`). Gemini free-quota mode is **${geminiFreeQuota}**.`
         );
     };
     void refreshAgentsBar();
@@ -3055,25 +3061,32 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         const freeQuotaEnabled = cfg.get<boolean>('gemini.useFreeQuota') === true;
-        type GeminiPick = vscode.QuickPickItem & { action?: 'toggleFreeQuota' | 'assignModel' | 'setKey' | 'clearKey' };
+        const geminiEndpoint = providerEndpointInfo('gemini');
+        type GeminiPick = vscode.QuickPickItem & { action?: 'toggleFreeQuota' | 'switchEndpoint' | 'assignModel' | 'setKey' | 'clearKey' };
         const picks: GeminiPick[] = [
+            { label: 'Gemini Backend (AI Studio / Vertex AI)', description: geminiEndpoint.label, detail: `${geminiEndpoint.detail} Click to switch between AI Studio and Google Cloud Vertex AI.`, action: 'switchEndpoint' },
             { label: 'Gemini API key', description: 'saved', detail: 'Stored in VS Code Secret Storage as harmony.geminiApiKey. Key value is never displayed.' },
-            { label: 'Gemini API status', description: apiStatus, detail: 'Checked with Google Generative Language / AI Studio /models endpoint, not Vertex AI.' },
+            { label: 'Gemini API status', description: apiStatus, detail: `Checked against active Gemini backend (${geminiEndpoint.label}).` },
             { label: 'Gemini free-quota mode', description: freeQuotaEnabled ? 'enabled' : 'disabled', detail: 'When enabled, Auto/Balanced Agents can prefer Gemini first and quota errors are surfaced clearly.', action: 'toggleFreeQuota' },
             { label: 'Assign discovered Gemini model to tier…', description: models.length ? `${models.length} discovered` : 'no discovered models', detail: 'Pick a model from the live /models response and save it as a Gemini tier override.', action: 'assignModel' },
-            { label: 'Set Gemini API Key', description: 'replace saved key', detail: 'Stores a new AI Studio / Gemini API key.', action: 'setKey' },
+            { label: 'Set Gemini API Key', description: 'replace saved key', detail: 'Stores a new AI Studio or Vertex AI API key / token.', action: 'setKey' },
             { label: 'Clear Gemini API Key', description: 'remove saved key', detail: 'Deletes harmony.geminiApiKey from VS Code Secret Storage.', action: 'clearKey' },
             { label: 'Gemini light tier', description: modelFor('gemini', 'light'), detail: 'Used by Economy/Fast when Gemini is selected.' },
             { label: 'Gemini mid tier', description: modelFor('gemini', 'mid'), detail: 'Available for explicit custom routing.' },
             { label: 'Gemini coding tier', description: modelFor('gemini', 'coding'), detail: 'Used by Auto/Balanced when Gemini is selected or free-quota mode makes Gemini first.' },
             { label: 'Gemini heavy tier', description: modelFor('gemini', 'heavy'), detail: 'Premium/cost guards apply before heavy calls.' },
+            { label: 'Gemini premium (Frontier) tier', description: modelFor('gemini', 'premium'), detail: 'Frontier tier (Argon / Carbon) — pairs with Context Shield & confirmation prompts.' },
         ];
 
         const picked = await vscode.window.showQuickPick(picks, {
-            title: 'Harmony Gemini Status',
-            placeHolder: 'AI Studio / Gemini API key status, free-quota mode, and tier model IDs.'
+            title: 'Harmony Gemini & Vertex AI Status',
+            placeHolder: 'Switch between AI Studio and Vertex AI, check key status, or assign Gemini 4 models.'
         });
         if (!picked?.action) return;
+        if (picked.action === 'switchEndpoint') {
+            await vscode.commands.executeCommand('harmony.selectProviderEndpointProfile', 'gemini');
+            return;
+        }
         if (picked.action === 'toggleFreeQuota') {
             await cfg.update('gemini.useFreeQuota', !freeQuotaEnabled, vscode.ConfigurationTarget.Global);
             void refreshAgentsBar();
@@ -3127,13 +3140,13 @@ export function activate(context: vscode.ExtensionContext) {
             const secretKey = secretKeyFor(provider);
             const saved = !!(await context.secrets.get(secretKey));
             const scopeDetail = `VS Code Secret Storage key: ${secretKey}. CLI/native provider keys use Windows DPAPI or env and are separate from this status.`;
-            const endpoint = provider === 'deepseek' || provider === 'alibaba' || provider === 'tencent' || provider === 'moonshot' || provider === 'kimiCode' ? providerEndpointInfo(provider) : undefined;
+            const endpoint = provider === 'deepseek' || provider === 'alibaba' || provider === 'tencent' || provider === 'moonshot' || provider === 'kimiCode' || provider === 'gemini' ? providerEndpointInfo(provider) : undefined;
             const endpointDetail = endpoint ? ` Endpoint: ${endpoint.label}${endpoint.baseUrl ? ` (${endpoint.baseUrl})` : ''}. ${endpoint.detail}` : '';
             rows.push({
                 label: providerLabel(provider),
                 description: saved ? 'key saved' : 'no key saved',
                 detail: provider === 'gemini'
-                    ? `Gemini uses the Google Generative Language / AI Studio API key stored as harmony.geminiApiKey; Vertex AI is separate. ${scopeDetail} Free-quota mode: ${freeQuota}. Current ${tier} model: ${modelFor(provider, tier)}.`
+                    ? `Gemini supports both Google AI Studio and Google Cloud Vertex AI (stored as harmony.geminiApiKey).${endpointDetail} ${scopeDetail} Free-quota mode: ${freeQuota}. Current ${tier} model: ${modelFor(provider, tier)}.`
                     : provider === 'claude'
                     ? `Uses an Anthropic API key stored as harmony.claudeApiKey for Claude model calls. This is not a Claude.ai account login. ${scopeDetail} Current ${tier} model: ${modelFor(provider, tier)}.`
                     : provider === 'alibaba' || provider === 'tencent' || provider === 'moonshot' || provider === 'zhipu'
@@ -3175,7 +3188,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('harmony.selectProviderEndpointProfile', async (providerArg?: ProviderId) => {
             const cfg = vscode.workspace.getConfiguration('harmony');
-            const directProviders: Array<EndpointProviderId> = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'stepfun', 'doubao', 'byteplus'];
+            const directProviders: Array<EndpointProviderId> = ['gemini', 'deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'stepfun', 'doubao', 'byteplus'];
             const provider = directProviders.includes(providerArg as any)
                 ? providerArg as EndpointProviderId
                 : (await vscode.window.showQuickPick(directProviders.map(value => ({ label: providerLabel(value), value })), {
@@ -3184,8 +3197,14 @@ export function activate(context: vscode.ExtensionContext) {
                 }))?.value;
             if (!provider) return;
             const current = providerEndpointInfo(provider);
-            type EndpointPick = vscode.QuickPickItem & { profile: 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'asia' | 'europe' | 'custom'; needsUrl?: boolean };
-            const picks: EndpointPick[] = provider === 'alibaba'
+            type EndpointPick = vscode.QuickPickItem & { profile: 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'asia' | 'europe' | 'ai-studio' | 'vertex' | 'custom'; needsUrl?: boolean; configureVertex?: boolean };
+            const picks: EndpointPick[] = provider === 'gemini'
+                ? [
+                    { label: 'Google Cloud Vertex AI (GCP Billing / Credits)', description: current.profile === 'vertex' ? 'current' : 'aiplatform.googleapis.com', detail: 'Use Google Cloud Vertex AI so calls bill to your GCP invoice / $300 trial / startup credits instead of AI Studio prepay. Works with Vertex Express API keys or GCP Project + Location.', profile: 'vertex', configureVertex: true },
+                    { label: 'Google AI Studio (Default)', description: current.profile === 'ai-studio' ? 'current' : 'generativelanguage.googleapis.com', detail: 'Standard Google AI Studio / Generative Language API endpoint.', profile: 'ai-studio' },
+                    { label: 'Gemini custom base URL', description: current.profile === 'custom' ? 'current' : 'advanced', detail: 'Use a custom Gemini / Vertex proxy URL from harmony.gemini.baseUrl.', profile: 'custom', needsUrl: true },
+                ]
+                : provider === 'alibaba'
                 ? [
                     { label: 'Alibaba international', description: current.profile === 'international' ? 'current' : 'Singapore/global', detail: 'Use this for international DashScope/Model Studio keys. This is the endpoint that passed the recent live smoke.', profile: 'international' },
                     { label: 'Alibaba mainland China', description: current.profile === 'mainland' ? 'current' : 'China/Beijing default', detail: 'Use this for mainland China DashScope keys. International keys commonly return 401 here.', profile: 'mainland' },
@@ -3230,10 +3249,34 @@ export function activate(context: vscode.ExtensionContext) {
                     prompt: 'Paste the exact OpenAI-compatible base URL for this provider account.',
                     value: current.baseUrl || '',
                     ignoreFocusOut: true,
-                    validateInput: value => /^https:\/\/.+\/v\d+\/?$/i.test(value.trim()) ? undefined : 'Use a full https://.../v1 style base URL.'
+                    validateInput: value => /^https:\/\/.+\/v\d+.*\/?$/i.test(value.trim()) ? undefined : 'Use a full https://.../v1 style base URL.'
                 });
                 if (!baseUrl) return;
                 await cfg.update(current.baseUrlSetting.replace(/^harmony\./, ''), baseUrl.replace(/\/$/, ''), vscode.ConfigurationTarget.Global);
+            }
+            if (picked.configureVertex) {
+                const curProj = (cfg.get<string>('gemini.vertexProjectId') ?? '').trim();
+                const curLoc = (cfg.get<string>('gemini.vertexLocation') ?? 'global').trim() || 'global';
+                const projInput = await vscode.window.showInputBox({
+                    title: 'Vertex AI — Google Cloud Project ID (Optional)',
+                    prompt: 'Enter your GCP Project ID for project/regional routing, or press Enter to leave blank for Vertex AI Express / API Key mode.',
+                    value: curProj,
+                    placeHolder: 'Leave blank for Vertex AI Express API Key mode, or enter e.g. my-gcp-project-123',
+                    ignoreFocusOut: true
+                });
+                if (projInput === undefined) return;
+                await cfg.update('gemini.vertexProjectId', projInput.trim(), vscode.ConfigurationTarget.Global);
+                if (projInput.trim()) {
+                    const locInput = await vscode.window.showInputBox({
+                        title: 'Vertex AI — GCP Location / Region',
+                        prompt: 'Enter Vertex AI location (e.g. global, us-central1, europe-west4). Gemini 3/4 frontier models work best on global or us-central1.',
+                        value: curLoc,
+                        ignoreFocusOut: true
+                    });
+                    if (locInput !== undefined && locInput.trim()) {
+                        await cfg.update('gemini.vertexLocation', locInput.trim(), vscode.ConfigurationTarget.Global);
+                    }
+                }
             }
             const settingKey = provider === 'deepseek' ? 'deepseek.endpointProfile' : `${provider}.endpointProfile`;
             await cfg.update(settingKey, picked.profile, vscode.ConfigurationTarget.Global);
@@ -3242,6 +3285,115 @@ export function activate(context: vscode.ExtensionContext) {
             view.refresh();
             vscode.window.showInformationMessage(`${providerLabel(provider)} endpoint: ${next.label}${next.baseUrl ? ` (${next.baseUrl})` : ''}`);
             return next;
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('harmony.reauthGcloudAdc', async () => {
+            invalidateVertexTokenCache();
+            invalidateKeyCache('gemini');
+            const term = vscode.window.createTerminal({ name: 'Harmony — Google Cloud ADC Login' });
+            term.show(false);
+            term.sendText('gcloud auth application-default login', true);
+            vscode.window.showInformationMessage(
+                'Finish signing in to Google Cloud in your browser — Harmony will automatically pick up the refreshed Vertex AI token on your next message.'
+            );
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('harmony.configureVertexCredentials', async () => {
+            const summary = readVertexVaultSummary();
+            const statusDesc = summary.present
+                ? `Active (${summary.credentialType ?? 'json'}${summary.clientEmail ? ` · ${summary.clientEmail}` : ''}${summary.projectId ? ` · project: ${summary.projectId}` : ''})`
+                : 'Not configured yet';
+            type VaultPick = vscode.QuickPickItem & { action: 'file' | 'paste' | 'reauth' | 'clear' };
+            const picks: VaultPick[] = [
+                {
+                    label: '$(folder-opened) Import GCP Service Account JSON File (Recommended — Non-Interactive)',
+                    description: summary.displayPath,
+                    detail: 'Copies your Service Account JSON into the OS-restricted local credential store (shared by VS Code, Standalone 8789 & CLI; preserves your AI Studio key).',
+                    action: 'file',
+                },
+                {
+                    label: '$(key) Paste GCP Service Account JSON',
+                    description: 'Clipboard / Direct Paste',
+                    detail: 'Paste a Service Account JSON object directly into the cross-surface Harmony Vault.',
+                    action: 'paste',
+                },
+                {
+                    label: '$(terminal) Refresh Human Google Cloud ADC Login (gcloud)',
+                    description: 'gcloud auth application-default login',
+                    detail: 'Opens a terminal to refresh browser-based Workspace ADC credentials when RAPT expires.',
+                    action: 'reauth',
+                },
+            ];
+            if (summary.present) {
+                picks.push({
+                    label: '$(trash) Clear Harmony Vertex Vault Credentials',
+                    description: statusDesc,
+                    detail: `Removes ${summary.displayPath} without touching your Google AI Studio key.`,
+                    action: 'clear',
+                });
+            }
+            const choice = await vscode.window.showQuickPick(picks, {
+                title: 'Harmony — Configure Vertex AI Credentials (Cross-Surface Vault)',
+                placeHolder: `Vault status: ${statusDesc}`,
+            });
+            if (!choice) return;
+
+            if (choice.action === 'reauth') {
+                await vscode.commands.executeCommand('harmony.reauthGcloudAdc');
+                return;
+            }
+            if (choice.action === 'clear') {
+                clearVertexVaultCredentials();
+                invalidateKeyCache('gemini');
+                void refreshAgentsBar();
+                view.refresh();
+                vscode.window.showInformationMessage(`Cleared Harmony Vertex Vault (${summary.displayPath}).`);
+                return;
+            }
+
+            let rawJson = '';
+            if (choice.action === 'file') {
+                const uris = await vscode.window.showOpenDialog({
+                    title: 'Select GCP Service Account JSON',
+                    canSelectMany: false,
+                    filters: { 'JSON Credentials': ['json'] },
+                });
+                if (!uris || uris.length === 0) return;
+                const bytes = await vscode.workspace.fs.readFile(uris[0]);
+                rawJson = Buffer.from(bytes).toString('utf8');
+            } else {
+                const pasted = await vscode.window.showInputBox({
+                    title: 'Paste GCP Service Account JSON',
+                    prompt: 'Paste the full JSON contents of your Google Cloud Service Account key (with Vertex AI User role).',
+                    password: true,
+                    ignoreFocusOut: true,
+                });
+                if (!pasted) return;
+                rawJson = pasted;
+            }
+
+            try {
+                const saved = writeVertexVaultCredentials(rawJson);
+                const cfg = vscode.workspace.getConfiguration('harmony');
+                if (saved.projectId && !(cfg.get<string>('gemini.vertexProjectId') ?? '').trim()) {
+                    await cfg.update('gemini.vertexProjectId', saved.projectId, vscode.ConfigurationTarget.Global);
+                }
+                if ((cfg.get<string>('gemini.endpointProfile') ?? 'ai-studio') !== 'vertex') {
+                    await cfg.update('gemini.endpointProfile', 'vertex', vscode.ConfigurationTarget.Global);
+                }
+                invalidateKeyCache('gemini');
+                void refreshAgentsBar();
+                view.refresh();
+                vscode.window.showInformationMessage(
+                    `Saved Vertex credentials (${saved.clientEmail ?? saved.credentialType}) to ${saved.displayPath} — active across VS Code, Standalone & CLI!`
+                );
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Could not save Vertex credentials: ${err?.message ?? String(err)}`);
+            }
         })
     );
 
@@ -4720,7 +4872,7 @@ document.getElementById('cancel').addEventListener('click', () => {
             if (!body || !body.trim()) return;
             try {
                 const w = await writeWhisper(body.trim(), 'command');
-                vscode.window.showInformationMessage(`📥 Whisper saved — read on next turn. (${w.id.slice(0, 8)})`);
+                vscode.window.showInformationMessage(`${tr('notify.whisperSaved')} (${w.id.slice(0, 8)})`);
             } catch (e: any) {
                 vscode.window.showErrorMessage(`Whisper write failed: ${e?.message ?? String(e)}`);
             }
@@ -4821,10 +4973,64 @@ document.getElementById('cancel').addEventListener('click', () => {
         })
     );
 
-    // ── Harmony Compose: long-form input with image attach ───────────────────
+    // ── Harmony Compose, Chat Panel & External Studio ────────────────────────
+    const studioBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98);
+    studioBar.text = '$(sparkle) Harmony Studio';
+    studioBar.tooltip = 'Launch Harmony Studio (External Standalone Desktop Window on port 8789)';
+    studioBar.command = 'harmony.launchStandaloneStudio';
+    studioBar.show();
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const standaloneModForView = require('./host/standaloneServer') as typeof import('./host/standaloneServer');
+
     context.subscriptions.push(
+        studioBar,
+        standaloneModForView.registerHarmonyChatViewProvider(context),
         vscode.commands.registerCommand('harmony.compose', () => {
             openComposeView(context);
+        }),
+        vscode.commands.registerCommand('harmony.launchStandaloneStudio', () => {
+            try { delete require.cache[require.resolve('./host/standaloneServer')]; } catch { /* ignore */ }
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const standaloneMod = require('./host/standaloneServer') as typeof import('./host/standaloneServer');
+            void standaloneMod.launchExternalStandaloneStudio(context);
+        }),
+        vscode.commands.registerCommand('harmony.unlockDevStudio', async () => {
+            try { delete require.cache[require.resolve('./host/standaloneServer')]; } catch { /* ignore */ }
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const devAuth = require('./devAuth') as typeof import('./devAuth');
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const standaloneMod = require('./host/standaloneServer') as typeof import('./host/standaloneServer');
+            let created = false;
+            let displayPath = '';
+            try {
+                const result = devAuth.ensureDevToken();
+                created = result.created;
+                // Unexpanded form only. The resolved path contains the account name and
+                // must never reach a surface a human (or a log reader) can see.
+                displayPath = result.displayPath;
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Harmony Dev: ${err?.message ?? String(err)}`);
+                return;
+            }
+            try {
+                await standaloneMod.startStandaloneDesktopServer({
+                    workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
+                    port: 8789,
+                });
+            } catch { /* the /dev page reports an unreachable server itself */ }
+            await vscode.env.openExternal(vscode.Uri.parse('http://127.0.0.1:8789/dev'));
+            vscode.window.showInformationMessage(
+                created
+                    ? `Harmony Dev: created a developer token at ${displayPath}. Open that file and paste its contents into the /dev page to unlock.`
+                    : `Harmony Dev: an existing developer token was found at ${displayPath}. Paste its contents into the /dev page to unlock.`
+            );
+        }),
+        vscode.commands.registerCommand('harmony.openStudioTab', () => {
+            try { delete require.cache[require.resolve('./host/standaloneServer')]; } catch { /* ignore */ }
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const standaloneMod = require('./host/standaloneServer') as typeof import('./host/standaloneServer');
+            standaloneMod.openStandaloneStudioWebviewTab(context);
         })
     );
 
@@ -4833,4 +5039,7 @@ document.getElementById('cancel').addEventListener('click', () => {
     view.refresh();
 }
 
-export function deactivate() {}
+export function deactivate() {
+    hubOutput.disposeForShutdown();
+    harmonyDebugChannel.disposeForShutdown();
+}

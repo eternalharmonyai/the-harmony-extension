@@ -34,6 +34,24 @@ secrets/
 auth/
 *.token
 
+# Token / credential carriers not matched by *.token or by secrets/.
+# NOTE: `secrets/` above is a DIRECTORY-only pattern, so a *file* named
+# secrets.* is otherwise commit-able — it already let one through:
+# creative-service/secrets.py is tracked. That file is a value-free loader
+# (it only reads secret NAMES from env / private config), so it stays tracked
+# on purpose. Hence explicit data-file patterns below instead of a blanket
+# `secrets.*`, which would silently untrack working source.
+.npmrc
+.netrc
+*.secrets
+secrets.json
+secrets.yaml
+secrets.yml
+secrets.toml
+*_token
+token.txt
+token.json
+
 # Memory / data stores
 vectordb/
 chroma_db/
@@ -54,6 +72,7 @@ logs/
 .harmony-staging/
 .harmony-recipes/
 .harmony-repair/
+.carebloom/
 .fastembed_cache/
 
 # Python

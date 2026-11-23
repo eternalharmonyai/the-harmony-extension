@@ -111,16 +111,29 @@ export async function rankProviders(
     for (const p of PROVIDER_IDS) {
         if (exclude.includes(p)) continue;
         if (!(await hasKey(secrets, p))) continue;
-        // Skip providers that don't support openaiCompat path
-        if (p === 'gemini' || p === 'claude') {
-            scored.push({ provider: p, score: getScore(p, tier) });
-            continue;
-        }
         scored.push({ provider: p, score: getScore(p, tier) });
     }
 
-    // Sort: highest score first, then by provider preference order
-    const prefOrder: ProviderId[] = ['deepseek', 'moonshot', 'kimiCode', 'alibaba', 'tencent', 'openai', 'openrouter', 'gemini', 'claude'];
+    // Sort: highest score first, then by provider preference order (compile-time exhaustive across all 17 ProviderId values)
+    const PREF_RANK: Record<ProviderId, number> = {
+        deepseek: 0,
+        moonshot: 1,
+        kimiCode: 2,
+        alibaba: 3,
+        tencent: 4,
+        'zhipu-coding': 5,
+        zhipu: 6,
+        'doubao-coding': 7,
+        doubao: 8,
+        'doubao-rewards': 9,
+        'byteplus-coding': 10,
+        byteplus: 11,
+        stepfun: 12,
+        openai: 13,
+        openrouter: 14,
+        gemini: 15,
+        claude: 16,
+    };
     scored.sort((a, b) => {
         // Healthy providers first (score > 0)
         const aHealthy = a.score.score > 0 ? 1 : 0;
@@ -128,8 +141,10 @@ export async function rankProviders(
         if (aHealthy !== bHealthy) return bHealthy - aHealthy;
         // Among same health band, sort by score
         if (a.score.score !== b.score.score) return b.score.score - a.score.score;
-        // Tie-break by preference order
-        return prefOrder.indexOf(a.provider) - prefOrder.indexOf(b.provider);
+        // Tie-break by preference order (unlisted providers sort last, never -1)
+        const rankA = PREF_RANK[a.provider] ?? Number.MAX_SAFE_INTEGER;
+        const rankB = PREF_RANK[b.provider] ?? Number.MAX_SAFE_INTEGER;
+        return rankA - rankB || a.provider.localeCompare(b.provider);
     });
 
     return scored.map(s => s.provider);

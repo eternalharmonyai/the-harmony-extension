@@ -53,11 +53,17 @@ export async function getHarmonyFolderSize(workspaceRoot?: string): Promise<numb
     return dirSize(dir);
 }
 
-// Safety directories managed by cleanup — excluded from context health to avoid
-// false-positives during long sessions where checkpoint snapshots accumulate.
-// tool-cache excluded: Playwright browser binaries (~5 MB) are a system dependency,
-// not context data — they skew context health without being cleanable.
-const SAFETY_DIRS = new Set(['snapshots', 'snapshot-archive', 'pre_edit', 'tool-cache']);
+// Safety directories managed by cleanup or static binary storage — excluded from
+// context health to avoid false-positives and avoid walking multi-hundred-MB binary
+// caches (Playwright, bundled.exe, ONNX/VSIX backups) on every sidebar refresh.
+export const SAFETY_DIRS = new Set(['snapshots', 'snapshot-archive', 'pre_edit', 'tool-cache', 'backups', 'hygiene']);
+
+const CONTEXT_HEALTH_CACHE_TTL_MS = 10_000;
+const contextHealthCache = new Map<string, { bytes: number; ts: number }>();
+
+export function invalidateContextHealthCache(): void {
+    contextHealthCache.clear();
+}
 
 async function dirSizeExcluding(dirPath: string, exclude: Set<string>): Promise<number> {
     let size = 0;
@@ -76,11 +82,17 @@ async function dirSizeExcluding(dirPath: string, exclude: Set<string>): Promise<
     return size;
 }
 
-/** Folder size excluding safety dirs (snapshots, pre_edit, archive) — used for context health. */
+/** Folder size excluding safety/binary dirs — cached 10s so rapid sidebar refreshes stay O(1). */
 export async function getContextHealthSize(workspaceRoot?: string): Promise<number> {
     const dir = await getHarmonyDir(workspaceRoot);
     if (!dir) return 0;
-    return dirSizeExcluding(dir, SAFETY_DIRS);
+    const cached = contextHealthCache.get(dir);
+    if (cached && Date.now() - cached.ts < CONTEXT_HEALTH_CACHE_TTL_MS) {
+        return cached.bytes;
+    }
+    const bytes = await dirSizeExcluding(dir, SAFETY_DIRS);
+    contextHealthCache.set(dir, { bytes, ts: Date.now() });
+    return bytes;
 }
 
 export async function harmonySelfCleanup(workspaceRoot?: string): Promise<CleanupReport> {
@@ -244,6 +256,7 @@ export async function harmonySelfCleanup(workspaceRoot?: string): Promise<Cleanu
 
     const afterBytes = await dirSize(dir);
     const contextHealthBytes = await dirSizeExcluding(dir, SAFETY_DIRS);
+    contextHealthCache.set(dir, { bytes: contextHealthBytes, ts: Date.now() });
     if (actions.filter(a => a.includes('Removed') || a.includes('Trimmed') || a.includes('Compacted')).length === 0) {
         actions.push('No cleanup needed — .harmony is within healthy limits. Snapshot and checkpoint files from the last 7 days are preserved for safety.');
     }

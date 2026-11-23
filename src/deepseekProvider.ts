@@ -14,6 +14,7 @@
  */
 import * as vscode from 'vscode';
 import { recordUsage } from './costTracker';
+import { createCoalescedMarkdownStreamer } from './rendererShield';
 import {
     ToolCallAccumulator,
     buildChatMessages,
@@ -343,27 +344,38 @@ export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
                     signal: controller.signal as AbortSignal,
                 };
                 let response = await fetch(`${cleanBase}/chat/completions`, requestInit);
-                // If the request with tools returns HTTP 400, retry once without
-                // tools and surface the actual status/reason.
+                // If the request with tools returns HTTP 400, first retry with thinking disabled
+                // while keeping tools attached; only drop tools if that also fails.
                 if (response.status === 400 && tools) {
                     const firstText = await response.text();
                     rejectionReason = summarizeRejection(firstText);
                     try {
-                        const retryBody = JSON.stringify({ ...requestBody, tools: undefined, tool_choice: undefined });
-                        const retryResponse = await fetch(`${cleanBase}/chat/completions`, { ...requestInit, body: retryBody });
-                        if (retryResponse.ok) {
-                            response = retryResponse;
-                            toolsDroppedForRetry = true;
-                        } else {
-                            // Report the RETRY's own status and body. The original 400 is
-                            // context, never the headline — this is the line that used to
-                            // claim "HTTP 400" no matter what really failed.
-                            const retryText = await retryResponse.text();
-                            progress.report(new vscode.LanguageModelTextPart(
-                                `[DeepSeek] ❌ HTTP ${retryResponse.status} on the retry without tools: ${summarizeRejection(retryText)}\n` +
-                                `   (the original request with tools returned HTTP 400: ${rejectionReason})`
-                            ));
-                            return;
+                        let retriedWithTools = false;
+                        if ((requestBody as any).thinking !== undefined) {
+                            const noThinkingBody = JSON.stringify({ ...requestBody, thinking: undefined, reasoning_effort: undefined });
+                            const noThinkingResponse = await fetch(`${cleanBase}/chat/completions`, { ...requestInit, body: noThinkingBody });
+                            if (noThinkingResponse.ok) {
+                                response = noThinkingResponse;
+                                retriedWithTools = true;
+                            }
+                        }
+                        if (!retriedWithTools) {
+                            const retryBody = JSON.stringify({ ...requestBody, thinking: undefined, reasoning_effort: undefined, tools: undefined, tool_choice: undefined });
+                            const retryResponse = await fetch(`${cleanBase}/chat/completions`, { ...requestInit, body: retryBody });
+                            if (retryResponse.ok) {
+                                response = retryResponse;
+                                toolsDroppedForRetry = true;
+                            } else {
+                                // Report the RETRY's own status and body. The original 400 is
+                                // context, never the headline — this is the line that used to
+                                // claim "HTTP 400" no matter what really failed.
+                                const retryText = await retryResponse.text();
+                                progress.report(new vscode.LanguageModelTextPart(
+                                    `[DeepSeek] ❌ HTTP ${retryResponse.status} on the retry without tools: ${summarizeRejection(retryText)}\n` +
+                                    `   (the original request with tools returned HTTP 400: ${rejectionReason})`
+                                ));
+                                return;
+                            }
                         }
                     } catch (retryErr) {
                         // An abort, a Stop or a network loss during the retry is NOT an
@@ -407,60 +419,72 @@ export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
                 let reportedThinking = false;
                 // Tool calls arrive as fragments spread across many SSE chunks.
                 const gatheredToolCalls = new ToolCallAccumulator();
+                // Coalesce sub-frame SSE token deltas (~25 fps) so DeepSeek streaming
+                // does not flood VS Code's Renderer process with 1-token IPC splices.
+                const coalescedText = createCoalescedMarkdownStreamer((chunkTextOut) => {
+                    if (!token.isCancellationRequested) {
+                        progress.report(new vscode.LanguageModelTextPart(chunkTextOut));
+                    }
+                });
 
-                while (true) {
-                    if (token.isCancellationRequested) break;
-                    idleGuard = setTimeout(() => controller.abort(new Error(`stream idle for ${Math.round(idleMs / 1000)}s — stalled.`)), idleMs);
-                    const { value, done } = await reader.read();
-                    clearTimeout(idleGuard);
-                    // On done: final decoder.decode() flush so a multi-byte character
-                    // split across the last chunk is not dropped.
-                    const chunkText = done ? decoder.decode() : decoder.decode(value, { stream: true });
-                    buffer += chunkText;
-                    if (buffer.length > 1_000_000) throw new Error('SSE buffer exceeded 1MB — malformed stream.');
+                try {
+                    while (true) {
+                        if (token.isCancellationRequested) break;
+                        idleGuard = setTimeout(() => controller.abort(new Error(`stream idle for ${Math.round(idleMs / 1000)}s — stalled.`)), idleMs);
+                        const { value, done } = await reader.read();
+                        clearTimeout(idleGuard);
+                        // On done: final decoder.decode() flush so a multi-byte character
+                        // split across the last chunk is not dropped.
+                        const chunkText = done ? decoder.decode() : decoder.decode(value, { stream: true });
+                        buffer += chunkText;
+                        if (buffer.length > 1_000_000) throw new Error('SSE buffer exceeded 1MB — malformed stream.');
 
-                    let lineEnd: number;
-                    while ((lineEnd = buffer.indexOf('\n')) >= 0) {
-                        const rawLine = buffer.slice(0, lineEnd).trim();
-                        buffer = buffer.slice(lineEnd + 1);
-                        if (!rawLine || !rawLine.startsWith('data:')) continue;
-                        const data = rawLine.slice(5).trim();
-                        if (data === '[DONE]') continue;
-                        let chunk: any;
-                        try { chunk = JSON.parse(data); } catch { continue; }
-                        if (chunk?.usage) {
-                            usage = {
-                                promptTokens: chunk.usage.prompt_tokens ?? 0,
-                                completionTokens: chunk.usage.completion_tokens ?? 0
-                            };
-                        }
-                        if (chunk?.choices?.[0]?.finish_reason === 'length') truncated = true;
-                        const delta = chunk?.choices?.[0]?.delta;
-                        if (!delta) continue;
-                        if (delta.tool_calls !== undefined) {
-                            gatheredToolCalls.push(delta.tool_calls);
-                        }
-                        const reasoning = delta.reasoning_content;
-                        if (typeof reasoning === 'string' && reasoning) {
-                            // Liveness only — NEVER surface raw chain-of-thought. Picker output
-                            // enters Copilot Chat history; injecting CoT would corrupt the
-                            // next-turn transcript (and this part is permanent, so: one short
-                            // indicator, never a ticking one).
-                            if (!reportedThinking) {
-                                reportedThinking = true;
+                        let lineEnd: number;
+                        while ((lineEnd = buffer.indexOf('\n')) >= 0) {
+                            const rawLine = buffer.slice(0, lineEnd).trim();
+                            buffer = buffer.slice(lineEnd + 1);
+                            if (!rawLine || !rawLine.startsWith('data:')) continue;
+                            const data = rawLine.slice(5).trim();
+                            if (data === '[DONE]') continue;
+                            let chunk: any;
+                            try { chunk = JSON.parse(data); } catch { continue; }
+                            if (chunk?.usage) {
+                                usage = {
+                                    promptTokens: chunk.usage.prompt_tokens ?? 0,
+                                    completionTokens: chunk.usage.completion_tokens ?? 0
+                                };
+                            }
+                            if (chunk?.choices?.[0]?.finish_reason === 'length') truncated = true;
+                            const delta = chunk?.choices?.[0]?.delta;
+                            if (!delta) continue;
+                            if (delta.tool_calls !== undefined) {
+                                gatheredToolCalls.push(delta.tool_calls);
+                            }
+                            const reasoning = delta.reasoning_content;
+                            if (typeof reasoning === 'string' && reasoning) {
+                                // Liveness only — NEVER surface raw chain-of-thought. Picker output
+                                // enters Copilot Chat history; injecting CoT would corrupt the
+                                // next-turn transcript (and this part is permanent, so: one short
+                                // indicator, never a ticking one).
+                                if (!reportedThinking) {
+                                    reportedThinking = true;
+                                    if (!token.isCancellationRequested) {
+                                        coalescedText.emitImmediate('(thinking…) ');
+                                    }
+                                }
+                            }
+                            if (typeof delta.content === 'string' && delta.content) {
+                                sawContent = true;
                                 if (!token.isCancellationRequested) {
-                                    progress.report(new vscode.LanguageModelTextPart('(thinking…) '));
+                                    coalescedText.push(delta.content);
                                 }
                             }
                         }
-                        if (typeof delta.content === 'string' && delta.content) {
-                            sawContent = true;
-                            if (!token.isCancellationRequested) {
-                                progress.report(new vscode.LanguageModelTextPart(delta.content));
-                            }
-                        }
+                        if (done) break;
                     }
-                    if (done) break;
+                } finally {
+                    // Flush all buffered text synchronously BEFORE emitting tool calls or exiting.
+                    coalescedText.dispose();
                 }
                 // Report gathered tool calls AFTER the streamed text, so VS Code
                 // receives the assistant turn in the order the model produced it.
@@ -471,8 +495,9 @@ export function registerDeepSeekProvider(context: vscode.ExtensionContext) {
                     if (token.isCancellationRequested) break;
                     if (call.parseFailed) {
                         progress.report(new vscode.LanguageModelTextPart(
-                            `\n[tool ${call.name}] arguments were not valid JSON — sent as an empty object.\n`
+                            `\n[tool ${call.name}] ⚠️ Blocked invocation: tool arguments were not valid JSON (${String(call.rawArguments || '').slice(0, 160)}). Please re-emit valid JSON arguments.\n`
                         ));
+                        continue;
                     }
                     progress.report(new vscode.LanguageModelToolCallPart(call.callId, call.name, call.input as object));
                 }

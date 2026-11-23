@@ -453,13 +453,19 @@ class SourceLedgerTool implements vscode.LanguageModelTool<SourceLedgerInput> {
     }
 }
 
-interface RepoMapInput { max_files?: number; max_depth?: number; include_hidden?: boolean; include_routes?: boolean; }
+interface RepoMapInput { max_files?: number; max_depth?: number; include_hidden?: boolean; include_routes?: boolean; scope_path?: string; }
 
-const WALK_EXCLUDES = new Set(['.git', '.harmony', 'node_modules', 'out', 'dist', 'build', 'coverage', '.venv', 'venv', '__pycache__', '_extract_0.2.12', '_extract_0.2.13', '_extract_0.2.14', '_extract_0.2.15', '_extract_0.2.17', '_extract_0.2.18']);
+const WALK_EXCLUDES_LOWER = new Set([
+    '.git', '.harmony', '.harmony-archive', '.harmony-staging', 'node_modules',
+    'out', 'dist', 'build', 'target', 'coverage', '.next', '.nuxt', '.turbo', '.cache',
+    '.venv', 'venv', '__pycache__',
+]);
+const WALK_EXCLUDE_PREFIXES_LOWER = ['_extract_', '_backup', '_comparison'];
+const WALK_EXCLUDE_FILE_EXTS = ['.vsix'];
 
 interface FileEntry { path: string; depth: number; }
 
-async function walkWorkspace(root: string, maxFiles: number, maxDepth: number, includeHidden: boolean): Promise<FileEntry[]> {
+async function walkWorkspace(root: string, startDir: string, maxFiles: number, maxDepth: number, includeHidden: boolean): Promise<FileEntry[]> {
     const files: FileEntry[] = [];
     async function walk(absDir: string, depth: number): Promise<void> {
         if (depth > maxDepth || files.length >= maxFiles) return;
@@ -467,18 +473,23 @@ async function walkWorkspace(root: string, maxFiles: number, maxDepth: number, i
         try { entries = await fs.readdir(absDir, { withFileTypes: true }); } catch { return; }
         for (const entry of entries) {
             if (files.length >= maxFiles) return;
+            if (entry.isSymbolicLink()) continue;
+            const lower = entry.name.toLowerCase();
             if (!includeHidden && entry.name.startsWith('.')) continue;
-            if (WALK_EXCLUDES.has(entry.name)) continue;
+            if (depth === 0 && entry.name.startsWith('_') && entry.isDirectory()) continue;
+            if (WALK_EXCLUDES_LOWER.has(lower)) continue;
+            if (WALK_EXCLUDE_PREFIXES_LOWER.some(prefix => lower.startsWith(prefix))) continue;
             const abs = path.join(absDir, entry.name);
             const rel = normalizePath(path.relative(root, abs));
             if (entry.isDirectory()) {
                 await walk(abs, depth + 1);
             } else if (entry.isFile()) {
+                if (WALK_EXCLUDE_FILE_EXTS.some(ext => lower.endsWith(ext))) continue;
                 files.push({ path: rel, depth });
             }
         }
     }
-    await walk(root, 0);
+    await walk(startDir, 0);
     return files;
 }
 
@@ -513,7 +524,22 @@ class RepoMapTool implements vscode.LanguageModelTool<RepoMapInput> {
         if (!root) return textResult('error: no workspace folder is open');
         const maxFiles = Math.max(100, Math.min(5000, Number(options.input.max_files) || 1200));
         const maxDepth = Math.max(1, Math.min(12, Number(options.input.max_depth) || 5));
-        const files = await walkWorkspace(root, maxFiles, maxDepth, options.input.include_hidden === true);
+        let scanRoot = root;
+        let scopeLabel = '';
+        if (typeof options.input.scope_path === 'string' && options.input.scope_path.trim()) {
+            const rawScope = options.input.scope_path.trim();
+            if (/^[A-Za-z]:(?![\\/])/.test(rawScope)) {
+                return textResult('error: scope_path must stay inside the active workspace');
+            }
+            const candidate = path.resolve(root, rawScope);
+            const relCheck = path.relative(root, candidate);
+            if (relCheck === '..' || relCheck.startsWith('..' + path.sep) || path.isAbsolute(relCheck)) {
+                return textResult('error: scope_path must stay inside the active workspace');
+            }
+            scanRoot = candidate;
+            scopeLabel = normalizePath(relCheck) || '.';
+        }
+        const files = await walkWorkspace(root, scanRoot, maxFiles, maxDepth, options.input.include_hidden === true);
         const filePaths = files.map(file => file.path).sort();
         const pkg = await readJsonFile<any>(path.join(root, 'package.json'));
         const scripts = Object.keys(pkg?.scripts ?? {});
@@ -531,6 +557,7 @@ class RepoMapTool implements vscode.LanguageModelTool<RepoMapInput> {
             '',
             `Workspace: ${path.basename(root)}`,
             `Root: ${root}`,
+            ...(scopeLabel ? [`Scope: ${scopeLabel}`] : []),
             `Files scanned: ${filePaths.length}${filePaths.length >= maxFiles ? ` (hit cap ${maxFiles})` : ''}`,
             `Generated: ${new Date().toISOString()}`,
             '',
@@ -602,7 +629,7 @@ class RouteMapTool implements vscode.LanguageModelTool<RouteMapInput> {
         const maxFiles = Math.max(100, Math.min(5000, Number(options.input.max_files) || 2000));
         const maxDepth = Math.max(1, Math.min(12, Number(options.input.max_depth) || 8));
         const maxRoutes = Math.max(10, Math.min(300, Number(options.input.max_routes) || 120));
-        const files = (await walkWorkspace(root, maxFiles, maxDepth, false)).map(file => file.path).sort();
+        const files = (await walkWorkspace(root, root, maxFiles, maxDepth, false)).map(file => file.path).sort();
         const routes = files
             .map(file => ({ file, route: appRouteFromFile(file) }))
             .filter((item): item is { file: string; route: string } => !!item.route)

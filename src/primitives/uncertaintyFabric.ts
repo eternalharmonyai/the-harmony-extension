@@ -147,3 +147,95 @@ export class UncertaintyFabricTool extends BasePrimitive<UFabricInput> {
         }
     }
 }
+
+// ── Closed-Loop Empirical Epistemic Calibration & Routing (Leap III) ──
+// Receives zero-cost ground-truth signals from `oracle.ts`, `effectLedger.ts`,
+// and `careBloom.ts`, updates Beta(alpha, beta) posteriors per `(source, taskKind)`,
+// and scores candidate routes by Expected Verified Information Gain per Dollar.
+
+export interface EmpiricalCalibrationSignal {
+    source: string;       // e.g. 'deepseek/deepseek-flash', 'gemini/gemini-4-argon', 'oracle'
+    taskKind?: string;    // e.g. 'compile', 'test', 'file-edit', 'general'
+    success: boolean;
+    reason?: string;
+}
+
+export interface EmpiricalPosterior {
+    key: string;
+    alpha: number;
+    beta: number;
+    mean: number;
+    variance: number;
+    observations: number;
+}
+
+export async function recordEmpiricalOutcome(
+    signal: EmpiricalCalibrationSignal,
+    customRoot?: string
+): Promise<EmpiricalPosterior | undefined> {
+    const root = customRoot ?? workspaceRoot();
+    if (!root) return undefined;
+    const dir = safeHarmonyDir(root, 'uncertainty-fabric');
+    await ensureDir(dir);
+    const postFp = path.join(dir, 'posteriors.jsonl');
+    const calFp = path.join(dir, 'calibration.jsonl');
+    const key = `${signal.source.trim().toLowerCase()}::${(signal.taskKind ?? 'general').trim().toLowerCase()}`;
+    const existing = await readJsonl<{ key: string; alpha: number; beta: number; updatedAt: number }>(postFp);
+    let row = existing.find(r => r.key === key);
+    if (!row) {
+        row = { key, alpha: 2, beta: 1, updatedAt: Date.now() }; // mildly optimistic prior (mean 0.667)
+        existing.push(row);
+    }
+    if (signal.success) {
+        row.alpha += 1;
+    } else {
+        row.beta += 1;
+    }
+    row.updatedAt = Date.now();
+    await rewriteJsonl(postFp, existing);
+    try {
+        await appendJsonl(calFp, {
+            key,
+            actual: signal.success,
+            alpha: row.alpha,
+            beta: row.beta,
+            reason: signal.reason,
+            timestamp: row.updatedAt,
+        });
+    } catch { /* best-effort log */ }
+    const sum = row.alpha + row.beta;
+    const mean = row.alpha / sum;
+    const variance = (row.alpha * row.beta) / (sum * sum * (sum + 1));
+    return {
+        key,
+        alpha: row.alpha,
+        beta: row.beta,
+        mean: Math.round(mean * 10000) / 10000,
+        variance: Math.round(variance * 10000) / 10000,
+        observations: Math.max(0, sum - 3),
+    };
+}
+
+/**
+ * Expected Verified Information Gain per Dollar:
+ *   Score(m | t) = (E[Posterior(m,t)] * (1 - Var[Posterior(m,t)])) / max(0.0005, estCostUsd)
+ */
+export function scoreCandidateByEpistemicUtility(
+    alpha: number,
+    beta: number,
+    estimatedCostUsd: number
+): { mean: number; variance: number; utilityPerDollar: number } {
+    const a = Math.max(0.5, alpha);
+    const b = Math.max(0.5, beta);
+    const sum = a + b;
+    const mean = a / sum;
+    const variance = (a * b) / (sum * sum * (sum + 1));
+    const costFloor = Math.max(0.0005, Number.isFinite(estimatedCostUsd) && estimatedCostUsd > 0 ? estimatedCostUsd : 0.0005);
+    const utilityPerDollar = (mean * (1 - variance)) / costFloor;
+    return {
+        mean: Math.round(mean * 10000) / 10000,
+        variance: Math.round(variance * 10000) / 10000,
+        utilityPerDollar: Math.round(utilityPerDollar * 100) / 100,
+    };
+}
+

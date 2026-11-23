@@ -75,41 +75,104 @@ function newId(): string {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-export async function addTodos(texts: string[]): Promise<TodoItem[]> {
-    const items = await loadTodos();
-    const now = new Date().toISOString();
-    for (const t of texts) {
-        const trimmed = t.trim();
-        if (!trimmed) continue;
-        items.push({ id: newId(), text: trimmed, done: false, created: now });
+export const DEFAULT_ACTIVE_TODO_WINDOW = 11;
+export const RECENT_COMPLETED_KEEP = 4;
+
+async function appendToTodoArchive(toArchive: TodoItem[]): Promise<boolean> {
+    if (toArchive.length === 0) return true;
+    const file = todoFileUri();
+    if (!file) return true;
+    const archiveUri = vscode.Uri.file(path.join(path.dirname(file.fsPath), 'todos-archive.json'));
+    try {
+        let archive: TodoItem[] = [];
+        try {
+            const buf = await vscode.workspace.fs.readFile(archiveUri);
+            const parsed = JSON.parse(new TextDecoder('utf-8').decode(buf));
+            if (Array.isArray(parsed)) archive = parsed;
+        } catch { /* archive doesn't exist yet */ }
+        const seenIds = new Set(archive.map(it => it.id));
+        for (const item of toArchive) {
+            if (!seenIds.has(item.id)) {
+                archive.push(item);
+                seenIds.add(item.id);
+            }
+        }
+        const data = new TextEncoder().encode(JSON.stringify(archive, null, 2));
+        await vscode.workspace.fs.writeFile(archiveUri, data);
+        return true;
+    } catch {
+        // Never discard completed items from todo.json if archive write fails (Rule 3)
+        return false;
     }
-    await saveTodos(items);
-    return items;
+}
+
+async function saveTodosWithAutoArchive(items: TodoItem[]): Promise<TodoItem[]> {
+    const done = items.filter(it => it.done);
+    if (done.length <= RECENT_COMPLETED_KEEP) {
+        await saveTodos(items);
+        return items;
+    }
+    const overflowDone = done.slice(0, done.length - RECENT_COMPLETED_KEEP);
+    const archivedOk = await appendToTodoArchive(overflowDone);
+    if (!archivedOk) {
+        await saveTodos(items);
+        return items;
+    }
+    const overflowIds = new Set(overflowDone.map(it => it.id));
+    const kept = items.filter(it => !overflowIds.has(it.id));
+    await saveTodos(kept);
+    return kept;
+}
+
+let todoMutationChain: Promise<unknown> = Promise.resolve();
+
+function withTodoLock<T>(fn: () => Promise<T>): Promise<T> {
+    const next = todoMutationChain.then(fn, fn);
+    todoMutationChain = next.then(() => undefined, () => undefined);
+    return next;
+}
+
+export async function addTodos(texts: string[]): Promise<TodoItem[]> {
+    return withTodoLock(async () => {
+        const items = await loadTodos();
+        const now = new Date().toISOString();
+        for (const t of texts) {
+            const trimmed = t.trim();
+            if (!trimmed) continue;
+            items.push({ id: newId(), text: trimmed, done: false, created: now });
+        }
+        return saveTodosWithAutoArchive(items);
+    });
 }
 
 export async function checkTodo(id: string, done = true): Promise<TodoItem[]> {
-    const items = await loadTodos();
-    for (const it of items) {
-        if (it.id === id) {
-            it.done = done;
-            it.completed = done ? new Date().toISOString() : undefined;
+    return withTodoLock(async () => {
+        const items = await loadTodos();
+        for (const it of items) {
+            if (it.id === id) {
+                it.done = done;
+                it.completed = done ? new Date().toISOString() : undefined;
+            }
         }
-    }
-    await saveTodos(items);
-    return items;
+        return saveTodosWithAutoArchive(items);
+    });
 }
 
 export async function removeTodo(id: string): Promise<TodoItem[]> {
-    const items = (await loadTodos()).filter(it => it.id !== id);
-    await saveTodos(items);
-    return items;
+    return withTodoLock(async () => {
+        const items = (await loadTodos()).filter(it => it.id !== id);
+        await saveTodos(items);
+        return items;
+    });
 }
 
 export async function clearTodos(scope: 'all' | 'done' = 'all'): Promise<TodoItem[]> {
-    const items = await loadTodos();
-    const kept = scope === 'done' ? items.filter(it => !it.done) : [];
-    await saveTodos(kept);
-    return kept;
+    return withTodoLock(async () => {
+        const items = await loadTodos();
+        const kept = scope === 'done' ? items.filter(it => !it.done) : [];
+        await saveTodos(kept);
+        return kept;
+    });
 }
 
 export function formatTodos(items: TodoItem[]): string {
@@ -131,17 +194,57 @@ export function getActiveBatchSize(): number {
         .get<number>('contextPersistence.activeBatchSize', 5);
 }
 
+export function getEffectiveActiveTodoLimit(): number {
+    return Math.max(DEFAULT_ACTIVE_TODO_WINDOW, getActiveBatchSize());
+}
+
 /**
- * Returns only the current "active batch" of todos.
- * Older pending items wait until the current batch is cleared.
+ * Formats a bounded active window of todos (most recent active + recent completed)
+ * with an explicit AGENTS.md §6 disclosure line whenever older items are omitted,
+ * preventing multi-KB repeated Chat tool cards from bloating the VS Code Renderer heap.
+ */
+export function formatActiveWindowTodos(
+    items: TodoItem[],
+    maxActive = getEffectiveActiveTodoLimit(),
+    maxRecentDone = RECENT_COMPLETED_KEEP
+): string {
+    if (items.length === 0) return '(no items)';
+    const pending = items.filter(t => !t.done);
+    const done = items.filter(t => t.done);
+    const keptPending = pending.slice(-Math.max(1, maxActive));
+    const keptDone = done.slice(-Math.max(0, maxRecentDone));
+    const keptIds = new Set<string>([
+        ...keptPending.map(t => t.id),
+        ...keptDone.map(t => t.id),
+    ]);
+    const windowed = items.filter(it => keptIds.has(it.id));
+    const lines = windowed.map(
+        (it, idx) => `${idx + 1}. [${it.done ? 'x' : ' '}] ${it.text}  \u2014 id:${it.id}`
+    );
+    const omittedPending = pending.length - keptPending.length;
+    const omittedDone = done.length - keptDone.length;
+    if (omittedPending > 0 || omittedDone > 0) {
+        const parts: string[] = [];
+        if (omittedPending > 0) parts.push(`${omittedPending} older pending`);
+        if (omittedDone > 0) parts.push(`${omittedDone} older completed`);
+        lines.push(
+            `\u2026 [Active window: showing ${windowed.length} of ${items.length} todo(s); ` +
+            `${parts.join(' + ')} omitted from chat output to protect VS Code Renderer memory. ` +
+            `Completed items auto-archive to .harmony/todos-archive.json]`
+        );
+    }
+    return lines.join('\n');
+}
+
+/**
+ * Returns only the current "active batch" of todos (most recent pending items).
  */
 export async function getActiveTodos(): Promise<TodoItem[]> {
     const all = await loadTodos();
     const pending = all.filter(t => !t.done);
-    const batchSize = getActiveBatchSize();
-    if (pending.length <= batchSize) return pending;
-    // Return the oldest N pending items as the active batch
-    return pending.slice(0, batchSize);
+    const limit = getEffectiveActiveTodoLimit();
+    if (pending.length <= limit) return pending;
+    return pending.slice(-limit);
 }
 
 /**
@@ -149,27 +252,16 @@ export async function getActiveTodos(): Promise<TodoItem[]> {
  * keeping the main todo.json lean.
  */
 export async function archiveCompletedTodos(): Promise<{ archived: number; kept: number }> {
-    const all = await loadTodos();
-    const done = all.filter(t => t.done);
-    const kept = all.filter(t => !t.done);
-    if (done.length === 0) return { archived: 0, kept: kept.length };
+    return withTodoLock(async () => {
+        const all = await loadTodos();
+        const done = all.filter(t => t.done);
+        const kept = all.filter(t => !t.done);
+        if (done.length === 0) return { archived: 0, kept: kept.length };
 
-    // Append completed to archive
-    const file = todoFileUri();
-    if (file) {
-        const archiveUri = vscode.Uri.file(path.join(path.dirname(file.fsPath), 'todos-archive.json'));
-        try {
-            let archive: TodoItem[] = [];
-            try {
-                const buf = await vscode.workspace.fs.readFile(archiveUri);
-                archive = JSON.parse(new TextDecoder('utf-8').decode(buf));
-            } catch { /* archive doesn't exist yet */ }
-            archive.push(...done);
-            const data = new TextEncoder().encode(JSON.stringify(archive, null, 2));
-            await vscode.workspace.fs.writeFile(archiveUri, data);
-        } catch { /* skip archive write failures */ }
-    }
+        const archivedOk = await appendToTodoArchive(done);
+        if (!archivedOk) return { archived: 0, kept: all.length };
 
-    await saveTodos(kept);
-    return { archived: done.length, kept: kept.length };
+        await saveTodos(kept);
+        return { archived: done.length, kept: kept.length };
+    });
 }

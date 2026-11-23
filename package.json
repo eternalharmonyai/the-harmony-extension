@@ -2,7 +2,7 @@
   "name": "harmony-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.16",
+  "version": "0.4.17",
   "publisher": "harmony",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
@@ -148,6 +148,11 @@
     "onLanguageModelTool:harmony_intent_model",
     "onLanguageModelTool:harmony_output_preview",
     "onLanguageModelTool:harmony_context_triage",
+    "onLanguageModelTool:harmony_dual_lens",
+    "onLanguageModelTool:harmony_audhd_lens",
+    "onLanguageModelTool:harmony_rule_matrix_eval",
+    "onLanguageModelTool:harmony_architecture_risk_audit",
+    "onLanguageModelTool:harmony_policy_gate_check",
     "onLanguageModelTool:harmony_browser_diagnose",
     "onLanguageModelTool:harmony_browser_recipe",
     "onLanguageModelTool:harmony_browser_compare",
@@ -333,6 +338,10 @@
           {
             "name": "checkpoint",
             "description": "Toggle checkpoint mode (pause between major steps)."
+          },
+          {
+            "name": "fleet",
+            "description": "Toggle, inspect, or dispatch Fleet Mode (Conductor + parallel Collaborator offload via Context Shield route)."
           },
           {
             "name": "research",
@@ -1576,7 +1585,7 @@
       {
         "name": "harmony_ask_question",
         "displayName": "Ask the user",
-        "modelDescription": "Ask the user one or more structured questions and wait for their answer using stable VS Code-native prompts. IMPORTANT: when you need clarification, call this tool directly instead of saying you will ask and ending the turn. Supports question/options or a questions[] batch with headers, option labels/descriptions, multiSelect, and freeform input. Returns the user's answer or 'user cancelled'.",
+        "modelDescription": "Ask the user one or more structured questions and wait for their answer using stable VS Code-native prompts. IMPORTANT: when you need clarification, call this tool directly instead of saying you will ask and ending the turn. Supports mode ('explore' | 'decide'), thought, question/options, readyCheckbox, or a questions[] batch with headers, option labels/descriptions, multiSelect, and freeform input. Answers are persisted locally before returning. Returns the user's answer or 'user cancelled'.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonyAsk",
         "tags": [
@@ -1593,6 +1602,18 @@
             "header": {
               "type": "string",
               "description": "Short identifier/title for this question."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "explore",
+                "decide"
+              ],
+              "description": "Conversation mode: 'explore' (non-blocking reflection paired with thought) or 'decide' (blocking decision with options)."
+            },
+            "thought": {
+              "type": "string",
+              "description": "Your reflection or reasoning grounding the question (required in explore mode, optional in decide mode)."
             },
             "message": {
               "type": "string",
@@ -1638,6 +1659,14 @@
               "type": "boolean",
               "description": "Hint that a longer answer is expected."
             },
+            "readyCheckbox": {
+              "type": "boolean",
+              "description": "Show a 'Ready' checkbox for mutual flow-state signalling."
+            },
+            "readyLabel": {
+              "type": "string",
+              "description": "Custom label for the ready checkbox."
+            },
             "questions": {
               "type": "array",
               "description": "Optional batch of structured questions. Use this instead of multiple separate ask turns.",
@@ -1645,6 +1674,16 @@
                 "type": "object",
                 "properties": {
                   "header": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "explore",
+                      "decide"
+                    ]
+                  },
+                  "thought": {
                     "type": "string"
                   },
                   "question": {
@@ -1688,6 +1727,12 @@
                   },
                   "multiline": {
                     "type": "boolean"
+                  },
+                  "readyCheckbox": {
+                    "type": "boolean"
+                  },
+                  "readyLabel": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1701,7 +1746,7 @@
       {
         "name": "harmony_ask_harmony",
         "displayName": "Ask Harmony",
-        "modelDescription": "Friendly alias for harmony_ask_question. Ask the user one or more structured questions. Supports question/options or a questions[] batch. Returns the user answer or user cancelled.",
+        "modelDescription": "Friendly alias for harmony_ask_question. Ask the user one or more structured questions. Supports mode, thought, question/options, or a questions[] batch. Returns the user answer or user cancelled.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonyAsk",
         "tags": [
@@ -1718,6 +1763,18 @@
             "header": {
               "type": "string",
               "description": "Short identifier/title for this question."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "explore",
+                "decide"
+              ],
+              "description": "Conversation mode: 'explore' or 'decide'."
+            },
+            "thought": {
+              "type": "string",
+              "description": "Reflection or reasoning grounding the question."
             },
             "message": {
               "type": "string",
@@ -1763,6 +1820,14 @@
               "type": "boolean",
               "description": "Hint that a longer answer is expected."
             },
+            "readyCheckbox": {
+              "type": "boolean",
+              "description": "Show a 'Ready' checkbox for mutual flow-state signalling."
+            },
+            "readyLabel": {
+              "type": "string",
+              "description": "Custom label for the ready checkbox."
+            },
             "questions": {
               "type": "array",
               "description": "Optional batch of structured questions. Use this instead of multiple separate ask turns.",
@@ -1770,6 +1835,16 @@
                 "type": "object",
                 "properties": {
                   "header": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "explore",
+                      "decide"
+                    ]
+                  },
+                  "thought": {
                     "type": "string"
                   },
                   "question": {
@@ -1813,6 +1888,12 @@
                   },
                   "multiline": {
                     "type": "boolean"
+                  },
+                  "readyCheckbox": {
+                    "type": "boolean"
+                  },
+                  "readyLabel": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1826,7 +1907,7 @@
       {
         "name": "harmony_ask_questions",
         "displayName": "Ask the user (batch)",
-        "modelDescription": "Alias for harmony_ask_question. Ask the user one or more structured questions. Supports question/options or a questions[] batch. Returns the user answer or user cancelled.",
+        "modelDescription": "Alias for harmony_ask_question. Ask the user one or more structured questions. Supports mode, thought, question/options, or a questions[] batch. Returns the user answer or user cancelled.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonyAsk",
         "tags": [
@@ -1843,6 +1924,18 @@
             "header": {
               "type": "string",
               "description": "Short identifier/title for this question."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "explore",
+                "decide"
+              ],
+              "description": "Conversation mode: 'explore' or 'decide'."
+            },
+            "thought": {
+              "type": "string",
+              "description": "Reflection or reasoning grounding the question."
             },
             "message": {
               "type": "string",
@@ -1888,6 +1981,14 @@
               "type": "boolean",
               "description": "Hint that a longer answer is expected."
             },
+            "readyCheckbox": {
+              "type": "boolean",
+              "description": "Show a 'Ready' checkbox for mutual flow-state signalling."
+            },
+            "readyLabel": {
+              "type": "string",
+              "description": "Custom label for the ready checkbox."
+            },
             "questions": {
               "type": "array",
               "description": "Optional batch of structured questions. Use this instead of multiple separate ask turns.",
@@ -1895,6 +1996,16 @@
                 "type": "object",
                 "properties": {
                   "header": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "explore",
+                      "decide"
+                    ]
+                  },
+                  "thought": {
                     "type": "string"
                   },
                   "question": {
@@ -1938,6 +2049,12 @@
                   },
                   "multiline": {
                     "type": "boolean"
+                  },
+                  "readyCheckbox": {
+                    "type": "boolean"
+                  },
+                  "readyLabel": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1951,7 +2068,7 @@
       {
         "name": "harmony_fetch_url",
         "displayName": "Fetch URL",
-        "modelDescription": "Fetch a URL via HTTPS/HTTP and return its text content (HTML stripped to text). Use for web research when the user references a URL or you need current information from a known site. Do not guess URLs. Supports optional headers for authenticated API calls.",
+        "modelDescription": "Fetch a URL via HTTPS/HTTP and return its text or Markdown content. Supports optional headers for authenticated API calls, plus DeepSeek Fetch (/v1/tools/fetch) Markdown extraction via extractor ('auto' | 'direct' | 'deepseek').",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonyFetch",
         "tags": [
@@ -1972,6 +2089,15 @@
             "headers": {
               "type": "object",
               "description": "Optional HTTP headers for authenticated requests."
+            },
+            "extractor": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "direct",
+                "deepseek"
+              ],
+              "description": "Extraction mode: 'auto' (default: zero-cost direct HTTP fetch first, automatic fallback to DeepSeek /v1/tools/fetch on 403/429/5xx or empty JS shell), 'direct' (direct HTTP only), or 'deepseek' (clean Markdown via DeepSeek /v1/tools/fetch)."
             }
           },
           "required": [
@@ -3952,6 +4078,10 @@
             "include_routes": {
               "type": "boolean",
               "description": "Include route/page file scan. Default true."
+            },
+            "scope_path": {
+              "type": "string",
+              "description": "Optional workspace-relative subdirectory to scope the scan (e.g. 'src')."
             }
           }
         }
@@ -6285,6 +6415,292 @@
         }
       },
       {
+        "name": "harmony_dual_lens",
+        "displayName": "Dual-Lens Superposition",
+        "modelDescription": "Engage Dual-Lens Superposition mode (inspired by the strengths of neurodivergent dual-focus cognition): toggle or combine Chaos Engine 1 (Omnidirectional Field Radar) and Chaos Engine 2 (Forensic Deterministic Crystal) to map real-world floor seams and lock them into uncompromising structural invariants.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyDualLens",
+        "tags": [
+          "cognition",
+          "planning",
+          "architecture",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "analyze",
+                "set_active_lens",
+                "status"
+              ],
+              "description": "Default 'analyze'. Use 'set_active_lens' to persist the active lens mode, or 'status' to inspect it."
+            },
+            "lens": {
+              "type": "string",
+              "enum": [
+                "omnidirectional",
+                "crystal",
+                "superposition"
+              ],
+              "description": "omnidirectional (Chaos Engine 1: Divergent Radar), crystal (Chaos Engine 2: Deterministic Crystal), or superposition (both engines balanced simultaneously). Default 'superposition'."
+            },
+            "problem": {
+              "type": "string",
+              "description": "The feature, bug, architecture, or slice to analyze through the Dual-Lens."
+            },
+            "domain_signals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Optional real-world floor/domain threads for Chaos Engine 1 to scan."
+            },
+            "invariants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Optional deterministic crystal invariants for Chaos Engine 2 to lock onto."
+            }
+          }
+        }
+      },
+      {
+        "name": "harmony_audhd_lens",
+        "displayName": "AuDHD Dual-Lens Superposition",
+        "modelDescription": "Engage AuDHD Dual-Lens Superposition mode (inspired by the strengths of neurodivergent dual-focus cognition): toggle or combine Chaos Engine 1 (Hyper-Divergent Omnidirectional Field Radar) and Chaos Engine 2 (Hyper-Focused Deterministic Crystal) to map real-world floor seams and lock them into uncompromising structural invariants.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyAudhdLens",
+        "tags": [
+          "cognition",
+          "planning",
+          "architecture",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "analyze",
+                "set_active_lens",
+                "status"
+              ],
+              "description": "Default 'analyze'. Use 'set_active_lens' to persist the active lens mode, or 'status' to inspect it."
+            },
+            "lens": {
+              "type": "string",
+              "enum": [
+                "omnidirectional",
+                "crystal",
+                "superposition"
+              ],
+              "description": "omnidirectional (Chaos Engine 1: Divergent Radar), crystal (Chaos Engine 2: Deterministic Crystal), or superposition (both engines balanced simultaneously). Default 'superposition'."
+            },
+            "problem": {
+              "type": "string",
+              "description": "The feature, bug, architecture, or slice to analyze through the AuDHD Dual-Lens."
+            },
+            "domain_signals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Optional real-world floor/domain threads for Chaos Engine 1 to scan."
+            },
+            "invariants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Optional deterministic crystal invariants for Chaos Engine 2 to lock onto."
+            }
+          }
+        }
+      },
+      {
+        "name": "harmony_rule_matrix_eval",
+        "displayName": "Declarative rule matrix & decision-table evaluator",
+        "modelDescription": "Deterministically evaluate any entity object against a declarative multi-tier rule matrix (loaded from .harmony/policies/<profile>.matrix.json, policy_path, inline tiers, or built-in R&D defaults). Supports gte, lte, gt, lt, eq, neq, in, not_in, contains, not_contains predicates, capacity formulas, knockout diagnostics, and init_template scaffolding.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyRuleMatrixEval",
+        "tags": [
+          "architecture",
+          "governance",
+          "decision-table",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "evaluate",
+                "init_template"
+              ],
+              "description": "Default 'evaluate'. Use 'init_template' to scaffold a customizable .harmony/policies/<profile>.matrix.json file in the active workspace."
+            },
+            "entity_name": {
+              "type": "string",
+              "description": "Optional name or label of the entity/workload being evaluated."
+            },
+            "profile": {
+              "type": "string",
+              "description": "Policy profile name (resolves to .harmony/policies/<profile>.matrix.json). Default 'default'."
+            },
+            "policy_path": {
+              "type": "string",
+              "description": "Optional workspace-relative path to a custom JSON rule matrix."
+            },
+            "entity": {
+              "type": "object",
+              "description": "Key-value attributes of the entity to evaluate against the rule matrix predicates."
+            },
+            "tiers": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Optional inline declarative rule tiers (overrides file/default tiers when provided). Each tier may set `priority` (lower number = higher priority); when omitted, tier array order is used and reported as the ordering basis."
+            }
+          }
+        }
+      },
+      {
+        "name": "harmony_architecture_risk_audit",
+        "displayName": "Enterprise architecture, separation-of-duties & lock-in audit",
+        "modelDescription": "Audit a proposed system or third-party vendor architecture against NIST SP 800-53 (AC-5 Separation of Duties), CIS Controls, SOC 2, data sovereignty, and blast-radius isolation principles. Can load workspace-specific invariants from .harmony/policies/architecture.json.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyArchitectureRiskAudit",
+        "tags": [
+          "architecture",
+          "security",
+          "governance",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "proposal_name": {
+              "type": "string",
+              "description": "Name or label of the proposed vendor or architecture change."
+            },
+            "proposal_summary": {
+              "type": "string",
+              "description": "Summary of what the vendor or architecture change proposes."
+            },
+            "security_plane_stack": {
+              "type": "string",
+              "description": "Optional description of the independent security/EDR/SIEM plane that must remain separate."
+            },
+            "security_plane_terms": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Optional extra security-plane terms or vendor names for this workspace. Extends the built-in generic-term and named-platform layers when detecting a proposed removal or consolidation of the independent security plane."
+            },
+            "sensitive_assets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Optional list of sensitive data or infrastructure assets in scope."
+            },
+            "consolidates_security_and_app_plane": {
+              "type": "boolean",
+              "description": "Whether the proposal merges application workflows and security monitoring into a single vendor."
+            },
+            "policy_path": {
+              "type": "string",
+              "description": "Optional workspace-relative path to custom architecture invariants (.harmony/policies/architecture.json)."
+            }
+          },
+          "required": [
+            "proposal_name",
+            "proposal_summary"
+          ]
+        }
+      },
+      {
+        "name": "harmony_policy_gate_check",
+        "displayName": "Deterministic pre-execution policy, time-window & suppression gate",
+        "modelDescription": "Deterministically evaluate a proposed outbound action, notification, webhook, or automated workflow dispatch against configurable local time-window bounds, opt-out/suppression flags, rate-limit caps, and blocked payload patterns (.harmony/policies/gate.json).",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "harmonyPolicyGateCheck",
+        "tags": [
+          "governance",
+          "compliance",
+          "architecture",
+          "harmony"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action_label": {
+              "type": "string",
+              "description": "Optional label for the outbound action or workflow step."
+            },
+            "channel": {
+              "type": "string",
+              "description": "Optional dispatch channel (e.g. webhook, notification, email, sms, api)."
+            },
+            "region_or_timezone": {
+              "type": "string",
+              "description": "Optional target region or timezone code."
+            },
+            "local_hour_24": {
+              "type": "number",
+              "description": "Recipient/target local hour in 24-hour format (0-23)."
+            },
+            "suppressed_or_opted_out": {
+              "type": "boolean",
+              "description": "Whether the target entity has opted out or is on a suppression list."
+            },
+            "recent_dispatch_count": {
+              "type": "number",
+              "description": "Number of dispatches sent to this target within the current rate-limit window."
+            },
+            "max_frequency_per_window": {
+              "type": "number",
+              "description": "Maximum allowed dispatches per window (default 3)."
+            },
+            "quiet_hours_start": {
+              "type": "number",
+              "description": "Start of quiet window in 24-hour local time (default 20 = 8 PM)."
+            },
+            "quiet_hours_end": {
+              "type": "number",
+              "description": "End of quiet window in 24-hour local time (default 8 = 8 AM)."
+            },
+            "payload_text": {
+              "type": "string",
+              "description": "Optional outbound payload or message text to scan against blocked policy patterns."
+            },
+            "blocked_patterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Optional list of prohibited phrases or substrings."
+            },
+            "policy_path": {
+              "type": "string",
+              "description": "Optional workspace-relative path to custom gate rules (.harmony/policies/gate.json)."
+            },
+            "require_full_evidence": {
+              "type": "boolean",
+              "description": "Fail-closed strictness. When true, the gate returns INCONCLUSIVE unless every invariant (suppression, quiet hours, frequency cap, payload scan) was evaluated on supplied evidence. The gate always refuses to return ALLOW when zero invariants were evaluated."
+            }
+          }
+        }
+      },
+      {
         "name": "harmony_browser_diagnose",
         "displayName": "Browser diagnose",
         "modelDescription": "Classify a browser automation failure and suggest recovery steps from intent, error message, and optional screenshot path.",
@@ -7221,7 +7637,7 @@
       {
         "name": "harmony_parallel",
         "displayName": "Parallel Swarm Dispatch",
-        "modelDescription": "Dispatch multiple workers simultaneously via Promise.all. Each worker gets a prompt and optional provider/tier/role. Includes cost guard with soft/hard limits. Returns structured results per worker.",
+        "modelDescription": "Dispatch multiple read-only Collaborator workers simultaneously via Promise.all. Each task gets a prompt, optional context_files (workspace-relative paths inlined locally at zero Conductor output token cost), and optional provider/tier/role/system/slot_index. Respects Context Shield offload route and heavy-tier confirmation prompts.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "harmonyParallel",
         "tags": [
@@ -7238,18 +7654,44 @@
                 "type": "object",
                 "properties": {
                   "prompt": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Focused read-only question or verification task for this worker."
+                  },
+                  "context_files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Workspace-relative file paths to read and inline locally into this worker's prompt (prefer this over pasting code into prompt)."
+                  },
+                  "max_chars_per_file": {
+                    "type": "number",
+                    "description": "Max characters read per context file (default 16000)."
                   },
                   "provider": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Optional explicit provider override. Omit to use Context Shield offload route or Agents Profile."
                   },
                   "tier": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Optional tier override (light | mid | coding | heavy | premium)."
                   },
                   "role": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Collaborator role (scout | researcher | planner | implementer | verifier | critic | cost_sentinel | hard_reasoner)."
+                  },
+                  "system": {
+                    "type": "string",
+                    "description": "Optional custom system instructions for this worker."
+                  },
+                  "slot_index": {
+                    "type": "number",
+                    "description": "Optional provider key slot index: 0=Chat, 1=Agents, 2=External, 3=Vision."
                   }
-                }
+                },
+                "required": [
+                  "prompt"
+                ]
               },
               "description": "Array of tasks to dispatch in parallel (max 10)"
             },
@@ -9413,6 +9855,14 @@
         "title": "Harmony: Select Provider Endpoint Profile"
       },
       {
+        "command": "harmony.configureVertexCredentials",
+        "title": "Harmony: Configure Vertex AI Credentials (Service Account / ADC)"
+      },
+      {
+        "command": "harmony.reauthGcloudAdc",
+        "title": "Harmony: Re-authenticate Google Cloud ADC (gcloud)"
+      },
+      {
         "command": "harmony.selectKimiCodeContextWindow",
         "title": "Harmony: KimiCode Context Window"
       },
@@ -9447,14 +9897,6 @@
       {
         "command": "harmony.setClaudeApiKey.clear",
         "title": "Harmony: Clear Anthropic API Key (Claude Models)"
-      },
-      {
-        "command": "harmony.setTencentApiKey",
-        "title": "Harmony: Set Tencent / Hunyuan API Key"
-      },
-      {
-        "command": "harmony.setTencentApiKey.clear",
-        "title": "Harmony: Clear Tencent / Hunyuan API Key"
       },
       {
         "command": "harmony.setTencentApiKey",
@@ -9541,6 +9983,26 @@
         "title": "Harmony: Compose with Images / Long Prompt"
       },
       {
+        "command": "harmony.launchStandaloneStudio",
+        "title": "Harmony: Launch Harmony Studio (External Desktop Window)",
+        "icon": {
+          "light": "media/harmony-icon.svg",
+          "dark": "media/harmony-icon.svg"
+        }
+      },
+      {
+        "command": "harmony.unlockDevStudio",
+        "title": "Harmony: Unlock Developer Studio (/dev)"
+      },
+      {
+        "command": "harmony.openStudioTab",
+        "title": "Harmony: Open Harmony Chat (Split View / Side Panel)",
+        "icon": {
+          "light": "media/harmony-icon.svg",
+          "dark": "media/harmony-icon.svg"
+        }
+      },
+      {
         "command": "harmony.continueLastTurn",
         "title": "Harmony: Continue From Step Limit",
         "category": "Harmony"
@@ -9583,12 +10045,32 @@
         "mac": "cmd+alt+m"
       }
     ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "harmony.openStudioTab",
+          "group": "navigation@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "harmony.openStudioTab",
+          "when": "view == harmony.controlPanel",
+          "group": "navigation@1"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
           "id": "harmony-sidebar",
           "title": "%viewsContainers.harmony%",
           "icon": "media/harmony-icon.png"
+        },
+        {
+          "id": "harmony-chat-panel",
+          "title": "%viewsContainers.harmonyChat%",
+          "icon": "media/harmony-icon.svg"
         }
       ]
     },
@@ -9603,6 +10085,13 @@
           "id": "harmony.translationTools",
           "name": "%views.translationTools%",
           "type": "tree"
+        }
+      ],
+      "harmony-chat-panel": [
+        {
+          "id": "harmony.chatPanel",
+          "name": "%views.chatPanel%",
+          "type": "webview"
         }
       ]
     },
@@ -9875,6 +10364,11 @@
           "default": false,
           "description": "%config.harmony.orchestrateMode.enabled.description%"
         },
+        "harmony.orchestrateMode.fleetEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.harmony.orchestrateMode.fleetEnabled.description%"
+        },
         "harmony.orchestrateMode.preApprovedTools": {
           "type": "array",
           "items": {
@@ -9884,10 +10378,14 @@
             "harmony_parallel",
             "harmony_orchestrate_codebase",
             "harmony_consult_model",
-            "harmony_spawn_worker",
-            "harmony_swarm_dispatch"
+            "harmony_spawn_worker"
           ],
           "description": "%config.harmony.orchestrateMode.preApprovedTools.description%"
+        },
+        "harmony.sidebar.quickHubPinned": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.harmony.sidebar.quickHubPinned.description%"
         },
         "harmony.orchestrateMode.maxCallsPerSession": {
           "type": "number",
@@ -10040,6 +10538,26 @@
           "type": "boolean",
           "default": false,
           "description": "%config.harmony.plannerEnforced.description%"
+        },
+        "harmony.costShield.mode": {
+          "type": "string",
+          "enum": ["auto", "manual", "off"],
+          "default": "auto",
+          "description": "Context Shield policy: 'auto' enables prefix-locked KV caching, same-file read deduplication, and phase-adaptive thinking on mechanical steps; 'manual' keeps prefix-locked caching while requiring explicit invocation for compaction/worker offload; 'off' disables context-shield transformations. Advisory prompt/context optimization only — not a billing cap."
+        },
+        "harmony.costShield.workerRoute": {
+          "type": "string",
+          "enum": [
+            "agentsProfile",
+            "deepseek:coding",
+            "deepseek:light",
+            "gemini:light",
+            "gemini:coding",
+            "claude:coding",
+            "openai:coding"
+          ],
+          "default": "agentsProfile",
+          "description": "Default model route for Context Shield worker/audit offloads (harmony_spawn_worker and harmony_parallel). 'agentsProfile' uses the configured Agents Profile (e.g. DeepSeek Coding / Flash 4.1)."
         },
         "harmony.checkpointMode": {
           "type": "boolean",
@@ -10547,6 +11065,32 @@
           "default": "permissive",
           "description": "%config.harmony.gemini.safety.preset.description%"
         },
+        "harmony.gemini.endpointProfile": {
+          "type": "string",
+          "enum": ["ai-studio", "vertex", "custom"],
+          "default": "ai-studio",
+          "description": "%config.harmony.gemini.endpointProfile.description%"
+        },
+        "harmony.gemini.vertexProjectId": {
+          "type": "string",
+          "default": "",
+          "description": "%config.harmony.gemini.vertexProjectId.description%"
+        },
+        "harmony.gemini.vertexLocation": {
+          "type": "string",
+          "default": "global",
+          "description": "%config.harmony.gemini.vertexLocation.description%"
+        },
+        "harmony.gemini.allowDedicatedVmEndpoints": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.harmony.gemini.allowDedicatedVmEndpoints.description%"
+        },
+        "harmony.gemini.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "%config.harmony.gemini.baseUrl.description%"
+        },
         "harmony.providers.claude.light": {
           "type": "string",
           "default": "",
@@ -10700,6 +11244,18 @@
           "default": "international",
           "description": "%config.harmony.alibaba.endpointProfile.description%"
         },
+        "harmony.sessions.preambleTargetChars": {
+          "type": "number",
+          "default": 8000,
+          "minimum": 1000,
+          "description": "%config.harmony.sessions.preambleTargetChars.description%"
+        },
+        "harmony.sessions.preambleCeilingChars": {
+          "type": "number",
+          "default": 24000,
+          "minimum": 2000,
+          "description": "%config.harmony.sessions.preambleCeilingChars.description%"
+        },
         "harmony.vision.geminiModel": {
           "type": "string",
           "default": "gemini-3.8-flash",
@@ -10746,6 +11302,9 @@
         "harmony.vision.autoGeminiModel": {
           "type": "string",
           "enum": [
+            "gemini-4-hydrogen",
+            "gemini-4-neon",
+            "gemini-4-carbon",
             "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-3.6-flash",
@@ -11175,9 +11734,32 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile && npm run check:tool-bridge && npm run check:lm-capabilities && npm run check:hub-auth && npm run check:webview && npm run check:migrations && npm run check:summarize-gate && npm run bundle-hub",
+    "vscode:prepublish": "npm run compile && npm run check:claim-hygiene && npm run check:snapshot-exclusion && npm run check:audit-toast && npm run check:tool-bridge && npm run check:lm-capabilities && npm run check:security-plane && npm run check:collaborator-roles && npm run check:collaborator-workspace && npm run check:collaborator-review && npm run check:gem-sanctuary && npm run check:sovereign-chat-stream && npm run check:session-preamble && npm run check:studio-settings && npm run check:fleet-hub && npm run check:studio-parity && npm run check:dev-surface && npm run check:csp-nonce && npm run check:resilience-circuit && npm run check:audit-classify && npm run check:audit-scope && npm run check:ask-surface && npm run check:vertex-auth && npm run check:renderer-shield && npm run check:native-resilience && npm run check:vpn-gemini-resilience && npm run check:hub-auth && npm run check:webview && npm run check:migrations && npm run check:summarize-gate && npm run bundle-hub",
     "compile": "tsc -p ./",
+    "check:claim-hygiene": "node scripts/check-claim-hygiene.js",
+    "check:fleet-hub": "node scripts/check-fleet-and-quick-hub.js",
+    "check:studio-parity": "node scripts/check-studio-parity.js",
+    "check:sovereign-chat-stream": "node scripts/check-sovereign-chat-stream.js",
+    "check:vertex-auth": "node scripts/check-vertex-auth.js",
+    "check:renderer-shield": "node scripts/check-renderer-shield.js",
+    "check:native-resilience": "node scripts/check-native-resilience.js",
+    "check:vpn-gemini-resilience": "node scripts/check-vpn-gemini-resilience.js",
     "check:tool-bridge": "node scripts/run-deepseek-tool-bridge-tests.js",
+    "check:security-plane": "node scripts/check-security-plane-detector.js",
+    "check:collaborator-roles": "node scripts/check-collaborator-roles.js",
+    "check:collaborator-workspace": "node scripts/check-collaborator-workspace.js",
+    "check:collaborator-review": "node scripts/check-collaborator-review.js",
+    "check:gem-sanctuary": "node scripts/check-gem-sanctuary.js",
+    "gems:extract": "node scripts/extract-gemini-gems.js",
+    "check:session-preamble": "node scripts/check-session-preamble.js",
+    "check:studio-settings": "node scripts/check-studio-settings.js",
+    "check:dev-surface": "node scripts/check-dev-surface.js",
+    "check:ask-surface": "node scripts/check-ask-surface.js",
+    "check:csp-nonce": "node scripts/check-csp-nonce.js",
+    "check:resilience-circuit": "node scripts/check-resilience-circuit.js",
+    "check:audit-classify": "node scripts/check-audit-classify.js",
+    "check:audit-scope": "node scripts/check-audit-scope.js",
+    "check:audit-toast": "node scripts/check-audit-toast.js",
     "check:lm-capabilities": "node scripts/check-lm-model-capabilities.js --self-test && node scripts/check-lm-model-capabilities.js",
     "check:hub-auth": "node scripts/check-hub-auth.js",
     "check:webview": "node scripts/check-webview-js.js",
@@ -11188,9 +11770,10 @@
     "check:durability:incremental": "node scripts/run-durability-incremental.js",
     "check:migrations": "node scripts/run-migration-tests.js",
     "check:summarize-gate": "node scripts/check-no-summarize-callers.js",
+    "check:snapshot-exclusion": "node scripts/check-snapshot-exclusion.js",
     "watch": "tsc -watch -p ./",
     "bundle-hub": "node scripts/bundle-hub.js",
-    "package": "npm run compile && npm run check:tool-bridge && npm run check:lm-capabilities && npm run check:step0-capture && npm run check:hub-auth && npm run check:webview && npm run check:migrations && npm run check:summarize-gate && npm run bundle-hub && npx --yes @vscode/vsce package --allow-missing-repository",
+    "package": "npm run compile && npm run check:claim-hygiene && npm run check:snapshot-exclusion && npm run check:audit-toast && npm run check:tool-bridge && npm run check:lm-capabilities && npm run check:security-plane && npm run check:collaborator-roles && npm run check:collaborator-workspace && npm run check:collaborator-review && npm run check:gem-sanctuary && npm run check:session-preamble && npm run check:studio-settings && npm run check:fleet-hub && npm run check:studio-parity && npm run check:dev-surface && npm run check:csp-nonce && npm run check:resilience-circuit && npm run check:audit-classify && npm run check:audit-scope && npm run check:ask-surface && npm run check:vertex-auth && npm run check:renderer-shield && npm run check:native-resilience && npm run check:vpn-gemini-resilience && npm run check:step0-capture && npm run check:hub-auth && npm run check:webview && npm run check:migrations && npm run check:summarize-gate && npm run bundle-hub && npx --yes @vscode/vsce package --allow-missing-repository",
     "harmony": "node bin/harmony-cli.js",
     "harmony:status": "node bin/harmony-cli.js status",
     "harmony:health": "node bin/harmony-cli.js health",
@@ -11198,6 +11781,8 @@
     "harmony:ui": "node bin/harmony-cli.js ui",
     "harmony:ui:serve": "node bin/harmony-cli.js ui serve",
     "harmony:ui:native": "node bin/harmony-cli.js ui native",
+    "harmony:desktop": "node scripts/harmony-desktop.js",
+    "harmony:mcp": "node scripts/harmony-desktop.js --mcp-stdio",
     "smoke:vscode-swarm-fixture": "node scripts/run-vscode-swarm-fixture.js",
     "smoke:vscode-swarm-deepseek-live": "node scripts/run-vscode-swarm-deepseek-live-fixture.js",
     "smoke:vscode-provider-key-import": "node scripts/run-vscode-provider-key-import-fixture.js",

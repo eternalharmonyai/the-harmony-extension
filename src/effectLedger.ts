@@ -91,3 +91,29 @@ export function formatEffects(entries: EffectRecord[]): string {
         return `- ${entry.timestamp} | ${entry.status} | ${entry.kind} | ${entry.action} ${entry.target}${inverse}${comp}${entry.notes ? ` - ${entry.notes}` : ''}`;
     }).join('\n');
 }
+
+/**
+ * Mark an effect as compensated (rolled back) and feed a negative empirical
+ * calibration signal (`+1 beta`) into Aletheia's uncertainty fabric.
+ */
+export async function compensateEffect(effectId: string, reason?: string): Promise<EffectRecord | undefined> {
+    const ledger = await readEffectLedger();
+    const entry = ledger.entries.find(e => e.id === effectId);
+    if (!entry) return undefined;
+    entry.status = 'compensated';
+    if (reason) {
+        entry.notes = entry.notes ? `${entry.notes} | rollback: ${reason}` : `rollback: ${reason}`;
+    }
+    await writeEffectLedger(ledger);
+    try {
+        const { recordEmpiricalOutcome } = await import('./primitives/uncertaintyFabric');
+        await recordEmpiricalOutcome({
+            source: `effect-ledger/${entry.kind}`,
+            taskKind: entry.action,
+            success: false,
+            reason: reason ?? `compensated ${entry.target}`,
+        });
+    } catch { /* non-fatal */ }
+    return entry;
+}
+

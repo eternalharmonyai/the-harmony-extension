@@ -63,12 +63,12 @@ export class ThoughtGraphTool extends BasePrimitive<ThoughtGraphInput> {
                 
                 while (pending.size > 0) {
                     waves++;
-                    // Find nodes whose dependencies are all verified (none in pending)
+                    // Find nodes whose dependencies are all satisfied (verified or unwitnessed hypothesis, none failed/pending)
                     const wave: ThoughtNode[] = [];
                     for (const [id, node] of pending) {
                         const depsSatisfied = node.dependencies.every(dep => {
                             const dn = nodeMap.get(dep);
-                            return dn && dn.status === 'verified';
+                            return dn && (dn.status === 'verified' || dn.status === 'hypothesis');
                         });
                         if (depsSatisfied) wave.push(node);
                     }
@@ -84,7 +84,7 @@ export class ThoughtGraphTool extends BasePrimitive<ThoughtGraphInput> {
                     const waveResults = await Promise.all(wave.map(node => this.executeNode(node, nodes, sandboxRunner)));
                     for (const r of waveResults) {
                         results.push(r);
-                        if (r.status === 'verified' || r.status === 'rejected') executed++;
+                        if (r.status === 'verified' || r.status === 'hypothesis' || r.status === 'rejected') executed++;
                         if (r.execution_result === 'pass') passed++;
                         if (r.execution_result === 'fail') failed++;
                         pending.delete(r.id);
@@ -133,13 +133,54 @@ export class ThoughtGraphTool extends BasePrimitive<ThoughtGraphInput> {
         }
     }
     private async executeNode(node: ThoughtNode, allNodes: ThoughtNode[], sandboxRunner: any): Promise<any> {
-        for (const dep of node.dependencies) { const dn = allNodes.find(n => n.id === dep); if (!dn || dn.status !== 'verified') return { id: node.id, status: 'blocked', reason: `Dependency ${dep} not verified` }; }
-        if (node.counterexamples && node.counterexamples.length > 0) { node.status = 'rejected'; node.execution_result = 'fail'; return { id: node.id, status: 'rejected', execution_result: 'fail' }; }
-        if (sandboxRunner && node.evidence.length > 0) {
-            const te = node.evidence.find(e => e.includes('assert') || e.includes('expect') || e.includes('test(') || e.includes('===') || e.includes('throw'));
-            if (te) { try { const r = await sandboxRunner.execute(te, undefined, { language: 'javascript', timeoutSec: 10 }); if (r.pass) { node.status = 'verified'; node.execution_result = 'pass'; return { id: node.id, status: 'verified', execution_result: 'pass' }; } else { node.status = 'rejected'; node.execution_result = 'fail'; return { id: node.id, status: 'rejected', execution_result: 'fail' }; } } catch { node.status = 'rejected'; node.execution_result = 'fail'; return { id: node.id, status: 'rejected', execution_result: 'fail' }; }
+        let inheritedHypothesis = false;
+        for (const dep of node.dependencies) {
+            const dn = allNodes.find(n => n.id === dep);
+            if (!dn || (dn.status !== 'verified' && dn.status !== 'hypothesis')) {
+                return { id: node.id, status: 'blocked', reason: `Dependency ${dep} not verified` };
+            }
+            if (dn.status === 'hypothesis') {
+                inheritedHypothesis = true;
             }
         }
-        node.status = 'verified'; node.execution_result = 'pass'; return { id: node.id, status: 'verified', execution_result: 'pass' };
+        if (node.counterexamples && node.counterexamples.length > 0) {
+            node.status = 'rejected';
+            node.execution_result = 'fail';
+            return { id: node.id, status: 'rejected', execution_result: 'fail' };
+        }
+        const witnessExpr = node.evidence.find(e =>
+            e.includes('assert') || e.includes('expect') || e.includes('test(') || e.includes('===') || e.includes('throw')
+        );
+        const signedCitation = node.evidence.some(e =>
+            e.includes('harmony-citation/1') || e.includes('sha256:') || e.includes('oracle_receipt:')
+        );
+        if (sandboxRunner && witnessExpr) {
+            try {
+                const r = await sandboxRunner.execute(witnessExpr, undefined, { language: 'javascript', timeoutSec: 10 });
+                if (r.pass) {
+                    node.status = inheritedHypothesis ? 'hypothesis' : 'verified';
+                    node.execution_result = 'pass';
+                    return { id: node.id, status: node.status, execution_result: 'pass', witnessed: !inheritedHypothesis };
+                } else {
+                    node.status = 'rejected';
+                    node.execution_result = 'fail';
+                    return { id: node.id, status: 'rejected', execution_result: 'fail' };
+                }
+            } catch {
+                node.status = 'rejected';
+                node.execution_result = 'fail';
+                return { id: node.id, status: 'rejected', execution_result: 'fail' };
+            }
+        }
+        if (signedCitation && !inheritedHypothesis) {
+            node.status = 'verified';
+            node.execution_result = 'pass';
+            return { id: node.id, status: 'verified', execution_result: 'pass', witnessed: true };
+        }
+        // Unwitnessed claim: keep as 'hypothesis' with execution_result: 'unexecuted'
+        // rather than silently promoting unproved prose to 'verified'.
+        node.status = 'hypothesis';
+        node.execution_result = 'unexecuted';
+        return { id: node.id, status: 'hypothesis', execution_result: 'unexecuted', witnessed: false };
     }
 }

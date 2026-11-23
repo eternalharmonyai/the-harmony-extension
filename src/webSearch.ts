@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { clipResult } from './toolResultCap';
 import { runSearch, institutionalDomains, meterSnapshot, SearchHost, SearchOutcome, SearchInput } from './webSearchCore';
 import { engineProvenance } from './provenance';
+import { resolveProviderKey } from './providers';
 
 const MAX_DISPLAY_CITATIONS = 40;
 
@@ -126,7 +127,13 @@ class WebSearchTool implements vscode.LanguageModelTool<WebSearchInput> {
 
         const host: SearchHost = {
             getConfig: <T,>(key: string, dflt?: T) => vscode.workspace.getConfiguration('harmony').get<T>(key) ?? dflt,
-            getSecret: (key) => Promise.resolve(this.secrets.get(key)),
+            getSecret: async (key) => {
+                if (key === 'harmony.deepseekApiKey') {
+                    const resolved = await resolveProviderKey(this.secrets, 'deepseek');
+                    if (resolved) return resolved;
+                }
+                return this.secrets.get(key);
+            },
             workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
         };
 

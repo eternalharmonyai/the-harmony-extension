@@ -10,18 +10,9 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Harmony Control",
-        "width": 1160,
-        "height": 820,
-        "minWidth": 760,
-        "minHeight": 540
-      }
-    ],
+    "windows": [],
     "security": {
-      "csp": "default-src 'self'; frame-src http://127.0.0.1:* http://localhost:*; connect-src http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8788 http://localhost:8788 http://127.0.0.1:8789 http://localhost:8789; frame-src 'none'; object-src 'none'; base-uri 'self'"
     }
   },
   "bundle": {

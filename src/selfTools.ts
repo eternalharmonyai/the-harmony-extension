@@ -516,7 +516,15 @@ class PackageAndInstallTool implements vscode.LanguageModelTool<Record<string, n
         const packageRun = await runProcess(npmCommand(), ['run', 'package'], root, 300000, token);
         const lines = [formatRun('npm run package', packageRun)];
         if (!packageRun.ok) return textResult(lines.join('\n\n'));
-        const vsix = path.join(root, 'harmony-extension.vsix');
+        const pkgJson = await readJsonFile(path.join(root, 'package.json'));
+        const version = typeof pkgJson?.version === 'string' ? pkgJson.version.trim() : '';
+        const versionedVsix = version ? path.join(root, `harmony-extension-${version}.vsix`) : '';
+        const unversionedVsix = path.join(root, 'harmony-extension.vsix');
+        let vsix = unversionedVsix;
+        if (versionedVsix && await pathExists(versionedVsix)) {
+            vsix = versionedVsix;
+            try { await fs.copyFile(versionedVsix, unversionedVsix); } catch { /* ignore copy error */ }
+        }
         if (!await pathExists(vsix)) return textResult(lines.concat(`error: package completed but VSIX was not found at ${vsix}`).join('\n\n'));
         const installRun = await runProcess(await codeCommand(), ['--install-extension', vsix, '--force'], root, 180000, token);
         lines.push(formatRun('code --install-extension', installRun));

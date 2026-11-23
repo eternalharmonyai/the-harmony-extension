@@ -462,8 +462,7 @@ async function atomicApply(
         return { success: false, error: `Atomic apply failed: ${err?.message ?? 'unknown'}` };
     }
 
-    // Phase 3: CLEANUP — remove WAL directory
-    try { await vscode.workspace.fs.delete(wUri, { recursive: true }); } catch { /* ok */ }
+    // Phase 3: KEEP WAL backup (`original.bak`) until post-apply verification completes
     return { success: true };
 }
 
@@ -656,8 +655,8 @@ async function applyApprovedDeepOrchestrate(
             timestamp: new Date().toISOString(), operationId, filePath,
             instruction: '', dryRun: false, consensus: true, applied: true,
         });
-        // Clean up session directory
-        try { await vscode.workspace.fs.delete(sessionUri, { recursive: true }); } catch { /* ok */ }
+        // Remove temporary draft copy while preserving the WAL backup (`original.bak`) and manifest
+        try { await vscode.workspace.fs.delete(draftUri); } catch { /* ok */ }
         return `✅ **DeepOrchestrate applied successfully!**\n\nFile \`${filePath}\` has been updated. A pre-edit backup was preserved in the WAL.${verifyMsg}`;
     }
 

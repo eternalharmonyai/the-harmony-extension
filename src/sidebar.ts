@@ -19,6 +19,7 @@ import { LanguageManager } from './languageManager';
 import { hubStartPolicy } from './hubPolicy';
 import { hubFetch } from './hubClient';
 import { ProfileRegistry } from './profileRegistry';
+import { writeStudioSetting } from './host/studioSettings';
 const VIEW_ID = 'harmony.controlPanel';
 const SIDEBAR_REFRESH_DELAY_MS = 150;
 const SIDEBAR_MAX_USAGE_ROWS = 40;
@@ -114,6 +115,9 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     private lastWebview: vscode.Webview | null = null;
     private webviewListenerAttached = false;
     private lastConcertEnrichTime = 0;
+    private lastConcertData: { messages: any[]; lastCheck: number } = { messages: [], lastCheck: 0 };
+    private lastCustomRoles: any[] = [];
+    private customRolesLoaded = false;
     private static MIN_REFRESH_INTERVAL_MS = 500;
     private static CONCERT_ENRICH_INTERVAL_MS = 15_000;
 
@@ -152,6 +156,9 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         // whether this is a fresh webview (first render) or preserved DOM (re-show).
         this.lastStateHash = '';
         this.lastPostedHash = '';
+        if (webviewRecreated) {
+            this.lastConcertEnrichTime = 0;
+        }
 
         // Only register message listener on fresh webviews. On re-shows of
         // the same webview, the existing listener is still active — attaching
@@ -254,13 +261,47 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                         await vscode.workspace.getConfiguration('harmony')
                             .update('plannerEnforced', !!msg.value, true);
                         break;
+                    case 'setCostShieldMode':
+                        if (msg.value === 'auto' || msg.value === 'manual' || msg.value === 'off') {
+                            const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+                            await writeStudioSetting(wsRoot, 'costShield.mode', msg.value);
+                            void this.refresh();
+                        }
+                        break;
+                    case 'setCostShieldWorkerRoute':
+                        if (typeof msg.value === 'string' && msg.value.trim()) {
+                            const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+                            await writeStudioSetting(wsRoot, 'costShield.workerRoute', msg.value.trim());
+                            void this.refresh();
+                        }
+                        break;
+                    case 'launchStudioWindow':
+                        // The button says "Full Harmony Studio", so it must open the
+                        // standalone Studio window (8789). It used to call
+                        // harmony.openStudioTab, which opens a Harmony *Chat* tab -
+                        // the label and the destination disagreed, which is exactly
+                        // how a control starts lying to its own user.
+                        await vscode.commands.executeCommand('harmony.launchStandaloneStudio');
+                        break;
                     case 'toggleCheckpoint':
                         await vscode.workspace.getConfiguration('harmony')
                             .update('checkpointMode', !!msg.value, true);
                         break;
-                    case 'toggleOrchestrateMode':
+                    case 'toggleOrchestrateMode': {
+                        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+                        await writeStudioSetting(wsRoot, 'orchestrateMode.enabled', !!msg.value);
+                        void this.refresh();
+                        break;
+                    }
+                    case 'toggleFleetMode': {
+                        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+                        await writeStudioSetting(wsRoot, 'orchestrateMode.fleetEnabled', !!msg.value);
+                        void this.refresh();
+                        break;
+                    }
+                    case 'toggleQuickHubPinned':
                         await vscode.workspace.getConfiguration('harmony')
-                            .update('orchestrateMode.enabled', !!msg.value, true);
+                            .update('sidebar.quickHubPinned', !!msg.value, true);
                         void this.refresh();
                         break;
                     case 'toggleDeepOrchestrateMode':
@@ -715,12 +756,14 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         const sidebarMode = this.sidebarMode();
         const compactSidebar = sidebarMode === 'compact';
         const providers: ProviderId[] = PROVIDER_IDS;
-        const endpointProviders: Array<EndpointProviderId> = ['deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'zhipu', 'zhipu-coding', 'stepfun', 'doubao', 'byteplus'];
+        const endpointProviders: Array<EndpointProviderId> = ['gemini', 'deepseek', 'alibaba', 'tencent', 'moonshot', 'kimiCode', 'zhipu', 'zhipu-coding', 'stepfun', 'doubao', 'byteplus'];
         const endpointStatesRaw = Object.fromEntries(endpointProviders.map(provider => [provider, providerEndpointInfo(provider)]));
         // ZH localization for endpoint labels
         const zhEndpointLabels: Record<string, Record<string, string>> = {
           default: { deepseek: 'DeepSeek 默认端点', moonshot: 'Moonshot 默认端点', kimiCode: 'KimiCode 默认端点', zhipu: '智谱(Z.AI) 默认端点', 'zhipu-coding': '智谱编程计划 端点' },
-          custom: { deepseek: 'DeepSeek 自定义端点', moonshot: 'Moonshot 自定义端点', kimiCode: 'KimiCode 自定义端点', zhipu: '智谱(Z.AI) 自定义端点' },
+          custom: { gemini: 'Gemini 自定义端点', deepseek: 'DeepSeek 自定义端点', moonshot: 'Moonshot 自定义端点', kimiCode: 'KimiCode 自定义端点', zhipu: '智谱(Z.AI) 自定义端点' },
+          'ai-studio': { gemini: 'Google AI Studio (默认端点)' },
+          vertex: { gemini: 'Google Cloud Vertex AI (GCP 账单/赠金)' },
           international: { alibaba: '阿里云 国际端点', tencent: '腾讯混元 国际端点', stepfun: '阶跃星辰 国际端点' },
           mainland: { alibaba: '阿里云 中国大陆端点', tencent: '腾讯混元 中国大陆端点', stepfun: '阶跃星辰 中国大陆端点' },
           us: { alibaba: '阿里云 美国/弗吉尼亚端点' },
@@ -728,7 +771,9 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
         };
         const zhEndpointDetails: Record<string, Record<string, string>> = {
           default: { deepseek: '使用 DeepSeek 标准 OpenAI 兼容端点', moonshot: '使用 Moonshot/Kimi 标准 OpenAI 兼容端点', kimiCode: '使用 KimiCode 标准 OpenAI 兼容端点 (api.kimi.com/coding/v1)', zhipu: '使用智谱(Z.AI) 标准 OpenAI 兼容端点', 'zhipu-coding': '使用 Z.AI 编程计划端点 (api.z.ai)' },
-          custom: { deepseek: '使用 harmony.deepseekBaseUrl', moonshot: '使用 harmony.moonshot.baseUrl', kimiCode: '使用 harmony.kimiCode.baseUrl', zhipu: '使用 harmony.zhipu.baseUrl', stepfun: '使用 harmony.stepfun.baseUrl', doubao: '使用 harmony.bytedance.baseUrl', byteplus: '使用 harmony.byteplus.baseUrl' },
+          custom: { gemini: '使用 harmony.gemini.baseUrl', deepseek: '使用 harmony.deepseekBaseUrl', moonshot: '使用 harmony.moonshot.baseUrl', kimiCode: '使用 harmony.kimiCode.baseUrl', zhipu: '使用 harmony.zhipu.baseUrl', stepfun: '使用 harmony.stepfun.baseUrl', doubao: '使用 harmony.bytedance.baseUrl', byteplus: '使用 harmony.byteplus.baseUrl' },
+          'ai-studio': { gemini: '使用 Google AI Studio 端点 (generativelanguage.googleapis.com)' },
+          vertex: { gemini: '使用 Google Cloud Vertex AI (aiplatform.googleapis.com) — 使用 GCP 账单/赠金，无需预充值' },
           international: { alibaba: '使用国际 DashScope 端点 (新加坡/全球路由)', tencent: '使用国际混元 OpenAI 兼容端点', stepfun: '使用国际 StepFun 端点 (api.stepfun.ai)' },
           mainland: { alibaba: '使用中国大陆 DashScope 端点 (北京/中国账号路由)', tencent: '使用中国大陆混元端点 (北京/中国账号路由)', stepfun: '使用中国大陆 StepFun 端点 (api.stepfun.com)' },
           us: { alibaba: '使用美国/弗吉尼亚端点' },
@@ -792,9 +837,13 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             planOnly: !!cfg.get<boolean>('planOnlyMode'),
             bigGunsMode: cfg.get<string>('bigGunsMode') || (cfg.get<boolean>('bigGunsAutoApprove') ? 'all' : 'off'),
             plannerEnforced: !!cfg.get<boolean>('plannerEnforced'),
+            costShieldMode: cfg.get<string>('costShield.mode') ?? 'auto',
+            costShieldWorkerRoute: cfg.get<string>('costShield.workerRoute') ?? 'agentsProfile',
             checkpoint: !!cfg.get<boolean>('checkpointMode'),
             language: cfg.get<string>('language') || 'en',
             orchestrateMode: !!cfg.get<boolean>('orchestrateMode.enabled'),
+            fleetMode: !!cfg.get<boolean>('orchestrateMode.enabled') && !!cfg.get<boolean>('orchestrateMode.fleetEnabled'),
+            quickHubPinned: !!cfg.get<boolean>('sidebar.quickHubPinned'),
             orchestrateBudget: (() => {
                 const lm = LanguageManager.getInstance();
                 const stats = getOrchestrateSessionStats();
@@ -873,8 +922,9 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             hubStatus: { online: false },
             whisperCount: 0,
             whisperDisabled: false,
-            concertBoard: { messages: [], lastCheck: 0 },
-            customRoles: [],
+            concertBoard: this.lastConcertData,
+            customRoles: this.lastCustomRoles,
+            customRolesLoaded: this.customRolesLoaded,
             profiles: ProfileRegistry.getInstance().list().map(p => ({ id: p.id, name: p.name, role: p.role, capsules: p.knowledge_capsules?.length ?? 0 })),
             globalMemory: { totalPatterns: 0, uniqueWorkspaces: 0, topTags: [] },
             hubAutoStart: hubStartPolicy(cfg) !== 'never',
@@ -976,10 +1026,10 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                     return (sid && sk) ? 'native' : undefined;
                 })(),
                 // Concert Board and Custom Roles moved to Phase 4 (non-blocking) —
-                // concertCheck and file I/O are non-critical for sidebar display
-                // and should never block the loading spinner from dismissing.
-                Promise.resolve({ messages: [], lastCheck: 0 }),
-                Promise.resolve([]),
+                // carry forward lastConcertData / lastCustomRoles so Phase 3 fullState
+                // never clobbers already-enriched Concert Board messages while Phase 4 is throttled.
+                Promise.resolve(this.lastConcertData),
+                Promise.resolve(this.lastCustomRoles),
             ]),
             new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Phase 2 sidebar gather timed out')), PHASE2_TIMEOUT_MS))
         ]).catch(() => {
@@ -1031,12 +1081,13 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                 ts: e.ts.slice(0, 16).replace('T', ' '),
                 preview: (e.prompt.split('\n')[0] ?? '').slice(0, 80)
             })),
-            todos: todos.slice(0, 20).map((t: any) => ({ id: t.id, text: t.text, done: t.done })),
+            todos: todos.slice(-20).map((t: any) => ({ id: t.id, text: t.text, done: t.done })),
             sessions: sessions.slice(0, 10),
             hubStatus,
             whisperCount,
             concertBoard: concertData,
             customRoles,
+            customRolesLoaded: this.customRolesLoaded,
             globalMemory: globalMemoryData,
             whisperDisabled: cfg.get<boolean>('whisper.disabled') ?? false,
         };
@@ -1084,11 +1135,12 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
             if (now - this.lastConcertEnrichTime >= HarmonyViewProvider.CONCERT_ENRICH_INTERVAL_MS) {
                 this.lastConcertEnrichTime = now;
                 void (async () => {
-                    let concertData: { messages: any[]; lastCheck: number } = { messages: [], lastCheck: 0 };
-                    let customRoles: any[] = [];
+                    let concertData: { messages: any[]; lastCheck: number } = this.lastConcertData;
+                    let customRoles: any[] = this.lastCustomRoles;
                     try {
                         const check = await concertCheck(undefined, true);
                         concertData = { messages: check.messages.slice(-20), lastCheck: Date.now() };
+                        this.lastConcertData = concertData;
                     } catch { /* concert hall unavailable */ }
                     try {
                         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -1097,8 +1149,16 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
                             const p = `${root}${sep}.harmony${sep}swarm${sep}custom-roles.json`;
                             const raw = await fsPromises.readFile(p, 'utf8');
                             customRoles = JSON.parse(raw);
+                            this.lastCustomRoles = customRoles;
+                        } else {
+                            customRoles = [];
+                            this.lastCustomRoles = [];
                         }
-                    } catch { /* no custom roles file */ }
+                    } catch {
+                        customRoles = [];
+                        this.lastCustomRoles = [];
+                    }
+                    this.customRolesLoaded = true;
                     if (this.view === view) {
                         let activeDels: any[] = [];
                         try { activeDels = await getActiveDeliberations(); } catch { /* deliberations unavailable */ }
@@ -1267,11 +1327,33 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   #sidebar-loading { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--vscode-sideBar-background); z-index: 100; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
   #sidebar-loading .spinner { width: 28px; height: 28px; border: 3px solid var(--vscode-input-border); border-top-color: var(--vscode-progressBar-background); border-radius: 50%; animation: hspin 0.7s linear infinite; }
   @keyframes hspin { to { transform: rotate(360deg); } }
+  .quick-hub { margin-top: 8px; padding: 6px 8px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-sideBar-background); box-sizing: border-box; width: 100%; }
+  .quick-hub.pinned { position: sticky; top: 0; z-index: 55; border-color: rgba(168,85,247,0.6); box-shadow: 0 3px 10px rgba(0,0,0,0.28); }
+  .quick-hub-header { display: flex; align-items: center; justify-content: space-between; gap: 4px; flex-wrap: wrap; min-width: 0; }
+  .quick-hub-title { font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .quick-hub-controls { display: inline-flex; align-items: center; gap: 4px; }
+  .quick-hub-ctrl-btn { width: auto; padding: 1px 6px; font-size: 10px; border-radius: 4px; border: 1px solid var(--vscode-input-border); background: transparent; color: var(--vscode-foreground); cursor: pointer; white-space: nowrap; }
+  .quick-hub-ctrl-btn.active { border-color: rgba(168,85,247,0.8); background: rgba(168,85,247,0.16); font-weight: 600; }
+  .quick-hub-links, .smart-links-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; width: 100%; box-sizing: border-box; min-width: 0; }
+  .quick-hub.collapsed .quick-hub-links { display: none; }
+  .smart-jump { width: auto; flex: 1 1 auto; min-width: 0; max-width: 100%; padding: 3px 7px; font-size: 10.5px; border-radius: 999px; border: 1px solid var(--vscode-input-border); background: var(--vscode-editor-background); color: var(--vscode-foreground); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+  .smart-jump:hover { background: var(--vscode-list-hoverBackground); border-color: rgba(168,85,247,0.65); }
+  .smart-jump.compact { flex: 0 1 auto; padding: 2px 6px; font-size: 10px; opacity: 0.9; }
+  .fleet-subcard { margin: 5px 0 6px 12px; padding: 6px 8px; border-left: 2px solid rgba(168,85,247,0.75); border-radius: 0 6px 6px 0; background: rgba(168,85,247,0.07); box-sizing: border-box; min-width: 0; }
+  .fleet-explainer { margin-top: 4px; font-size: 10px; line-height: 1.42; opacity: 0.9; }
+  .fleet-explainer summary { cursor: pointer; font-weight: 600; user-select: none; }
+  .fleet-explainer-body { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; }
+  .floating-hub-btn { display: none; position: fixed; right: 10px; bottom: 10px; z-index: 65; width: auto; padding: 4px 9px; font-size: 10.5px; font-weight: 600; border-radius: 999px; border: 1px solid rgba(168,85,247,0.75); background: var(--vscode-sideBar-background); color: var(--vscode-foreground); box-shadow: 0 2px 8px rgba(0,0,0,0.35); cursor: pointer; }
+  @keyframes navPulse {
+    0% { box-shadow: 0 0 0 2px rgba(168,85,247,0.85); border-radius: 6px; }
+    100% { box-shadow: 0 0 0 0 rgba(168,85,247,0); }
+  }
+  .nav-target-pulse { animation: navPulse 1.1s ease-out; }
 </style>
 </head>
 <body>
   <div id="sidebar-loading"><div class="spinner"></div><span style="font-size:12px;opacity:0.8;">${lm.getString('sidebar.loading')}</span></div>
-  <div style="margin-bottom:6px;">
+  <div id="sec-top" style="margin-bottom:6px;">
     <div style="font-size:11px; margin-bottom:2px;">🌐 ${lm.getString('language.label')}</div>
     <div class="segmented-control" id="language-segmented">
       <button class="seg-btn" data-lang="en">${lm.getString('language.en')}</button>
@@ -1284,6 +1366,26 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   <button class="subtle" id="prepare-self-update" style="margin-top:6px;">${lm.getString('top.prepareSelfUpdate')}</button>
   <button class="subtle" id="create-seat-handoff" style="margin-top:6px;">${lm.getString('top.createSeatHandoff')}</button>
   <button class="subtle" id="create-resume-brief" style="margin-top:6px;">${lm.getString('top.createResumeBrief')}</button>
+
+  <div id="sec-quick-hub" class="quick-hub" role="navigation" aria-label="${lm.getString('quickHub.title')}">
+    <div class="quick-hub-header">
+      <span class="quick-hub-title">🧭 ${lm.getString('quickHub.title')}</span>
+      <span class="quick-hub-controls">
+        <button type="button" class="quick-hub-ctrl-btn" id="pin-quick-hub" aria-pressed="false" title="Sticky-pin Quick-Jump Hub while scrolling">📌 ${lm.getString('quickHub.pin')}</button>
+        <button type="button" class="quick-hub-ctrl-btn" id="collapse-quick-hub" aria-expanded="true" aria-controls="quick-hub-links-list" title="Collapse or expand jump pills">▾</button>
+      </span>
+    </div>
+    <div id="quick-hub-links-list" class="quick-hub-links">
+      <button type="button" class="smart-jump" data-jump="sec-frontier" title="Jump directly to Primary Provider &amp; Frontier Model selector (gemini-4-argon, gemini-4-carbon, gemini-4-neon, gemini-4-hydrogen, gpt-6-astra, claude-fable-5-1, deepseek)">🌟 ${lm.getString('quickHub.frontier')}</button>
+      <button type="button" class="smart-jump" data-jump="sec-orchestrate">⚡ ${lm.getString('quickHub.orchestrate')}</button>
+      <button type="button" class="smart-jump" data-jump="sec-cost-shield">🛡️ ${lm.getString('quickHub.costShield')}</button>
+      <button type="button" class="smart-jump" data-jump="sec-whisper" id="quick-hub-whisper-btn">📥 ${lm.getString('quickHub.whisper')}</button>
+      <button type="button" class="smart-jump" data-jump="sec-providers" title="Jump to Consult, Agents &amp; Multi-Slot Provider Keys">🧭 ${lm.getString('quickHub.providers')}</button>
+      <button type="button" class="smart-jump" data-jump="sec-plan">📋 ${lm.getString('quickHub.plan')}</button>
+      <button type="button" class="smart-jump" data-jump="sec-hub" title="Jump to HarmonyHub (Local Sovereign Vector &amp; Cross-Project Recall Daemon)">🧠 ${lm.getString('quickHub.hub')}</button>
+    </div>
+  </div>
+  <button type="button" id="floating-hub-btn" class="floating-hub-btn" data-jump="sec-quick-hub" title="Jump back to Quick-Jump Hub">🧭 ${lm.getString('quickHub.top')} ↑</button>
 
   <h3>🎯 ${lm.getString('token.title')}</h3>
   <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
@@ -1312,13 +1414,36 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
   <button class="subtle" id="configure-swarm-defaults" style="margin-top:4px;">${lm.getString('swarm.configureDefaults')}</button>
   <div class="hint" id="swarm-default" style="margin-top:4px;">${lm.getString('swarm.defaultLoading')}</div>
 
-  <h3>⚡ ${lm.getString('orchestrate.title')}</h3>
-  <label class="row"><input type="checkbox" id="orchestrate-mode"> ${lm.getString('orchestrate.preApprove')} <span class="hint">${lm.getString('orchestrate.preApproveHint')}</span></label>
-  <div class="disclaimer">⚠️ ${lm.getString('orchestrate.preApproveDisclaimer')}</div>
-  <div class="hint" id="orchestrate-budget" style="margin-top:2px;">${lm.getString('orchestrate.confirmHint')}</div>
-  <label class="row"><input type="checkbox" id="deep-orchestrate-mode"> 🏗️ ${lm.getString('orchestrate.deepTitle')}</label>
-  <div class="hint" id="deep-orchestrate-status" style="margin-top:2px;">${lm.getString('orchestrate.deepDesc')}</div>
-  <div class="hint" style="margin-top:4px;opacity:0.7;font-style:italic;">${lm.getString('orchestrate.costWarning')}</div>
+  <div id="sec-orchestrate">
+    <h3>⚡ ${lm.getString('orchestrate.title')}</h3>
+    <label class="row"><input type="checkbox" id="orchestrate-mode"> ${lm.getString('orchestrate.preApprove')} <span class="hint">${lm.getString('orchestrate.preApproveHint')}</span></label>
+    <div class="disclaimer">⚠️ ${lm.getString('orchestrate.preApproveDisclaimer')}</div>
+    <div class="hint" id="orchestrate-budget" style="margin-top:2px;">${lm.getString('orchestrate.confirmHint')}</div>
+    <div class="fleet-subcard" id="fleet-subcard">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;">
+        <label class="row" style="padding:0;font-weight:600;"><input type="checkbox" id="fleet-mode"> 🚀 ${lm.getString('orchestrate.fleetTitle')}</label>
+        <span class="pill" id="fleet-status-pill">${lm.getString('orchestrate.fleetPausedPill')}</span>
+      </div>
+      <div class="hint" style="margin-top:2px;">${lm.getString('orchestrate.fleetHint')}</div>
+      <details class="fleet-explainer">
+        <summary>🧭 ${lm.getString('orchestrate.fleetExplainerSummary')}</summary>
+        <div class="fleet-explainer-body">
+          <div>🎼 ${lm.getString('orchestrate.fleetConductorLine')}</div>
+          <div>🧭 ${lm.getString('orchestrate.fleetOrchestratorLine')}</div>
+          <div>⚡ ${lm.getString('orchestrate.fleetCollaboratorLine')}</div>
+          <div id="fleet-live-route" style="margin-top:2px;"></div>
+        </div>
+      </details>
+      <div class="smart-links-row">
+        <button type="button" class="smart-jump compact" data-jump="sec-cost-shield">🛡️ ${lm.getString('quickHub.configureOffload')} ↓</button>
+        <button type="button" class="smart-jump compact" data-jump="sec-whisper">📥 ${lm.getString('quickHub.whisper')} ↓</button>
+        <button type="button" class="smart-jump compact" data-jump="sec-quick-hub">🧭 ${lm.getString('quickHub.top')} ↑</button>
+      </div>
+    </div>
+    <label class="row"><input type="checkbox" id="deep-orchestrate-mode"> 🏗️ ${lm.getString('orchestrate.deepTitle')}</label>
+    <div class="hint" id="deep-orchestrate-status" style="margin-top:2px;">${lm.getString('orchestrate.deepDesc')}</div>
+    <div class="hint" style="margin-top:4px;opacity:0.7;font-style:italic;">${lm.getString('orchestrate.costWarning')}</div>
+  </div>
 
   <h3>🎻 ${lm.getString('symphony.title')}</h3>
   <div id="symphony-profiles" class="stack" style="margin-bottom:4px;">
@@ -1388,7 +1513,7 @@ export class HarmonyViewProvider implements vscode.WebviewViewProvider {
     <option value="reviewer">reviewer</option>
   </select>
 
-  <h3>${lm.getString('provider.title')}</h3>
+  <h3 id="sec-frontier">${lm.getString('provider.title')}</h3>
   <select id="provider">
     <option value="vscode-lm">VS Code LM (Copilot)</option>
 ${PROVIDER_IDS.map(p => {
@@ -1425,6 +1550,32 @@ ${PROVIDER_IDS.map(p => {
     <label class="row"><input type="checkbox" id="flow-state"> 🧠 ${lm.getString('steering.flowState')}</label>
     <div class="disclaimer">⚠️ ${lm.getString('steering.flowStateDisclaimer')}</div>
     <label class="row"><input type="checkbox" id="planner-enforced"> ${lm.getString('steering.plannerEnforced')}</label>
+    <div id="sec-cost-shield" style="margin:6px 0;padding:8px;border:1px solid var(--vscode-panel-border);border-radius:6px;background:rgba(56,189,248,0.06);">
+      <div style="font-size:11px;font-weight:600;margin-bottom:4px;">🛡️ ${lm.getString('contextShield.title')}</div>
+      <div style="font-size:10px;opacity:0.85;margin-bottom:4px;">${lm.getString('contextShield.policyModeLabel')}</div>
+      <select id="cost-shield-mode" style="margin-bottom:6px;">
+        <option value="auto">${lm.getString('contextShield.modeAutoOption')}</option>
+        <option value="manual">${lm.getString('contextShield.modeManualOption')}</option>
+        <option value="off">${lm.getString('contextShield.modeOffOption')}</option>
+      </select>
+      <div style="font-size:10px;opacity:0.85;margin-bottom:4px;">${lm.getString('contextShield.workerRouteLabel')}</div>
+      <select id="cost-shield-worker-route" style="margin-bottom:4px;">
+        <option value="agentsProfile">${lm.getString('contextShield.routeAgentsProfile')}</option>
+        <option value="deepseek:coding">DeepSeek Coding (Flash 4.1)</option>
+        <option value="deepseek:light">DeepSeek Light (Fast Scout)</option>
+        <option value="gemini:light">Gemini Flash Light</option>
+        <option value="gemini:coding">Gemini Coding</option>
+        <option value="claude:coding">Claude Coding</option>
+        <option value="openai:coding">OpenAI Coding</option>
+      </select>
+      <div id="cost-shield-summary" class="hint" style="margin-top:4px;line-height:1.35;"></div>
+      <div class="smart-links-row">
+        <button type="button" class="smart-jump compact" data-jump="sec-orchestrate">🚀 ${lm.getString('quickHub.orchestrate')} ↑</button>
+        <button type="button" class="smart-jump compact" data-jump="sec-whisper">📥 ${lm.getString('quickHub.whisper')} ↓</button>
+        <button type="button" class="smart-jump compact" data-jump="sec-quick-hub">🧭 ${lm.getString('quickHub.top')} ↑</button>
+      </div>
+      <button class="subtle" id="launch-studio-window" style="margin-top:6px;border:1px solid rgba(168,85,247,0.75);background:rgba(168,85,247,0.10);box-shadow:0 0 0 1px rgba(168,85,247,0.22),0 0 10px rgba(168,85,247,0.20);">🖥️ ${lm.getString('contextShield.launchStudioWindow')}</button>
+    </div>
     <label class="row"><input type="checkbox" id="checkpoint"> ${lm.getString('steering.checkpoint')}</label>
     <div class="disclaimer">⚠️ ${lm.getString('steering.checkpointDisclaimer')}</div>
     <div style="margin-bottom:4px;">
@@ -1460,7 +1611,7 @@ ${PROVIDER_IDS.map(p => {
   </div>
   <div class="hint" style="margin-top:4px;">${lm.getString('agentSteps.desc')}</div>
 
-  <h3>${lm.getString('consult.title')} <span class="hint">${lm.getString('consult.titleHint')}</span></h3>
+  <h3 id="sec-providers">${lm.getString('consult.title')} <span class="hint">${lm.getString('consult.titleHint')}</span></h3>
   <div class="status" id="routing-summary" style="margin-bottom:6px;"></div>
   <div id="providers" class="stack"></div>
   <button class="subtle" id="show-provider-status" style="margin-top:4px;">${lm.getString('consult.showStatus')}</button>
@@ -1480,6 +1631,9 @@ ${PROVIDER_IDS.map(p => {
       <option value="alibaba">${lm.getString('visual.alibabaOnly')}</option>
       <option value="deepseek">${lm.getString('visual.deepseekOnly')}</option>
       <optgroup label="Gemini">
+        <option value="gemini-4-hydrogen">gemini-4-hydrogen (Gemini 4 fast)</option>
+        <option value="gemini-4-neon">gemini-4-neon (Gemini 4 Pareto frontier)</option>
+        <option value="gemini-4-carbon">gemini-4-carbon (Gemini 4 frontier)</option>
         <option value="gemini-3.8-flash">gemini-3.8-flash ${lm.getString('visual.desc.gemini38Flash')}</option>
         <option value="gemini-3.7-flash">gemini-3.7-flash</option>
         <option value="gemini-3.6-flash">gemini-3.6-flash</option>
@@ -1510,6 +1664,9 @@ ${PROVIDER_IDS.map(p => {
     <div id="auto-vision-models" style="display:none; margin-top:4px; margin-left:8px;">
       <div style="font-size:10px; margin-bottom:2px;">${lm.getString('visual.autoGeminiModel')}</div>
       <select id="auto-gemini-model">
+        <option value="gemini-4-hydrogen">gemini-4-hydrogen</option>
+        <option value="gemini-4-neon">gemini-4-neon</option>
+        <option value="gemini-4-carbon">gemini-4-carbon</option>
         <option value="gemini-3.8-flash">gemini-3.8-flash</option>
         <option value="gemini-3.7-flash">gemini-3.7-flash</option>
         <option value="gemini-3.6-flash">gemini-3.6-flash</option>
@@ -1542,7 +1699,7 @@ ${PROVIDER_IDS.map(p => {
   <div class="hint">${lm.getString('visual.skipOcrTip')}</div>
   <div class="hint">${lm.getString('visual.availableHint')}</div>
 
-  <h3>${lm.getString('plan.title')}</h3>
+  <h3 id="sec-plan">${lm.getString('plan.title')}</h3>
   <div id="todos" class="stack"><div class="empty">${lm.getString('plan.none')}</div></div>
 
   <h3>${lm.getString('usage.title')}</h3>
@@ -1557,12 +1714,19 @@ ${PROVIDER_IDS.map(p => {
   <button class="subtle" id="manage-sessions" style="margin-top:4px;">${lm.getString('sessions.manage')}</button>
   <button class="subtle" id="view-conversation" style="margin-top:4px;">${lm.getString('sessions.viewConversation')}</button>
 
-  <h3>${lm.getString('whisper.title')}</h3>
-  <label class="row" style="margin-bottom:6px;"><input type="checkbox" id="whisper-disabled"> ${lm.getString('whisper.disable')} <span class="hint">${lm.getString('whisper.disableHint')}</span></label>
-  <div id="whisper-inbox" class="stack"><div class="empty">${lm.getString('whisper.noPending')}</div></div>
-  <textarea id="whisper-input" placeholder="${lm.getString('whisper.placeholder')}" rows="2" style="width:100%;margin-top:4px;padding:6px;border:1px solid var(--vscode-input-border);background:var(--vscode-input-background);color:var(--vscode-input-foreground);font:inherit;resize:vertical;box-sizing:border-box;" maxlength="8000"></textarea>
-  <button class="btn" id="send-whisper" style="margin-top:4px;width:100%;">${lm.getString('whisper.send')}</button>
-  <button class="subtle" id="check-whispers" style="margin-top:4px;">${lm.getString('whisper.check')}</button>
+  <div id="sec-whisper">
+    <h3>${lm.getString('whisper.title')}</h3>
+    <label class="row" style="margin-bottom:6px;"><input type="checkbox" id="whisper-disabled"> ${lm.getString('whisper.disable')} <span class="hint">${lm.getString('whisper.disableHint')}</span></label>
+    <div id="whisper-inbox" class="stack"><div class="empty">${lm.getString('whisper.noPending')}</div></div>
+    <textarea id="whisper-input" placeholder="${lm.getString('whisper.placeholder')}" rows="2" style="width:100%;margin-top:4px;padding:6px;border:1px solid var(--vscode-input-border);background:var(--vscode-input-background);color:var(--vscode-input-foreground);font:inherit;resize:vertical;box-sizing:border-box;" maxlength="8000"></textarea>
+    <button class="btn" id="send-whisper" style="margin-top:4px;width:100%;">${lm.getString('whisper.send')}</button>
+    <button class="subtle" id="check-whispers" style="margin-top:4px;">${lm.getString('whisper.check')}</button>
+    <div class="smart-links-row">
+      <button type="button" class="smart-jump compact" data-jump="sec-orchestrate">⚡ ${lm.getString('quickHub.orchestrate')} ↑</button>
+      <button type="button" class="smart-jump compact" data-jump="sec-cost-shield">🛡️ ${lm.getString('quickHub.costShield')} ↑</button>
+      <button type="button" class="smart-jump compact" data-jump="sec-quick-hub">🧭 ${lm.getString('quickHub.top')} ↑</button>
+    </div>
+  </div>
 
   <h3>${lm.getString('concert.title')} <span id="concert-board-badge" style="font-weight:normal;font-size:10px;"></span></h3>
   <div class="hint" style="margin-bottom:4px;">${lm.getString('concert.hint')}</div>
@@ -1575,7 +1739,7 @@ ${PROVIDER_IDS.map(p => {
   <h3>${lm.getString('repair.title')}</h3>
   <button class="subtle" id="restore-engine" style="margin-top:4px;">${lm.getString('repair.restore')}</button>
 
-  <h3>${lm.getString('hub.fullTitle')}</h3>
+  <h3 id="sec-hub">${lm.getString('hub.fullTitle')}</h3>
   <div id="hub-status" style="margin-bottom:6px;font-size:11px;"></div>
   <div id="hub-roots" class="stack"><div class="empty">${lm.getString('hub.noFolders')}</div></div>
   <button class="btn" id="allow-hub-folder" style="margin-top:6px;">${lm.getString('hub.addFolder')}</button>
@@ -1792,6 +1956,20 @@ ${PROVIDER_IDS.map(p => {
     routing_disabled: lm.getString('routing.disabled'),
     memory_active_entries: lm.getString('memory.activeEntries'),
     memory_preserved_files_label: lm.getString('memory.preservedFilesLabel'),
+    fleet_active_pill: lm.getString('orchestrate.fleetActivePill'),
+    fleet_paused_pill: lm.getString('orchestrate.fleetPausedPill'),
+    quick_hub_pin: lm.getString('quickHub.pin'),
+    quick_hub_pinned: lm.getString('quickHub.pinned'),
+    quick_hub_whisper: lm.getString('quickHub.whisper'),
+    usage_responsibility_html: lm.getString('usage.responsibilityNoticeHtml'),
+    cs_summary_mode_auto: lm.getString('contextShield.summaryModeAuto'),
+    cs_summary_mode_manual: lm.getString('contextShield.summaryModeManual'),
+    cs_summary_mode_off: lm.getString('contextShield.summaryModeOff'),
+    cs_summary_route_agents_prefix: lm.getString('contextShield.summaryRouteAgentsPrefix'),
+    cs_summary_active_label: lm.getString('contextShield.summaryActiveLabel'),
+    cs_summary_target_label: lm.getString('contextShield.summaryCollaboratorTargetLabel'),
+    cs_fleet_offload_label: lm.getString('contextShield.fleetActiveOffloadLabel'),
+    cs_fleet_shield_label: lm.getString('contextShield.fleetShieldLabel'),
   })};
   try {
   function renderProviderAccounting(a) {
@@ -1947,7 +2125,7 @@ ${PROVIDER_IDS.map(p => {
       $('rewards-endpoint-id').value = primaryModel && primaryModel !== 'ep-rewards-placeholder' ? primaryModel : '';
     }
     $('direct-primary-block').style.display = primaryDirect ? 'block' : 'none';
-    const endpointSwitchable = ['alibaba', 'tencent', 'stepfun', 'doubao', 'doubao-coding', 'byteplus', 'byteplus-coding'].includes(s.provider);
+    const endpointSwitchable = ['gemini', 'alibaba', 'tencent', 'stepfun', 'doubao', 'doubao-coding', 'byteplus', 'byteplus-coding'].includes(s.provider);
     const endpointLabelHtml = primaryEndpoint
       ? '<br>' + LOC.provider_endpoint_label + ' ' + (endpointSwitchable
           ? '<a href="#" id="switch-endpoint-link" style="cursor:pointer;"><code>' + escapeHtml(primaryEndpoint.label) + '</code> → ' + LOC.provider_endpoint_switch + '</a>'
@@ -1975,8 +2153,42 @@ ${PROVIDER_IDS.map(p => {
     $('plan-only').checked = !!s.planOnly;
     $('big-guns-mode').value = s.bigGunsMode || 'off';
     $('planner-enforced').checked = !!s.plannerEnforced;
+    if ($('cost-shield-mode')) $('cost-shield-mode').value = s.costShieldMode || 'auto';
+    if ($('cost-shield-worker-route')) $('cost-shield-worker-route').value = s.costShieldWorkerRoute || 'agentsProfile';
+    if ($('cost-shield-summary')) {
+      const modeName = (s.costShieldMode || 'auto') === 'auto'
+        ? LOC.cs_summary_mode_auto
+        : (s.costShieldMode === 'manual' ? LOC.cs_summary_mode_manual : LOC.cs_summary_mode_off);
+      const routeName = (!s.costShieldWorkerRoute || s.costShieldWorkerRoute === 'agentsProfile')
+        ? (LOC.cs_summary_route_agents_prefix + (s.agentsResolvedProvider || s.agentsProvider || 'deepseek') + ' / ' + (s.agentsResolvedModel || s.agentsTier || 'coding'))
+        : s.costShieldWorkerRoute;
+      $('cost-shield-summary').innerHTML = escapeHtml(LOC.cs_summary_active_label) + ' <code>' + escapeHtml(modeName) + '</code><br>' + escapeHtml(LOC.cs_summary_target_label) + ' <code>' + escapeHtml(routeName) + '</code>';
+      if ($('fleet-live-route')) {
+        $('fleet-live-route').innerHTML = escapeHtml(LOC.cs_fleet_offload_label) + ' <code>' + escapeHtml(routeName) + '</code> · ' + escapeHtml(LOC.cs_fleet_shield_label) + ' <code>' + escapeHtml(s.costShieldMode || 'auto') + '</code>';
+      }
+    }
     $('checkpoint').checked = !!s.checkpoint;
     $('orchestrate-mode').checked = !!s.orchestrateMode;
+    if ($('fleet-mode')) {
+      const fleetActive = !!(s.orchestrateMode && s.fleetMode);
+      $('fleet-mode').checked = fleetActive;
+      const pill = $('fleet-status-pill');
+      if (pill) {
+        pill.textContent = fleetActive ? LOC.fleet_active_pill : LOC.fleet_paused_pill;
+        pill.style.background = fleetActive ? 'var(--vscode-charts-green)' : 'var(--vscode-badge-background)';
+        pill.style.color = fleetActive ? '#111' : 'var(--vscode-badge-foreground)';
+      }
+    }
+    if ($('sec-quick-hub')) {
+      const pinned = !!s.quickHubPinned;
+      $('sec-quick-hub').classList.toggle('pinned', pinned);
+      if ($('pin-quick-hub')) {
+        $('pin-quick-hub').classList.toggle('active', pinned);
+        $('pin-quick-hub').setAttribute('aria-pressed', pinned ? 'true' : 'false');
+        $('pin-quick-hub').textContent = '📌 ' + (pinned ? LOC.quick_hub_pinned : LOC.quick_hub_pin);
+      }
+      if (typeof window.__updateFloatingHubBtn === 'function') window.__updateFloatingHubBtn();
+    }
     $('orchestrate-budget').textContent = s.orchestrateBudget || LOC.orchestrate_confirm_hint;
     $('deep-orchestrate-mode').checked = !!s.deepOrchestrateMode;
     $('pre-action-checklist').checked = s.preActionChecklist ?? true;
@@ -2054,49 +2266,61 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
     const wEl = $('whisper-inbox');
     if (s.whisperCount > 0) wEl.innerHTML = '<div class="item">' + s.whisperCount + ' ' + LOC.whisper_unread + '</div>';
     else wEl.innerHTML = '<div class="empty">' + LOC.whisper_no_pending + '</div>';
+    if ($('quick-hub-whisper-btn')) {
+      $('quick-hub-whisper-btn').textContent = '📥 ' + LOC.quick_hub_whisper + (s.whisperCount > 0 ? ' (' + s.whisperCount + ')' : '');
+    }
     $('whisper-disabled').checked = !!s.whisperDisabled;
 
     // ── Concert Board rendering ──
-    // Always render from state data; Phase 4 enrich will overlay if needed.
+    // Preserve Phase 4 enriched messages if an un-enriched state arrives before Phase 4 runs.
     const cbEl = $('concert-board');
     const cbBadge = $('concert-board-badge');
-    if (s.concertBoard && s.concertBoard.messages && s.concertBoard.messages.length > 0) {
-        const msgs = s.concertBoard.messages;
-        if (cbBadge) cbBadge.textContent = '(' + msgs.length + ' messages)';
-        cbEl.innerHTML = msgs.map(m => {
-            const time = new Date(m.timestamp).toISOString().slice(11, 16);
-            const fromEmoji = m.from === 'coordinator' ? '🎼' : m.from === 'verifier' ? '🔍' : m.from === 'researcher' ? '📚' : m.from === 'implementer' ? '🔧' : m.from === 'scout' ? '🔭' : m.from === 'designer' ? '🎨' : m.from === 'critic' ? '⚖️' : '🎻';
-            const roomLabel = m.room.replace('swarm-', '').slice(0, 12);
-            const bodyPreview = m.body.length > 120 ? m.body.slice(0, 120) + '…' : m.body;
-            return '<div class="todo-item" style="font-size:10px;line-height:1.4;">' +
-                '<span style="flex:1">' + fromEmoji + ' <b>' + escapeHtml(m.from) + '</b> <span style="opacity:0.5">' + escapeHtml(time) + '</span><br>' +
-                '<span style="opacity:0.7;font-size:9px;">' + escapeHtml(roomLabel) + '</span><br>' +
-                '<span style="word-break:break-word;">' + escapeHtml(bodyPreview) + '</span></span></div>';
-        }).join('');
-    } else {
-        if (cbBadge) cbBadge.textContent = '';
-        cbEl.innerHTML = '<div class="empty">' + LOC.concert_quiet + '</div>';
+    const hasEnrichedIncoming = Boolean(s.concertBoard && s.concertBoard.lastCheck);
+    if (!window.__concertBoardEnriched || hasEnrichedIncoming) {
+        if (hasEnrichedIncoming) window.__concertBoardEnriched = true;
+        if (s.concertBoard && s.concertBoard.messages && s.concertBoard.messages.length > 0) {
+            const msgs = s.concertBoard.messages;
+            if (cbBadge) cbBadge.textContent = '(' + msgs.length + ' ' + LOC.concert_messages + ')';
+            cbEl.innerHTML = msgs.map(m => {
+                const time = new Date(m.timestamp).toISOString().slice(11, 16);
+                const fromEmoji = m.from === 'coordinator' ? '🎼' : m.from === 'verifier' ? '🔍' : m.from === 'researcher' ? '📚' : m.from === 'implementer' ? '🔧' : m.from === 'scout' ? '🔭' : m.from === 'designer' ? '🎨' : m.from === 'critic' ? '⚖️' : '🎻';
+                const roomClean = String(m.room || '').replace(/^swarm-/, '');
+                const roomLabel = roomClean.length > 36 ? roomClean.slice(0, 35) + '…' : roomClean;
+                const bodyPreview = m.body.length > 120 ? m.body.slice(0, 120) + '…' : m.body;
+                return '<div class="todo-item" style="font-size:10px;line-height:1.4;">' +
+                    '<span style="flex:1">' + fromEmoji + ' <b>' + escapeHtml(m.from) + '</b> <span style="opacity:0.5">' + escapeHtml(time) + '</span><br>' +
+                    '<span style="opacity:0.7;font-size:9px;">' + escapeHtml(roomLabel) + '</span><br>' +
+                    '<span style="word-break:break-word;">' + escapeHtml(bodyPreview) + '</span></span></div>';
+            }).join('');
+        } else {
+            if (cbBadge) cbBadge.textContent = '';
+            cbEl.innerHTML = '<div class="empty">' + LOC.concert_quiet + '</div>';
+        }
     }
 
     // ── Custom Roles rendering ──
     const crEl = $('custom-roles-list');
-    if (s.customRoles && Array.isArray(s.customRoles) && s.customRoles.length > 0) {
-        crEl.innerHTML = s.customRoles.map((r, i) => {
-            const label = r.label || r.id || LOC.custom_roles_unnamed;
-            const purpose = r.purpose || '';
-            return '<div class="todo-item" style="align-items:flex-start;">' +
-                '<span style="flex:1;font-size:11px;"><b>' + escapeHtml(label) + '</b>' +
-                (purpose ? '<br><span style="opacity:0.6;font-size:10px;">' + escapeHtml(purpose.slice(0, 100)) + '</span>' : '') +
-                '</span>' +
-                '<button class="subtle" data-delete-role="' + i + '" style="padding:1px 4px;font-size:10px;" title="' + LOC.delete_title + '">✕</button></div>';
-        }).join('');
-        crEl.querySelectorAll('[data-delete-role]').forEach(btn => {
-            btn.addEventListener('click', function() {
-                vscode.postMessage({ type: 'deleteCustomRole', index: parseInt(this.dataset.deleteRole) });
+    const hasEnrichedRoles = Boolean(s.customRolesLoaded);
+    if (!window.__customRolesEnriched || hasEnrichedRoles) {
+        if (hasEnrichedRoles) window.__customRolesEnriched = true;
+        if (s.customRoles && Array.isArray(s.customRoles) && s.customRoles.length > 0) {
+            crEl.innerHTML = s.customRoles.map((r, i) => {
+                const label = r.label || r.id || LOC.custom_roles_unnamed;
+                const purpose = r.purpose || '';
+                return '<div class="todo-item" style="align-items:flex-start;">' +
+                    '<span style="flex:1;font-size:11px;"><b>' + escapeHtml(label) + '</b>' +
+                    (purpose ? '<br><span style="opacity:0.6;font-size:10px;">' + escapeHtml(purpose.slice(0, 100)) + '</span>' : '') +
+                    '</span>' +
+                    '<button class="subtle" data-delete-role="' + i + '" style="padding:1px 4px;font-size:10px;" title="' + LOC.delete_title + '">✕</button></div>';
+            }).join('');
+            crEl.querySelectorAll('[data-delete-role]').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    vscode.postMessage({ type: 'deleteCustomRole', index: parseInt(this.dataset.deleteRole) });
+                });
             });
-        });
-    } else {
-        crEl.innerHTML = '<div class="empty">No custom roles defined yet.</div>';
+        } else {
+            crEl.innerHTML = '<div class="empty">' + LOC.custom_roles_none + '</div>';
+        }
     }
 
     // ── Symphony Profiles rendering ──
@@ -2125,26 +2349,38 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
 
     const usageEl = $('usage');
     const accountingHtml = renderProviderAccounting(s.usage && s.usage.accounting);
+    const usageResponsibilityBody = LOC.usage_responsibility_html ||
+      '⚠️ <b>UNOFFICIAL ESTIMATE ONLY — YOU PAY YOUR PROVIDER(S):</b> In-app token counts and <code>~est.</code> figures use a local rate table, are not invoices, and cannot reflect live provider rate updates, long-context/tier pricing, thinking tokens, retries/fallbacks, temporary pre-auth cache holds, or taxes. Context Shield optimizes prompt context and routing — it is <b>not</b> a spend cap. <b>CHECK YOUR OFFICIAL PROVIDER BILLING CONSOLE BETWEEN MESSAGES</b> (Google Cloud Billing / AI Studio, DeepSeek, Anthropic, OpenAI, etc.) as the sole source of truth and set hard budget alerts there.';
+    const usageResponsibilityHtml =
+      '<div style="margin-top:6px;font-size:9.5px;line-height:1.4;opacity:0.88;border-left:2px solid #cca700;padding:3px 6px;background:rgba(204,167,0,0.07);border-radius:0 4px 4px 0;">' +
+      usageResponsibilityBody +
+      '</div>';
     if (s.sidebarMode === 'compact') {
-      usageEl.innerHTML = '<div class="empty">' + LOC.sessions_hidden_compact + '</div>' + accountingHtml;
+      usageEl.innerHTML = '<div class="empty">' + LOC.sessions_hidden_compact + '</div>' + usageResponsibilityHtml + accountingHtml;
     } else if (!s.usage || s.usage.calls === 0) {
-      usageEl.innerHTML = '<div class="empty">' + LOC.usage_no_calls + '</div>' + accountingHtml;
+      usageEl.innerHTML = '<div class="empty">' + LOC.usage_no_calls + '</div>' + usageResponsibilityHtml + accountingHtml;
     } else {
       const rowsHtml = s.usage.rows.map(r => {
         const units = r.billableUnits > 0 ? ' / ' + r.billableUnits + ' ' + escapeHtml(r.billableUnitLabel || 'unit') + (r.billableUnits === 1 ? '' : 's') : '';
         const latency = r.measuredCalls > 0
           ? ' / last ' + formatLatency(r.lastDurationMs) + ' / avg ' + formatLatency(r.averageDurationMs) + (r.slowCalls > 0 ? ' / slow ' + r.slowCalls : (r.delayedCalls > 0 ? ' / delayed ' + r.delayedCalls : ''))
           : '';
-        // Cost display with relative indicators
-        let costStr = r.estCostKnown ? ' / ' + costLabel(r.estCostDollars) : ' / cost unknown';
-        if (r.provider === 'deepseek' && r.cachedPromptTokens > 0 && r.worstCaseCostDollars !== undefined && r.worstCaseCostDollars > (r.estCostDollars || 0) * 1.1) {
-          costStr = ' / ' + costLabel(r.estCostDollars) + ' (worst-case ' + costLabel(r.worstCaseCostDollars) + ') ⚡cache';
+        // Cost display with relative indicators (DeepSeek & Gemini prefix cache + thinking telemetry)
+        let costStr = r.estCostKnown ? ' / ~' + costLabel(r.estCostDollars) + ' est.' : ' / cost unknown';
+        if ((r.provider === 'deepseek' || r.provider === 'gemini') && r.cachedPromptTokens > 0 && r.worstCaseCostDollars !== undefined && r.worstCaseCostDollars > (r.estCostDollars || 0) * 1.05) {
+          costStr = ' / ~' + costLabel(r.estCostDollars) + ' est. (uncached ~' + costLabel(r.worstCaseCostDollars) + ') ⚡cache:' + r.cachedPromptTokens + ' tok';
+        } else if (r.cachedPromptTokens > 0) {
+          costStr += ' ⚡cache:' + r.cachedPromptTokens + ' tok';
+        }
+        if (r.thoughtsTokens && r.thoughtsTokens > 0) {
+          costStr += ' 🧠think:' + r.thoughtsTokens + ' tok';
         }
         return '<div class="todo-item"><span style="flex:1">' + escapeHtml(r.provider) + '/' + escapeHtml(r.tier) + '<br><span style="opacity:0.65">' + escapeHtml(r.model || 'unknown') + '</span></span>' +
         '<span style="opacity:0.7">' + r.calls + ' calls / ' + r.totalTokens + ' tok' + units + latency + costStr + '</span></div>';
       }).join('');
       usageEl.innerHTML = rowsHtml +
         '<div style="margin-top:4px;font-size:10px;opacity:0.6">' + LOC.usage_total + ' ' + s.usage.calls + ' calls / ' + s.usage.total + ' tok</div>' +
+        usageResponsibilityHtml +
         '<button class="subtle" id="reset-usage" style="margin-top:4px;">' + LOC.usage_reset + '</button>' + accountingHtml;
       const reset = document.getElementById('reset-usage');
       if (reset) reset.addEventListener('click', () => vscode.postMessage({ type: 'resetUsage' }));
@@ -2423,7 +2659,8 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
             cbEl.innerHTML = cb.messages.map(function(m) {
               var time = new Date(m.timestamp).toISOString().slice(11, 16);
               var emoji = m.from === 'coordinator' ? '🎼' : m.from === 'verifier' ? '🔍' : m.from === 'researcher' ? '📚' : m.from === 'implementer' ? '🔧' : m.from === 'scout' ? '🔭' : m.from === 'designer' ? '🎨' : m.from === 'critic' ? '⚖️' : '🎻';
-              var roomLabel = m.room.replace('swarm-', '').slice(0, 12);
+              var roomClean = String(m.room || '').replace(/^swarm-/, '');
+              var roomLabel = roomClean.length > 36 ? roomClean.slice(0, 35) + '\u2026' : roomClean;
               var preview = m.body.length > 120 ? m.body.slice(0, 120) + '\u2026' : m.body;
               return '<div class="todo-item" style="font-size:10px;line-height:1.4;">' +
                 '<span style="flex:1">' + emoji + ' <b>' + escapeHtml(m.from) + '</b> <span style="opacity:0.5">' + escapeHtml(time) + '</span><br>' +
@@ -2437,6 +2674,7 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
         }
       }
       if (v.customRoles) {
+        window.__customRolesEnriched = true;
         const crEl = $('custom-roles-list');
         if (crEl) {
           if (v.customRoles.length > 0) {
@@ -2497,7 +2735,79 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
   $('open-swarm-launcher').addEventListener('click', () => vscode.postMessage({ type: 'openSwarmLauncher' }));
   $('open-swarm-direct').addEventListener('click', () => vscode.postMessage({ type: 'openSwarmDirectControls' }));
   $('configure-swarm-defaults').addEventListener('click', () => vscode.postMessage({ type: 'configureSwarmDefaults' }));
-  $('orchestrate-mode').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleOrchestrateMode', value: e.target.checked }));
+  $('orchestrate-mode').addEventListener('change', (e) => {
+    const nextVal = !!e.target.checked;
+    if (!nextVal && $('fleet-mode')) $('fleet-mode').checked = false;
+    vscode.postMessage({ type: 'toggleOrchestrateMode', value: nextVal });
+  });
+  if ($('fleet-mode')) {
+    $('fleet-mode').addEventListener('change', (e) => {
+      const nextFleet = !!e.target.checked;
+      if (nextFleet && $('orchestrate-mode')) $('orchestrate-mode').checked = true;
+      vscode.postMessage({ type: 'toggleFleetMode', value: nextFleet });
+    });
+  }
+  let lastJumpTarget = null;
+  function jumpToSection(targetId) {
+    const target = $(targetId);
+    if (!target) return;
+    if (lastJumpTarget && lastJumpTarget !== target) {
+      lastJumpTarget.style.scrollMarginTop = '';
+    }
+    lastJumpTarget = target;
+    const hubEl = $('sec-quick-hub');
+    const isPinned = !!(hubEl && hubEl.classList.contains('pinned') && targetId !== 'sec-quick-hub');
+    const hubHeight = isPinned ? Math.ceil(hubEl.getBoundingClientRect().height || hubEl.offsetHeight || 56) : 0;
+    target.style.scrollMarginTop = isPinned ? (hubHeight + 8) + 'px' : '8px';
+    const reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    target.classList.remove('nav-target-pulse');
+    void target.offsetWidth;
+    target.classList.add('nav-target-pulse');
+  }
+  document.addEventListener('click', (ev) => {
+    const btn = ev.target && ev.target.closest ? ev.target.closest('[data-jump]') : null;
+    if (!btn) return;
+    const targetId = btn.getAttribute('data-jump');
+    if (targetId) {
+      ev.preventDefault();
+      jumpToSection(targetId);
+    }
+  });
+  if ($('pin-quick-hub')) {
+    $('pin-quick-hub').addEventListener('click', () => {
+      const hubEl = $('sec-quick-hub');
+      const nextPinned = !(hubEl && hubEl.classList.contains('pinned'));
+      if (hubEl) hubEl.classList.toggle('pinned', nextPinned);
+      $('pin-quick-hub').classList.toggle('active', nextPinned);
+      $('pin-quick-hub').setAttribute('aria-pressed', nextPinned ? 'true' : 'false');
+      $('pin-quick-hub').textContent = '📌 ' + (nextPinned ? LOC.quick_hub_pinned : LOC.quick_hub_pin);
+      if (typeof window.__updateFloatingHubBtn === 'function') window.__updateFloatingHubBtn();
+      vscode.postMessage({ type: 'toggleQuickHubPinned', value: nextPinned });
+    });
+  }
+  if ($('collapse-quick-hub')) {
+    $('collapse-quick-hub').addEventListener('click', () => {
+      const hubEl = $('sec-quick-hub');
+      if (!hubEl) return;
+      const collapsed = hubEl.classList.toggle('collapsed');
+      $('collapse-quick-hub').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      $('collapse-quick-hub').textContent = collapsed ? '▸' : '▾';
+    });
+  }
+  window.__updateFloatingHubBtn = function() {
+    const fab = $('floating-hub-btn');
+    const hubEl = $('sec-quick-hub');
+    const topEl = $('sec-top');
+    if (!fab) return;
+    const pinned = !!(hubEl && hubEl.classList.contains('pinned'));
+    const topOffset = topEl && topEl.getBoundingClientRect ? topEl.getBoundingClientRect().top : 0;
+    const scrolled = topOffset < -140 || (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0) > 180;
+    fab.style.display = (!pinned && scrolled) ? 'inline-flex' : 'none';
+  };
+  document.addEventListener('scroll', () => {
+    if (typeof window.__updateFloatingHubBtn === 'function') window.__updateFloatingHubBtn();
+  }, { capture: true, passive: true });
   $('deep-orchestrate-mode').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleDeepOrchestrateMode', value: e.target.checked }));
   $('deepswarm-provider').addEventListener('change', (e) => vscode.postMessage({ type: 'selectDeepSwarmProvider', value: e.target.value }));
   $('deepswarm-tier').addEventListener('change', (e) => vscode.postMessage({ type: 'selectDeepSwarmTier', value: e.target.value }));
@@ -2520,6 +2830,9 @@ $('triple-check-auto').checked = !!s.tripleCheckAuto;
   $('plan-only').addEventListener('change', (e) => vscode.postMessage({ type: 'togglePlanOnly', value: e.target.checked }));
   $('big-guns-mode').addEventListener('change', (e) => vscode.postMessage({ type: 'setBigGunsMode', value: e.target.value }));
   $('planner-enforced').addEventListener('change', (e) => vscode.postMessage({ type: 'togglePlannerEnforced', value: e.target.checked }));
+  if ($('cost-shield-mode')) $('cost-shield-mode').addEventListener('change', (e) => vscode.postMessage({ type: 'setCostShieldMode', value: e.target.value }));
+  if ($('cost-shield-worker-route')) $('cost-shield-worker-route').addEventListener('change', (e) => vscode.postMessage({ type: 'setCostShieldWorkerRoute', value: e.target.value }));
+  if ($('launch-studio-window')) $('launch-studio-window').addEventListener('click', () => vscode.postMessage({ type: 'launchStudioWindow' }));
   $('checkpoint').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleCheckpoint', value: e.target.checked }));
   $('pre-action-checklist').addEventListener('change', (e) => vscode.postMessage({ type: 'togglePreActionChecklist', value: e.target.checked }));
   $('swarm-verifier').addEventListener('change', (e) => vscode.postMessage({ type: 'toggleSwarmVerifier', value: e.target.checked }));

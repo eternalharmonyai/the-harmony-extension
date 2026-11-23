@@ -779,8 +779,8 @@ export class HarmonyChatViewProvider implements vscode.WebviewViewProvider {
     btn.addEventListener('click', () => {
       const selected = checks.filter(c => c.checked).map(c => c.value);
       const freeform = textarea ? textarea.value.trim() : '';
-            const selectedText = selected.join('\n');
-            const answer = selectedText && freeform ? selectedText + '\n\n' + freeform : (selectedText || freeform);
+      const selectedText = selected.join('\\n');
+      const answer = selectedText && freeform ? selectedText + '\\n\\n' + freeform : (selectedText || freeform);
       btn.disabled = true;
       btn.textContent = 'Submitted';
       vscode.postMessage({ type: 'questionAnswer', cardId, answer });

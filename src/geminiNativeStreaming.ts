@@ -29,6 +29,16 @@
  */
 
 import * as vscode from 'vscode';
+import { getVscodeHttpProxyOptions, isGeminiVertexProfile, resolveGeminiGenerateContentRequestAsync } from './providers';
+import { enrichVertexHttpError, invalidateVertexTokenCache, redactUrlCredentials } from './vertexAuth';
+import { harmonyDebugChannel } from './rendererShield';
+import { formatDegradedHistoricalToolSummary } from './textualToolCallGuard';
+import {
+    evictIdleVpnSockets,
+    markVpnHostPreferFreshIpv4,
+    unwrapTransportErrorChain,
+    vpnResilientFetch,
+} from './vpnResilientTransport';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -49,7 +59,12 @@ export interface GeminiNativeStreamResult {
     content: string;
     reasoning: string;
     toolCalls: GeminiNativeToolCall[];
-    usage?: { promptTokens?: number; completionTokens?: number };
+    usage?: {
+        promptTokens?: number;
+        completionTokens?: number;
+        cachedPromptTokens?: number;
+        thoughtsTokens?: number;
+    };
     durationMs: number;
 }
 
@@ -166,29 +181,50 @@ export function convertMessagesToGeminiContents(
                 pendingParts.parts.push({ text: msg.content });
             }
             if (msg.tool_calls && msg.tool_calls.length > 0) {
-                for (const tc of msg.tool_calls) {
-                    let args: Record<string, unknown> = {};
-                    try {
-                        args = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
-                    } catch {
-                        args = { _raw: tc.function.arguments };
-                    }
-                    callIdToFnName.set(tc.id, tc.function.name);
-                    if (tc.thought_signature) {
+                // Google's thought-signature spec for Gemini 3+ / 4.x:
+                // In a single model turn (including parallel tool calls), the first
+                // functionCall part carries the turn's thoughtSignature. If any tool_call
+                // in this turn has a signature, treat the turn as signed and ensure the
+                // first emitted functionCall part carries it (so parallel siblings are not
+                // partially degraded into text while others remain functionCall).
+                // Conversely, if NO tool_call in the turn has a signature, degrade all
+                // tool_calls in the turn to text together so no unsigned functionCall is sent.
+                const turnSignature = msg.tool_calls.find(
+                    tc => typeof tc.thought_signature === 'string' && tc.thought_signature.trim().length > 0
+                )?.thought_signature?.trim();
+                let attachedTurnSig = false;
+                if (turnSignature) {
+                    for (const tc of msg.tool_calls) {
+                        let args: Record<string, unknown> = {};
+                        try {
+                            args = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
+                        } catch {
+                            args = { _raw: tc.function.arguments };
+                        }
+                        callIdToFnName.set(tc.id, tc.function.name);
+                        const explicitSig = typeof tc.thought_signature === 'string' && tc.thought_signature.trim().length > 0
+                            ? tc.thought_signature.trim()
+                            : undefined;
+                        const sigToAttach = explicitSig ?? (!attachedTurnSig ? turnSignature : undefined);
+                        if (sigToAttach) attachedTurnSig = true;
                         const part: GeminiPart = {
                             functionCall: { name: tc.function.name, args },
-                            thoughtSignature: tc.thought_signature,
+                            ...(sigToAttach ? { thoughtSignature: sigToAttach } : {}),
                         };
                         pendingParts.parts.push(part);
-                    } else {
-                        // Never emit an unsigned functionCall part — Gemini 3+ and
-                        // gemini-4-argon reject any functionCall lacking thoughtSignature
-                        // with HTTP 400 ("Function call is missing a thought_signature").
-                        unsignedCallIds.add(tc.id);
-                        pendingParts.parts.push({
-                            text: `[Tool call: ${tc.function.name}(${JSON.stringify(args)})]`,
-                        });
                     }
+                } else {
+                    // Never emit an unsigned functionCall part — Gemini 3+ and 4.x reject
+                    // unsigned functionCall turns with HTTP 400. Also never emit literal
+                    // `[Tool call: fn({...})]` syntax inside the `model` role, or the model
+                    // will few-shot-imitate plain-text tool calls on subsequent steps.
+                    for (const tc of msg.tool_calls) {
+                        callIdToFnName.set(tc.id, tc.function.name);
+                        unsignedCallIds.add(tc.id);
+                    }
+                    pendingParts.parts.push({
+                        text: formatDegradedHistoricalToolSummary(msg.tool_calls.map(tc => tc.function.name)),
+                    });
                 }
             }
         } else if (msg.role === 'tool') {
@@ -202,10 +238,11 @@ export function convertMessagesToGeminiContents(
             pendingParts.role = geminiRole;
             // functionResponse.name must match the DECLARED function name that
             // was called — not the OpenAI-style tool_call_id (would 400).
-            const toolName = callIdToFnName.get(msg.tool_call_id ?? '') ?? msg.tool_call_id ?? 'unknown_tool';
-            if (msg.tool_call_id && unsignedCallIds.has(msg.tool_call_id)) {
+            const knownFnName = msg.tool_call_id ? callIdToFnName.get(msg.tool_call_id) : undefined;
+            const toolName = knownFnName ?? msg.tool_call_id ?? 'unknown_tool';
+            if (!knownFnName || (msg.tool_call_id && unsignedCallIds.has(msg.tool_call_id))) {
                 pendingParts.parts.push({
-                    text: `[Tool result for ${toolName}]: ${String(msg.content ?? '(empty)')}`
+                    text: `[Historical tool output from earlier turn (${toolName})]: ${String(msg.content ?? '(empty)')}`
                 });
             } else {
                 let responseContent: Record<string, unknown>;
@@ -219,9 +256,40 @@ export function convertMessagesToGeminiContents(
                 });
             }
         } else {
-            // Regular user message
+            // Regular user message (including post-tool Mid-Session Whispers or Flow-State nudges).
+            // Vertex AI's generateContent validator requires a functionResponse turn answering
+            // a model functionCall turn to contain ONLY functionResponse parts (1:1 count match);
+            // mixing a sibling `{ text }` part into a functionResponse turn causes HTTP 400.
             if (msg.content) {
-                pendingParts.parts.push({ text: msg.content });
+                let lastFnRespPart: Extract<GeminiPart, { functionResponse: unknown }> | undefined;
+                for (let idx = pendingParts.parts.length - 1; idx >= 0; idx--) {
+                    const candidate = pendingParts.parts[idx];
+                    if ('functionResponse' in candidate) {
+                        lastFnRespPart = candidate;
+                        break;
+                    }
+                }
+                if (!lastFnRespPart && pendingParts.parts.length === 0 && contents.length > 0 && contents[contents.length - 1].role === 'user') {
+                    const prevParts = contents[contents.length - 1].parts;
+                    for (let idx = prevParts.length - 1; idx >= 0; idx--) {
+                        const candidate = prevParts[idx];
+                        if ('functionResponse' in candidate) {
+                            lastFnRespPart = candidate;
+                            break;
+                        }
+                    }
+                }
+                if (lastFnRespPart) {
+                    const existingNote = typeof lastFnRespPart.functionResponse.response.additional_user_context === 'string'
+                        ? `${lastFnRespPart.functionResponse.response.additional_user_context}\n\n${msg.content}`
+                        : msg.content;
+                    lastFnRespPart.functionResponse.response = {
+                        ...lastFnRespPart.functionResponse.response,
+                        additional_user_context: existingNote,
+                    };
+                } else {
+                    pendingParts.parts.push({ text: msg.content });
+                }
             }
         }
     }
@@ -258,6 +326,9 @@ export function convertToolsToGemini(tools: any[]): GeminiFunctionDeclaration[] 
         });
     }
 
+    // Deterministic code-unit sort so the 196-tool declaration prefix stays
+    // byte-identical across turns and steps for Gemini implicit KV caching.
+    declarations.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return declarations;
 }
 
@@ -267,8 +338,12 @@ function convertSchemaToGemini(schema: any): Record<string, unknown> {
 
     const result: Record<string, unknown> = {};
 
-    // Convert type
+    // Convert type (handle JSON Schema union arrays like ['string', 'null'] safely)
     if (schema.type) {
+        const rawType = Array.isArray(schema.type)
+            ? (schema.type.find((t: unknown) => typeof t === 'string' && t !== 'null') ?? schema.type[0] ?? 'string')
+            : schema.type;
+        const typeStr = typeof rawType === 'string' ? rawType.toLowerCase() : 'string';
         const typeMap: Record<string, string> = {
             'string': 'STRING',
             'number': 'NUMBER',
@@ -277,7 +352,7 @@ function convertSchemaToGemini(schema: any): Record<string, unknown> {
             'array': 'ARRAY',
             'object': 'OBJECT',
         };
-        result.type = typeMap[schema.type] ?? schema.type.toUpperCase();
+        result.type = typeMap[typeStr] ?? typeStr.toUpperCase();
     }
 
     // Copy description
@@ -285,18 +360,19 @@ function convertSchemaToGemini(schema: any): Record<string, unknown> {
         result.description = schema.description;
     }
 
-    // Convert properties recursively
+    // Convert properties recursively in deterministic key order
     if (schema.properties) {
         const props: Record<string, unknown> = {};
-        for (const [key, val] of Object.entries(schema.properties)) {
-            props[key] = convertSchemaToGemini(val);
+        const sortedKeys = Object.keys(schema.properties).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+        for (const key of sortedKeys) {
+            props[key] = convertSchemaToGemini(schema.properties[key]);
         }
         result.properties = props;
     }
 
-    // Convert required array
+    // Convert required array in deterministic order
     if (Array.isArray(schema.required)) {
-        result.required = [...schema.required];
+        result.required = [...new Set<string>(schema.required.map(String))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     }
 
     // Convert items for arrays
@@ -326,95 +402,216 @@ function convertSchemaToGemini(schema: any): Record<string, unknown> {
  * For thoughts:
  *   data: {"candidates":[{"content":{"role":"model","parts":[{"thought":true,"text":"reasoning here...","thoughtSignature":"sig..."}]}}]}
  */
+export interface GeminiSSEStreamGuard {
+    idleTimeoutMs?: number;
+    heartbeatIntervalMs?: number;
+    onIdleHeartbeat?: (elapsedMs: number) => void;
+    onIdleTimeout?: () => void;
+    isCancelled?: () => boolean;
+}
+
+function readGeminiChunkWithIdleTimeout(
+    readPromise: Promise<{ done: boolean; value?: Uint8Array }>,
+    idleTimeoutMs?: number,
+    onIdleTimeout?: () => void,
+    heartbeatIntervalMs?: number,
+    onIdleHeartbeat?: (elapsedMs: number) => void
+): Promise<{ done: boolean; value?: Uint8Array }> {
+    if (!idleTimeoutMs || idleTimeoutMs <= 0) return readPromise;
+    readPromise.catch(() => { /* raced out or aborted — prevent unhandled rejection */ });
+    const waitStartedAt = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pulseTimer: ReturnType<typeof setInterval> | undefined;
+    if (onIdleHeartbeat && heartbeatIntervalMs && heartbeatIntervalMs > 0) {
+        pulseTimer = setInterval(() => {
+            try { onIdleHeartbeat(Date.now() - waitStartedAt); } catch { /* ignore */ }
+        }, heartbeatIntervalMs);
+        if (typeof (pulseTimer as any).unref === 'function') {
+            (pulseTimer as any).unref();
+        }
+    }
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            try { onIdleTimeout?.(); } catch { /* ignore */ }
+            reject(new Error(`Gemini Native stream idle timeout after ${Math.round(idleTimeoutMs / 1000)}s without data — connection stalled`));
+        }, idleTimeoutMs);
+    });
+    return Promise.race([readPromise, timeoutPromise]).finally(() => {
+        if (timer) clearTimeout(timer);
+        if (pulseTimer) clearInterval(pulseTimer);
+    });
+}
+
 export async function parseGeminiSSEStream(
     response: Response,
     onDelta: (delta: { content?: string; reasoning?: string; toolCalls?: any[] }) => void,
     routeLabel: string,
-    toolCallCounter: { count: number }
-): Promise<{ content: string; reasoning: string; toolCalls: GeminiNativeToolCall[]; usage?: { promptTokens?: number; completionTokens?: number } }> {
+    toolCallCounter: { count: number },
+    streamGuard?: GeminiSSEStreamGuard
+): Promise<{
+    content: string;
+    reasoning: string;
+    toolCalls: GeminiNativeToolCall[];
+    usage?: {
+        promptTokens?: number;
+        completionTokens?: number;
+        cachedPromptTokens?: number;
+        thoughtsTokens?: number;
+    };
+}> {
     const reader = (response.body as any).getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
 
     const accumulated = { content: '', reasoning: '' };
     const toolCalls: GeminiNativeToolCall[] = [];
-    let usage: { promptTokens?: number; completionTokens?: number } | undefined;
+    let lastPartSignature: string | undefined;
+    let usage: {
+        promptTokens?: number;
+        completionTokens?: number;
+        cachedPromptTokens?: number;
+        thoughtsTokens?: number;
+    } | undefined;
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        let lineEnd: number;
-        while ((lineEnd = buffer.indexOf('\n')) >= 0) {
-            const rawLine = buffer.slice(0, lineEnd).trim();
-            buffer = buffer.slice(lineEnd + 1);
-            if (!rawLine || !rawLine.startsWith('data:')) continue;
-            const data = rawLine.slice(5).trim();
-            if (data === '[DONE]') continue;
-
-            let parsed: any;
-            try {
-                parsed = JSON.parse(data);
-            } catch {
-                continue; // Skip malformed JSON
+    let streamCompleted = false;
+    try {
+        while (true) {
+            if (streamGuard?.isCancelled?.()) break;
+            const { done, value } = await readGeminiChunkWithIdleTimeout(
+                reader.read(),
+                streamGuard?.idleTimeoutMs,
+                streamGuard?.onIdleTimeout,
+                streamGuard?.heartbeatIntervalMs,
+                streamGuard?.onIdleHeartbeat
+            );
+            if (done) {
+                streamCompleted = true;
+                break;
             }
 
-            // Extract usage metadata
-            if (parsed?.usageMetadata) {
-                usage = {
-                    promptTokens: parsed.usageMetadata.promptTokenCount,
-                    completionTokens: parsed.usageMetadata.candidatesTokenCount,
-                };
-            }
+            buffer += decoder.decode(value, { stream: true });
 
-            // Extract candidates[0].content.parts
-            const candidate = parsed?.candidates?.[0];
-            if (!candidate) continue;
+            let lineEnd: number;
+            while ((lineEnd = buffer.indexOf('\n')) >= 0) {
+                const rawLine = buffer.slice(0, lineEnd).trim();
+                buffer = buffer.slice(lineEnd + 1);
+                if (!rawLine || !rawLine.startsWith('data:')) continue;
+                const data = rawLine.slice(5).trim();
+                if (data === '[DONE]') continue;
 
-            const parts = candidate?.content?.parts;
-            if (!Array.isArray(parts)) continue;
-
-            let lastPartSignature: string | undefined;
-            for (const part of parts) {
-                const partSig = part.thoughtSignature ?? part.thought_signature;
-                if (typeof partSig === 'string' && partSig) {
-                    lastPartSignature = partSig;
+                let parsed: any;
+                try {
+                    parsed = JSON.parse(data);
+                } catch {
+                    continue; // Skip malformed JSON
                 }
-                // Text content
-                if (typeof part.text === 'string' && part.text) {
-                    if (part.thought === true) {
-                        // This is a thinking/reasoning part
-                        accumulated.reasoning += part.text;
-                        onDelta({ reasoning: part.text });
-                    } else {
-                        // Regular text
-                        accumulated.content += part.text;
-                        onDelta({ content: part.text });
+
+                // Extract usage metadata:
+                // - promptTokenCount INCLUDES cachedContentTokenCount
+                // - candidatesTokenCount EXCLUDES thoughtsTokenCount (both are billed as output)
+                if (parsed?.usageMetadata) {
+                    const promptTokens = typeof parsed.usageMetadata.promptTokenCount === 'number'
+                        ? parsed.usageMetadata.promptTokenCount
+                        : undefined;
+                    const candidatesTokens = typeof parsed.usageMetadata.candidatesTokenCount === 'number'
+                        ? parsed.usageMetadata.candidatesTokenCount
+                        : 0;
+                    const thoughtsTokens = typeof parsed.usageMetadata.thoughtsTokenCount === 'number'
+                        ? parsed.usageMetadata.thoughtsTokenCount
+                        : undefined;
+                    const cachedPromptTokens = typeof parsed.usageMetadata.cachedContentTokenCount === 'number'
+                        ? parsed.usageMetadata.cachedContentTokenCount
+                        : undefined;
+                    const hasCompletion = typeof parsed.usageMetadata.candidatesTokenCount === 'number'
+                        || typeof parsed.usageMetadata.thoughtsTokenCount === 'number';
+                    usage = {
+                        promptTokens: promptTokens ?? usage?.promptTokens,
+                        completionTokens: hasCompletion
+                            ? candidatesTokens + (thoughtsTokens ?? usage?.thoughtsTokens ?? 0)
+                            : usage?.completionTokens,
+                        cachedPromptTokens: cachedPromptTokens ?? usage?.cachedPromptTokens,
+                        thoughtsTokens: thoughtsTokens ?? usage?.thoughtsTokens,
+                    };
+                }
+
+                // Extract candidates[0].content.parts
+                const candidate = parsed?.candidates?.[0];
+                if (!candidate) continue;
+
+                const candidateSig = candidate?.thoughtSignature
+                    ?? candidate?.thought_signature
+                    ?? candidate?.content?.thoughtSignature
+                    ?? candidate?.content?.thought_signature;
+                if (typeof candidateSig === 'string' && candidateSig) {
+                    lastPartSignature = candidateSig;
+                    for (const existingTc of toolCalls) {
+                        if (!existingTc.thought_signature) {
+                            existingTc.thought_signature = candidateSig;
+                        }
                     }
                 }
 
-                // Function call
-                if (part.functionCall) {
-                    const fnName = part.functionCall.name ?? '(unknown)';
-                    const fnArgs = part.functionCall.args ?? {};
-                    const callId = `gemini-call-${toolCallCounter.count++}`;
-                    const argsStr = JSON.stringify(fnArgs);
-                    const signature = part.thoughtSignature ?? part.thought_signature ?? lastPartSignature;
+                const parts = candidate?.content?.parts;
+                if (!Array.isArray(parts)) continue;
 
-                    const toolCall: GeminiNativeToolCall = {
-                        id: callId,
-                        type: 'function',
-                        function: {
-                            name: fnName,
-                            arguments: argsStr,
-                        },
-                        ...(signature ? { thought_signature: signature } : {}),
-                    };
-                    toolCalls.push(toolCall);
-                    onDelta({ toolCalls: [toolCall] });
+                for (const part of parts) {
+                    const partSig = part.thoughtSignature ?? part.thought_signature;
+                    if (typeof partSig === 'string' && partSig) {
+                        lastPartSignature = partSig;
+                        // Backfill any tool call emitted in an earlier SSE chunk of this turn
+                        for (const existingTc of toolCalls) {
+                            if (!existingTc.thought_signature) {
+                                existingTc.thought_signature = partSig;
+                            }
+                        }
+                    }
+                    // Text content
+                    if (typeof part.text === 'string' && part.text) {
+                        if (part.thought === true) {
+                            // This is a thinking/reasoning part
+                            accumulated.reasoning += part.text;
+                            onDelta({ reasoning: part.text });
+                        } else {
+                            // Regular text
+                            accumulated.content += part.text;
+                            onDelta({ content: part.text });
+                        }
+                    }
+
+                    // Function call
+                    if (part.functionCall) {
+                        const fnName = part.functionCall.name ?? '(unknown)';
+                        const fnArgs = part.functionCall.args ?? {};
+                        const callId = `gemini-call-${toolCallCounter.count++}`;
+                        const argsStr = JSON.stringify(fnArgs);
+                        const signature = part.thoughtSignature ?? part.thought_signature ?? lastPartSignature;
+
+                        const toolCall: GeminiNativeToolCall = {
+                            id: callId,
+                            type: 'function',
+                            function: {
+                                name: fnName,
+                                arguments: argsStr,
+                            },
+                            ...(signature ? { thought_signature: signature } : {}),
+                        };
+                        toolCalls.push(toolCall);
+                        onDelta({ toolCalls: [toolCall] });
+                    }
                 }
+            }
+        }
+    } finally {
+        if (!streamCompleted) {
+            try { void Promise.resolve(reader.cancel()).catch(() => {}); } catch { /* ignore */ }
+        }
+        try { reader.releaseLock(); } catch { /* ignore */ }
+    }
+
+    if (toolCalls.length > 0 && lastPartSignature) {
+        for (const existingTc of toolCalls) {
+            if (!existingTc.thought_signature) {
+                existingTc.thought_signature = lastPartSignature;
             }
         }
     }
@@ -442,21 +639,100 @@ let thinkingClampNotified = false;
  *
  * @returns Same shape as callDeepSeekStreaming for drop-in compatibility
  */
+export interface GeminiNativeCallOptions {
+    stepIndex?: number;
+    isMechanicalStep?: boolean;
+    costShieldMode?: 'auto' | 'manual' | 'off';
+    connectTimeoutMs?: number;
+    uploadTimeoutMs?: number;
+    ttfbTimeoutMs?: number;
+    streamIdleTimeoutMs?: number;
+    tlsRejectUnauthorized?: boolean;
+    fetchImpl?: typeof fetch;
+    onGuardEvent?: (reason: string) => void;
+    onProgressPulse?: (status: string) => void;
+}
+
+export function unwrapGeminiTransportError(err: any): string {
+    return redactUrlCredentials(unwrapTransportErrorChain(err));
+}
+
+export function resolveGeminiTtfbMs(cfg: vscode.WorkspaceConfiguration, overrideMs?: number, model?: string): number {
+    if (typeof overrideMs === 'number' && Number.isFinite(overrideMs) && overrideMs > 0) {
+        return overrideMs;
+    }
+    const sec = cfg.get<number>('ttfbTimeoutSec');
+    const inspected = typeof (cfg as any)?.inspect === 'function'
+        ? (cfg as any).inspect('ttfbTimeoutSec')
+        : undefined;
+    const explicitlyConfigured =
+        inspected?.globalValue !== undefined
+        || inspected?.workspaceValue !== undefined
+        || inspected?.workspaceFolderValue !== undefined
+        || (typeof sec === 'number' && Number.isFinite(sec) && sec !== 180);
+    const effective = (typeof sec === 'number' && Number.isFinite(sec) && sec >= 30) ? Math.min(sec, 600) : 180;
+    // Frontier Gemini 4 Argon/Carbon/Neon legitimately queue/think for 140s-179s on Vertex global DSQ.
+    // Because vpnResilientFetch separately enforces 15s connect/TLS and 30s paced-upload watchdogs,
+    // raising the post-upload TTFB floor to 240s prevents false timeouts on healthy Carbon/Neon steps.
+    if (!explicitlyConfigured && effective === 180 && /(^|[-_.])(argon|carbon|neon)($|[-_.])/i.test(model ?? '')) {
+        return 240_000;
+    }
+    return effective * 1000;
+}
+
+export function resolveGeminiIdleMs(
+    cfg: vscode.WorkspaceConfiguration,
+    overrideMs?: number,
+    model?: string,
+    hasTools?: boolean
+): number {
+    if (typeof overrideMs === 'number' && Number.isFinite(overrideMs) && overrideMs > 0) {
+        return overrideMs;
+    }
+    const sec = cfg.get<number>('streamIdleTimeoutSec');
+    const inspected = typeof (cfg as any)?.inspect === 'function'
+        ? (cfg as any).inspect('streamIdleTimeoutSec')
+        : undefined;
+    const explicitNonDefault =
+        (inspected?.globalValue !== undefined && inspected.globalValue !== 120)
+        || (inspected?.workspaceValue !== undefined && inspected.workspaceValue !== 120)
+        || (inspected?.workspaceFolderValue !== undefined && inspected.workspaceFolderValue !== 120)
+        || (typeof sec === 'number' && Number.isFinite(sec) && sec !== 120);
+    const effective = (typeof sec === 'number' && Number.isFinite(sec) && sec >= 30) ? Math.min(sec, 900) : 120;
+    // Gemini Native `streamGenerateContent?alt=sse` buffers each `functionCall` JSON
+    // object server-side and emits zero SSE bytes after preceding prose until the
+    // complete JSON `args` finishes generating. Meanwhile OS TCP `SO_KEEPALIVE` (15s)
+    // probes wire liveness inside the VPN tunnel. Grant 300s (5m) on Argon/Carbon/Neon with tools.
+    if (!explicitNonDefault && effective === 120 && hasTools && /(^|[-_.])(argon|carbon|neon)($|[-_.])/i.test(model ?? '')) {
+        return 300_000;
+    }
+    return effective * 1000;
+}
+
+function isEarlyZeroDeltaSseDrop(err: unknown): boolean {
+    const unwrapped = unwrapTransportErrorChain(err);
+    return /\beconnreset\b|\bepipe\b|\betimedout\b|\bsocket hang ?up\b|\bother side closed\b|\bpremature close\b|\bterminated\b|\bund_err_(?:socket|closed|aborted)\b/i.test(unwrapped);
+}
+
 export async function callGeminiNativeStreaming(
     model: string,
     apiKey: string,
     messages: OpenAICompatMessage[],
     tools: any[],
     token: vscode.CancellationToken,
-    onDelta: (delta: { content?: string; reasoning?: string; toolCalls?: any[] }) => void
+    onDelta: (delta: { content?: string; reasoning?: string; toolCalls?: any[] }) => void,
+    options?: GeminiNativeCallOptions
 ): Promise<GeminiNativeStreamResult> {
     const cfg = vscode.workspace.getConfiguration('harmony');
-    const controller = new AbortController();
-    const cancelSub = token.onCancellationRequested(() => controller.abort());
+    const proxyOpts = getVscodeHttpProxyOptions();
+    const ttfbMs = resolveGeminiTtfbMs(cfg, options?.ttfbTimeoutMs, model);
+    const idleMs = resolveGeminiIdleMs(cfg, options?.streamIdleTimeoutMs, model, Array.isArray(tools) && tools.length > 0);
+    let activeController = new AbortController();
+    const cancelSub = token.onCancellationRequested(() => activeController.abort());
     const startedAt = Date.now();
 
     // Read user-configurable settings
-    const rawThinkingLevel = cfg.get<string>('gemini.thinking.level') ?? 'medium';
+    const rawThinkingLevel = (cfg.get<string>('gemini.thinking.level') ?? 'medium').trim().toLowerCase();
     // Clamp to the four API-valid strings — settings files can be hand-edited.
     const thinkingLevelValid = /^(minimal|low|medium|high)$/.test(rawThinkingLevel);
     const thinkingLevel: ThinkingLevel = thinkingLevelValid ? (rawThinkingLevel as ThinkingLevel) : 'medium';
@@ -487,13 +763,29 @@ export async function callGeminiNativeStreaming(
     // - 'none'   (older or unrecognized ids): omit `thinkingConfig` entirely — the
     //   safe default, because new models reject the legacy field with a 400.
     const thinkingMode = classifyGeminiThinking(model);
-    const effectiveLevel: ThinkingLevel = thinkingLevel === 'minimal' ? 'low' : thinkingLevel;
+    let effectiveLevel: ThinkingLevel = thinkingLevel === 'minimal' ? 'low' : thinkingLevel;
+    const shieldMode = options?.costShieldMode ?? (cfg.get<string>('costShield.mode') as 'auto' | 'manual' | 'off' | undefined) ?? 'auto';
+    const adaptiveStepDown = shieldMode === 'auto'
+        && (options?.stepIndex ?? 0) > 0
+        && options?.isMechanicalStep === true;
+    const isFrontierGemini4 = /(^|[-_.])(argon|carbon|neon)($|[-_.])/i.test(model);
+    if (adaptiveStepDown) {
+        if (isFrontierGemini4) {
+            // Frontier Gemini 4 models (Argon / Carbon / Neon): clamp mechanical follow-up
+            // tool steps directly to 'low' so multi-step loops don't burn frontier thinking budgets.
+            effectiveLevel = 'low';
+        } else if (effectiveLevel === 'high') {
+            effectiveLevel = 'medium';
+        } else if (effectiveLevel === 'medium') {
+            effectiveLevel = 'low';
+        }
+    }
     const thinkingConfig = thinkingMode === 'level'
         ? { thinkingLevel: effectiveLevel.toUpperCase() }
         : thinkingMode === 'budget'
             ? {
-                thinkingBudget: thinkingLevel === 'high' ? 8192
-                    : (thinkingLevel === 'low' || thinkingLevel === 'minimal') ? 1024
+                thinkingBudget: effectiveLevel === 'high' ? 8192
+                    : effectiveLevel === 'low' ? 1024
                     : 2048
             }
             : undefined;
@@ -521,8 +813,7 @@ export async function callGeminiNativeStreaming(
         ];
     }
 
-    // Debug log
-    const harmonyDebugChannel = vscode.window.createOutputChannel('Harmony Debug');
+    // Debug log (uses shared bounded singleton channel — never recreate/dispose per step)
     if (cfg.get<boolean>('enableDebugLogging') !== false) {
         harmonyDebugChannel.appendLine(`\n[Gemini Native API] Fetching streamGenerateContent for ${model} ...`);
         harmonyDebugChannel.appendLine(`[Gemini Native API] contents=${contents.length} tools=${functionDeclarations.length} thinking=${thinkingMode === 'level' ? effectiveLevel.toUpperCase() : thinkingLevel}${thinkingMode === 'none' ? ' (omitted)' : ''}${thinkingLevelValid ? '' : ' (clamped from invalid setting)'} safety=${safetyPreset}`);
@@ -530,32 +821,149 @@ export async function callGeminiNativeStreaming(
 
     const toolCallCounter = { count: 0 };
 
-    try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                // Use header, NOT query param (?key=) — privacy: avoids proxy logs
-                'x-goog-api-key': apiKey,
-            },
-            body: JSON.stringify(requestBody),
-            signal: controller.signal as any,
-        });
+    const serializedBody = JSON.stringify(requestBody);
 
-        if (!response.ok) {
-            const text = await response.text();
-            throw new Error(`Gemini Native HTTP ${response.status}: ${text.slice(0, 500)}`);
+    let emittedAnyDelta = false;
+    const trackedOnDelta: typeof onDelta = (delta) => {
+        if (
+            (delta.content && delta.content.length > 0)
+            || (delta.reasoning && delta.reasoning.length > 0)
+            || (delta.toolCalls && delta.toolCalls.length > 0)
+        ) {
+            emittedAnyDelta = true;
+        }
+        onDelta(delta);
+    };
+
+    const executeNativeFetch = async (
+        url: string,
+        headers: Record<string, string>,
+        forceFreshSocket = false,
+        preferIpv4 = false
+    ): Promise<Response> => {
+        activeController = new AbortController();
+        if (token.isCancellationRequested) {
+            activeController.abort();
+        }
+        return await vpnResilientFetch(url, {
+            method: 'POST',
+            headers,
+            body: serializedBody,
+            signal: activeController.signal,
+            label: `Gemini Native (${model})`,
+            connectTimeoutMs: options?.connectTimeoutMs,
+            uploadTimeoutMs: options?.uploadTimeoutMs,
+            ttfbTimeoutMs: ttfbMs,
+            forceFreshSocket,
+            preferIpv4,
+            ...proxyOpts,
+            tlsRejectUnauthorized: options?.tlsRejectUnauthorized,
+            fetchImpl: options?.fetchImpl,
+            onGuardEvent: (reason) => {
+                if (cfg.get<boolean>('enableDebugLogging') !== false) {
+                    harmonyDebugChannel.appendLine(`[Gemini Native Self-Heal] ${reason}`);
+                }
+                options?.onGuardEvent?.(reason);
+            },
+        });
+    };
+
+    const checkResponseAndRequireBody = async (
+        res: Response,
+        reqInfo: Awaited<ReturnType<typeof resolveGeminiGenerateContentRequestAsync>>
+    ): Promise<void> => {
+        if (!res.ok) {
+            const text = await res.text();
+            if (reqInfo.backend === 'vertex') {
+                throw new Error(enrichVertexHttpError(res.status, text, model, reqInfo.vertexAuth));
+            }
+            throw new Error(`Gemini Native HTTP ${res.status}: ${redactUrlCredentials(text).slice(0, 500)}`);
+        }
+        if (!res.body) throw new Error('Gemini Native returned no body.');
+    };
+
+    try {
+        let reqInfo = await resolveGeminiGenerateContentRequestAsync(model, apiKey, 'streamGenerateContent', true);
+        if (cfg.get<boolean>('enableDebugLogging') !== false) {
+            const authTag = reqInfo.vertexAuth ? ` auth=${reqInfo.vertexAuth.mode}/${reqInfo.vertexAuth.source}` : '';
+            harmonyDebugChannel.appendLine(`[Gemini Native API] backend=${reqInfo.backend}${authTag} url=${redactUrlCredentials(reqInfo.url)}`);
         }
 
-        if (!response.body) throw new Error('Gemini Native returned no body.');
+        let response = await executeNativeFetch(reqInfo.url, reqInfo.headers, false, false);
 
-        const result = await parseGeminiSSEStream(
-            response,
-            onDelta,
-            'Gemini Native',
-            toolCallCounter
-        );
+        if (response.status === 401 && reqInfo.backend === 'vertex' && reqInfo.vertexAuth?.cacheKey) {
+            try { await response.body?.cancel(); } catch { /* ignore */ }
+            invalidateVertexTokenCache(reqInfo.vertexAuth.cacheKey);
+            const refreshNote = `Gemini Native (${model}) Vertex OAuth token expired (HTTP 401); refreshing token automatically`;
+            if (cfg.get<boolean>('enableDebugLogging') !== false) {
+                harmonyDebugChannel.appendLine(`[Gemini Native Self-Heal] ${refreshNote}`);
+            }
+            options?.onGuardEvent?.(refreshNote);
+            reqInfo = await resolveGeminiGenerateContentRequestAsync(model, apiKey, 'streamGenerateContent', true, { bypassVertexCache: true });
+            response = await executeNativeFetch(reqInfo.url, reqInfo.headers, false, false);
+        }
+
+        await checkResponseAndRequireBody(response, reqInfo);
+
+        let idleTimedOut = false;
+        const ssePhaseStart = Date.now();
+        let result: Awaited<ReturnType<typeof parseGeminiSSEStream>>;
+        const buildStreamGuard = (): GeminiSSEStreamGuard => ({
+            idleTimeoutMs: idleMs,
+            heartbeatIntervalMs: 25_000,
+            onIdleHeartbeat: (elapsedMs) => {
+                const secWait = Math.max(1, Math.round(elapsedMs / 1000));
+                const phase = emittedAnyDelta && functionDeclarations.length > 0
+                    ? `synthesizing structured tool call (${secWait}s buffered, TCP keep-alive active)`
+                    : `reasoning (${secWait}s elapsed, TCP keep-alive active)`;
+                options?.onProgressPulse?.(`Gemini (${model}) ${phase}…`);
+            },
+            onIdleTimeout: () => {
+                idleTimedOut = true;
+                activeController.abort();
+            },
+            isCancelled: () => token.isCancellationRequested,
+        });
+        try {
+            result = await parseGeminiSSEStream(
+                response,
+                trackedOnDelta,
+                'Gemini Native',
+                toolCallCounter,
+                buildStreamGuard()
+            );
+        } catch (sseErr: any) {
+            const sseElapsed = Date.now() - ssePhaseStart;
+            if (
+                !token.isCancellationRequested
+                && !idleTimedOut
+                && !emittedAnyDelta
+                && sseElapsed <= 25_000
+                && isEarlyZeroDeltaSseDrop(sseErr)
+            ) {
+                evictIdleVpnSockets();
+                try { markVpnHostPreferFreshIpv4(new URL(reqInfo.url).hostname); } catch { /* ignore */ }
+                const detail = unwrapGeminiTransportError(sseErr).slice(0, 160);
+                const healNote = `Gemini Native (${model}) SSE stream dropped before first delta (${detail}); reconnecting immediately on fresh IPv4 socket inside tunnel`;
+                if (cfg.get<boolean>('enableDebugLogging') !== false) {
+                    harmonyDebugChannel.appendLine(`[Gemini Native Self-Heal] ${healNote}`);
+                }
+                options?.onGuardEvent?.(healNote);
+                toolCallCounter.count = 0;
+                idleTimedOut = false;
+                response = await executeNativeFetch(reqInfo.url, reqInfo.headers, true, true);
+                await checkResponseAndRequireBody(response, reqInfo);
+                result = await parseGeminiSSEStream(
+                    response,
+                    trackedOnDelta,
+                    'Gemini Native',
+                    toolCallCounter,
+                    buildStreamGuard()
+                );
+            } else {
+                throw sseErr;
+            }
+        }
 
         if (result.toolCalls.length > 0 && cfg.get<boolean>('enableDebugLogging') !== false) {
             harmonyDebugChannel.appendLine(`[Gemini Native] parsed ${result.toolCalls.length} tool calls: ${JSON.stringify(result.toolCalls.map(tc => ({ id: tc.id, name: tc.function.name, hasSig: !!tc.thought_signature })))}`);
@@ -570,7 +978,6 @@ export async function callGeminiNativeStreaming(
         };
     } finally {
         cancelSub.dispose();
-        harmonyDebugChannel.dispose();
     }
 }
 
@@ -615,6 +1022,12 @@ export function shouldUseGeminiNative(model: string, userPreference: string): bo
     // Explicit user override
     if (userPreference === 'generateContent') return true;
     if (userPreference === 'openai-compat') return false;
+
+    // Vertex AI Express Mode only exposes native generateContent / streamGenerateContent,
+    // and project-scoped Vertex AI prefers native for full Gemini feature parity.
+    try {
+        if (isGeminiVertexProfile()) return true;
+    } catch { /* headless unit test without vscode workspace config */ }
 
     // 'auto' mode: native for 2.5+ and -latest aliases (any parsed major >= 2.5)
     const mode = classifyGeminiThinking(model);

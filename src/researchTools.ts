@@ -29,6 +29,36 @@ async function ensureDir(dirPath: string): Promise<void> {
     await fs.mkdir(dirPath, { recursive: true });
 }
 
+function isInsideRoot(root: string, targetPath: string): boolean {
+    const rel = path.relative(path.resolve(root), path.resolve(targetPath));
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+async function extractPdfTextFromBuffer(buffer: Buffer): Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pdfModule: any = require('pdf-parse');
+    const PDFParseCtor = pdfModule?.PDFParse ?? pdfModule?.default?.PDFParse;
+    if (typeof PDFParseCtor === 'function') {
+        const parser = new PDFParseCtor({ data: new Uint8Array(buffer) });
+        try {
+            const r: any = await parser.getText();
+            return typeof r?.text === 'string' ? r.text : '';
+        } finally {
+            if (typeof parser.destroy === 'function') {
+                await parser.destroy().catch(() => {});
+            }
+        }
+    }
+    const fn = typeof pdfModule?.default === 'function'
+        ? pdfModule.default
+        : (typeof pdfModule === 'function' ? pdfModule : null);
+    if (!fn) {
+        throw new Error('Unsupported pdf-parse module export shape');
+    }
+    const data: any = await fn(buffer);
+    return typeof data?.text === 'string' ? data.text : '';
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // PHASE 3: PDF Ingestion
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -68,11 +98,12 @@ class PdfIngestTool implements vscode.LanguageModelTool<PdfIngestInput> {
             const resolved = path.isAbsolute(input.file_path)
                 ? input.file_path
                 : path.resolve(root, input.file_path);
+            if (!isInsideRoot(root, resolved)) {
+                return textResult(`error: file_path must be inside the active workspace: ${input.file_path}`);
+            }
             try {
-                const pdfParse = require('pdf-parse');
                 const buffer = await fs.readFile(resolved);
-                const data = await pdfParse(buffer);
-                rawText = data.text;
+                rawText = await extractPdfTextFromBuffer(buffer);
                 originalPath = resolved;
                 source = 'file';
             } catch (e: any) {
@@ -81,16 +112,26 @@ class PdfIngestTool implements vscode.LanguageModelTool<PdfIngestInput> {
         }
 
         // From URL
-        if (input.url) {
+        if (!rawText.trim() && input.url) {
+            let parsedUrl: URL;
             try {
-                const response = await fetch(input.url, {
+                parsedUrl = new URL(input.url);
+            } catch {
+                return textResult(`error: invalid URL: ${input.url}`);
+            }
+            if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+                return textResult(`error: only http(s) URLs are supported: ${input.url}`);
+            }
+            try {
+                const response = await fetch(parsedUrl.toString(), {
                     headers: { 'User-Agent': 'Harmony-Research/0.3.0' },
                     signal: AbortSignal.timeout(30000),
                 });
+                if (!response.ok) {
+                    return textResult(`error: HTTP ${response.status} when fetching PDF from ${input.url}`);
+                }
                 const buffer = Buffer.from(await response.arrayBuffer());
-                const pdfParse = require('pdf-parse');
-                const data = await pdfParse(buffer);
-                rawText = data.text;
+                rawText = await extractPdfTextFromBuffer(buffer);
                 originalPath = input.url;
                 source = 'url';
             } catch (e: any) {
@@ -105,13 +146,14 @@ class PdfIngestTool implements vscode.LanguageModelTool<PdfIngestInput> {
         // Store corpus entry
         const id = `corpus-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
         const title = input.title || path.basename(originalPath, '.pdf') || 'Untitled';
+        const trimmedWords = rawText.trim().split(/\s+/).filter(Boolean);
         const entry: CorpusEntry = {
             id,
             source,
             originalPath,
             title,
             text: rawText,
-            wordCount: rawText.split(/\s+/).length,
+            wordCount: trimmedWords.length,
             ingestedAt: new Date().toISOString(),
             sha256: crypto.createHash('sha256').update(rawText).digest('hex'),
         };
@@ -147,11 +189,16 @@ class PdfIngestTool implements vscode.LanguageModelTool<PdfIngestInput> {
     }
 
     async prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<PdfIngestInput>) {
-        const label = options.input.file_path
-            ? path.basename(options.input.file_path)
-            : options.input.url
-                ? new URL(options.input.url).hostname
-                : 'PDF';
+        let label = 'PDF';
+        if (options.input?.file_path) {
+            label = path.basename(options.input.file_path);
+        } else if (options.input?.url) {
+            try {
+                label = new URL(options.input.url).hostname || options.input.url;
+            } catch {
+                label = options.input.url;
+            }
+        }
         return { invocationMessage: `Ingesting PDF: ${label}` };
     }
 }
@@ -177,7 +224,7 @@ class ConflictDetectorTool implements vscode.LanguageModelTool<ConflictDetectorI
         const resolved: { title: string; text: string }[] = [];
         for (const t of input.texts.slice(0, 10)) {
             // Try as corpus ID
-            if (corpusPath && /^corpus-/.test(t)) {
+            if (corpusPath && /^corpus-[a-zA-Z0-9_-]+$/.test(t)) {
                 try {
                     const entry: CorpusEntry = JSON.parse(
                         await fs.readFile(path.join(corpusPath, `${t}.json`), 'utf8')
@@ -297,11 +344,15 @@ class CitationInfluenceTool implements vscode.LanguageModelTool<CitationInfluenc
 
         // Fetch citation details
         try {
-            const url = `https://api.semanticscholar.org/graph/v1/paper/${paperId}?fields=title,authors,year,citationCount,influentialCitationCount,citations.title,citations.citationCount,citations.year,references.title,references.citationCount,references.year`;
-            const json: any = await (await fetch(url, {
+            const url = `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(paperId)}?fields=title,authors,year,citationCount,influentialCitationCount,citations.title,citations.citationCount,citations.year,references.title,references.citationCount,references.year`;
+            const resp = await fetch(url, {
                 headers: { 'User-Agent': 'Harmony-Research/0.3.0' },
                 signal: AbortSignal.timeout(10000),
-            })).json();
+            });
+            if (!resp.ok) {
+                return textResult(`error: Semantic Scholar returned HTTP ${resp.status} for paper ${paperId}`);
+            }
+            const json: any = await resp.json();
 
             const title = json.title ?? 'Unknown';
             const year = json.year ?? '?';
@@ -426,6 +477,9 @@ class ResearchStateTool implements vscode.LanguageModelTool<{ action: string; pr
         }
 
         if (action === 'advance' && input.project_id && input.state) {
+            if (!/^proj-[a-zA-Z0-9_-]+$/.test(input.project_id)) {
+                return textResult(`error: invalid project_id format: ${input.project_id}`);
+            }
             const projectPath = path.join(projectsDir, `${input.project_id}.json`);
             try {
                 const project: ResearchProjectData = JSON.parse(await fs.readFile(projectPath, 'utf8'));
@@ -473,6 +527,9 @@ class CodeTheoryBridgeTool implements vscode.LanguageModelTool<CodeTheoryInput> 
             const resolved = path.isAbsolute(input.file_path)
                 ? input.file_path
                 : path.resolve(root, input.file_path);
+            if (!isInsideRoot(root, resolved)) {
+                return textResult(`error: file_path must be inside the active workspace: ${input.file_path}`);
+            }
             try {
                 const content = await fs.readFile(resolved, 'utf8');
                 codeContext = content.slice(0, 3000);

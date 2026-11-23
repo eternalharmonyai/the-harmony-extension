@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { loadTodos, TodoItem } from './todoStore';
+import { loadTodos, getEffectiveActiveTodoLimit } from './todoStore';
 
 /**
  * Context Persistence Verifier (Approach C)
@@ -51,8 +51,12 @@ interface VerificationResult {
 
 export async function runVerifierCheck(): Promise<string> {
     const todos = await loadTodos();
-    const pending = todos.filter(t => !t.done);
-    if (pending.length === 0) return '## ✅ Verifier: All todo items completed.';
+    const allPending = todos.filter(t => !t.done);
+    if (allPending.length === 0) return '## ✅ Verifier: All todo items completed.';
+
+    const activeLimit = getEffectiveActiveTodoLimit();
+    const pending = allPending.slice(-activeLimit);
+    const omittedBacklogCount = allPending.length - pending.length;
 
     const results: VerificationResult[] = [];
 
@@ -95,7 +99,10 @@ export async function runVerifierCheck(): Promise<string> {
     const pendingOnly = results.filter(r => r.status === 'pending' || r.status === 'unverified');
 
     const lines: string[] = ['## 🔍 Context Persistence Verifier'];
-    lines.push(`> ${pending.length} pending todo(s), ${verified.length} verified, ${blocked.length} blocked, ${pendingOnly.length} unchecked`);
+    lines.push(`> ${pending.length} active pending todo(s), ${verified.length} verified, ${blocked.length} blocked, ${pendingOnly.length} unchecked`);
+    if (omittedBacklogCount > 0) {
+        lines.push(`> _(Scoped to the ${pending.length} most recent active todo(s); ${omittedBacklogCount} older backlog item(s) omitted to protect VS Code Renderer memory)_`);
+    }
     lines.push('');
 
     if (blocked.length > 0) {

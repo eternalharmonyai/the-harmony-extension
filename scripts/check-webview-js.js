@@ -41,6 +41,7 @@ const SOURCES = [
   'src/askView.ts',
   'src/composeView.ts',
   'src/chatViewProvider.ts',
+  'src/host/standaloneServer.ts',
   'src/extension.ts',
 ];
 
@@ -101,7 +102,9 @@ function neutralizeTemplate(text) {
       out += text[i];
     }
   }
-  return out;
+  // Evaluate JS template-literal backslash escapes (`\\/` -> `\/`, `\\n` -> `\n`, etc.)
+  // using V8 itself so vm.Script parses the EXACT script text emitted to the browser!
+  return vm.runInNewContext('`' + out + '`');
 }
 
 function checkSource(failures) {
@@ -131,7 +134,7 @@ function checkCompiled(failures) {
   const outDir = path.join(ROOT, 'out');
   if (!fs.existsSync(outDir)) return;
   for (const rel of SOURCES) {
-    const js = path.join(outDir, path.basename(rel).replace(/\.ts$/, '.js'));
+    const js = path.join(outDir, rel.replace(/^src[\\/]/, '').replace(/\.ts$/, '.js'));
     if (!fs.existsSync(js)) continue;
     const text = fs.readFileSync(js, 'utf8');
     let idx = 0;
@@ -149,6 +152,46 @@ function checkCompiled(failures) {
         );
       }
     }
+  }
+}
+
+function checkRenderedHtmlOutputs(failures) {
+  // Template literals evaluate backslash escapes (\n, \/, \s, \b, \x00) at runtime,
+  // which raw file scanning BEFORE template evaluation cannot see. Invoke actual
+  // HTML renderers when compiled output exists and parse their emitted <script> blocks!
+  const standaloneJs = path.join(ROOT, 'out', 'host', 'standaloneServer.js');
+  if (!fs.existsSync(standaloneJs)) return;
+  try {
+    const mod = require(standaloneJs);
+    const samples = [];
+    if (typeof mod.renderStandaloneDesktopHtml === 'function') {
+      samples.push({
+        label: 'standaloneServer.renderStandaloneDesktopHtml(http)',
+        html: mod.renderStandaloneDesktopHtml(ROOT, 201, 'test-token', 'nonce123'),
+      });
+      samples.push({
+        label: 'standaloneServer.renderStandaloneDesktopHtml(webview)',
+        html: mod.renderStandaloneDesktopHtml(ROOT, 201, 'vscode-webview-tab', 'nonce456', 'vscode-webview://abc'),
+      });
+    }
+    for (const sample of samples) {
+      let idx = 0;
+      for (const block of scriptBlocks(sample.html)) {
+        idx++;
+        try {
+          new vm.Script(block.body, { filename: sample.label + '#script' + idx });
+        } catch (e) {
+          const lineMatch = /#script\d+:(\d+)/.exec(String(e.stack || ''));
+          const badLine = lineMatch ? block.body.split(/\r?\n/)[Number(lineMatch[1]) - 1] : '';
+          failures.push(
+            sample.label + ' script#' + idx + '  RENDERED HTML SCRIPT DOES NOT PARSE: ' + (e.message || e) +
+            (badLine ? '  >> ' + String(badLine).trim().slice(0, 140) : '')
+          );
+        }
+      }
+    }
+  } catch (err) {
+    failures.push('checkRenderedHtmlOutputs failed to load standaloneServer.js: ' + (err && err.message ? err.message : String(err)));
   }
 }
 
@@ -175,6 +218,7 @@ function main() {
   const failures = [];
   checkSource(failures);
   checkCompiled(failures);
+  checkRenderedHtmlOutputs(failures);
 
   if (failures.length) {
     console.error('');

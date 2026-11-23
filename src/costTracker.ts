@@ -6,6 +6,9 @@ import type { ProviderId, Tier } from './providers';
 export type UsageProviderId = ProviderId | 'vscode-lm';
 export type UsageTier = Tier | 'native';
 
+export const UNOFFICIAL_COST_ESTIMATE_DISCLAIMER =
+    '⚠️ UNOFFICIAL CLIENT-SIDE ESTIMATE ONLY — THIS MAY BE WRONG OR INCOMPLETE (RATES, CREDITS, CACHING & TAXES VARY). NOT A BILLING STATEMENT — CHECK YOUR PROVIDER BILLING CONSOLE BETWEEN MESSAGES TO BE SURE.';
+
 /**
  * In-memory cost & usage tracking for the current VS Code session.
  *
@@ -25,8 +28,10 @@ export interface UsageRecord {
     model: string;
     promptTokens: number;
     completionTokens: number;
-    /** Number of prompt tokens served from DeepSeek cache (from X-DS-Usage-Cached-Tokens header). */
+    /** Number of prompt tokens served from provider prefix cache (DeepSeek or Gemini). */
     cachedPromptTokens?: number;
+    /** Number of thinking/reasoning tokens billed as output (e.g. Gemini thoughtsTokenCount). */
+    thoughtsTokens?: number;
     /** Characters of the outbound prompt view (the messages array as sent), measured pre-send. */
     promptChars?: number;
     /** CJK characters within promptChars (Han + Kana + Hangul). */
@@ -54,6 +59,10 @@ export interface UsageRecord {
     stepOutcome?: 'completed' | 'failed';
     /** Provider-reported served model id (best-effort). */
     servedModel?: string;
+    /** Epistemic verdict for the step ('verified' | 'hypothesis' | 'probe_error' | 'not-in-verified-set'). */
+    verdict?: 'verified' | 'hypothesis' | 'probe_error' | 'not-in-verified-set';
+    /** Optional hash/receipt reference supporting a 'verified' verdict. */
+    evidenceHash?: string;
     durationMs?: number;
     billableUnits?: number;
     billableUnitLabel?: string;
@@ -84,16 +93,17 @@ interface ProviderPolicySnapshot {
 
 interface ProviderLedgerEntry {
     version: 1;
-    kind: 'usage' | 'policy_block';
+    kind: 'usage' | 'policy_block' | 'route_guard' | 'fallback';
     timestamp: string;
     provider: UsageProviderId;
     tier: UsageTier;
     model: string;
-    status: 'recorded' | 'blocked';
+    status: 'recorded' | 'blocked' | 'guarded' | 'fallback';
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
     cachedPromptTokens?: number;
+    thoughtsTokens?: number;
     promptChars?: number;
     promptCjkChars?: number;
     toolSchemaChars?: number;
@@ -104,6 +114,8 @@ interface ProviderLedgerEntry {
     usageReported?: boolean;
     stepOutcome?: 'completed' | 'failed';
     servedModel?: string;
+    verdict?: 'verified' | 'hypothesis' | 'probe_error' | 'not-in-verified-set';
+    evidenceHash?: string;
     durationMs?: number;
     latencyBand?: 'normal' | 'delayed' | 'slow';
     billableUnits?: number;
@@ -276,6 +288,7 @@ export function recordUsage(rec: UsageRecord): void {
         completionTokens: rec.completionTokens,
         totalTokens: rec.promptTokens + rec.completionTokens,
         cachedPromptTokens: rec.cachedPromptTokens,
+        thoughtsTokens: rec.thoughtsTokens,
         promptChars: rec.promptChars,
         promptCjkChars: rec.promptCjkChars,
         toolSchemaChars: rec.toolSchemaChars,
@@ -286,6 +299,8 @@ export function recordUsage(rec: UsageRecord): void {
         usageReported: rec.usageReported,
         stepOutcome: rec.stepOutcome,
         servedModel: rec.servedModel,
+        verdict: rec.verdict,
+        evidenceHash: rec.evidenceHash,
         durationMs: rec.durationMs,
         latencyBand: latencyBand(rec.durationMs),
         billableUnits: rec.billableUnits,
@@ -319,9 +334,10 @@ export interface UsageSummaryRow {
     slowCalls: number;
     estCostDollars: number;
     estCostKnown: boolean;
-    /** Cost if zero cache hits (worst-case). Only meaningful for DeepSeek. */
+    /** Cost if zero cache hits (worst-case). Meaningful for DeepSeek and Gemini. */
     worstCaseCostDollars?: number;
     cachedPromptTokens: number;
+    thoughtsTokens?: number;
     billableUnits: number;
     billableUnitLabel?: string;
 }
@@ -332,10 +348,18 @@ export function estimateCost(provider: UsageProviderId, model: string, prompt: n
     const lower = model.toLowerCase();
     
     if (provider === 'gemini') {
-        if (lower.includes('flash')) {
-            pM = 0.075; cM = 0.30;
+        if (lower.includes('flash') || lower.includes('hydrogen')) {
+            pM = 0.075; cM = 0.30; // gemini-flash / gemini-4-hydrogen (approximate local estimate)
+        } else if (lower.includes('neon')) {
+            pM = 0.60; cM = 2.50; // gemini-4-neon (Pareto-efficient frontier; approximate local estimate — check GCP/AI Studio console)
         } else {
-            pM = 1.25; cM = 5.00; // gemini-pro 
+            pM = 1.25; cM = 5.00; // gemini-pro / argon / carbon (approximate local estimate — check GCP/AI Studio console)
+        }
+        // Apply Gemini implicit/explicit prefix cache discount (75% off cached input tokens)
+        if (cachedPrompt !== undefined && cachedPrompt > 0 && prompt > 0) {
+            const clampedCached = Math.min(Math.max(0, cachedPrompt), prompt);
+            const missPrompt = Math.max(0, prompt - clampedCached);
+            return (missPrompt / 1000000) * pM + (clampedCached / 1000000) * (pM * 0.25) + (completion / 1000000) * cM;
         }
     } else if (provider === 'deepseek') {
         if (lower.includes('pro') || lower.includes('reasoner') || lower.includes('r1')) {
@@ -346,19 +370,22 @@ export function estimateCost(provider: UsageProviderId, model: string, prompt: n
         }
         // Apply cache discount for DeepSeek: cached prompt tokens are 10x cheaper
         if (cachedPrompt !== undefined && cachedPrompt > 0 && prompt > 0) {
-            const missPrompt = Math.max(0, prompt - cachedPrompt);
-            return (missPrompt / 1000000) * pM + (cachedPrompt / 1000000) * (pM * 0.1) + (completion / 1000000) * cM;
+            const clampedCached = Math.min(Math.max(0, cachedPrompt), prompt);
+            const missPrompt = Math.max(0, prompt - clampedCached);
+            return (missPrompt / 1000000) * pM + (clampedCached / 1000000) * (pM * 0.1) + (completion / 1000000) * cM;
         }
     } else if (provider === 'openai') {
         if (lower.includes('dall-e') || lower.includes('image')) {
             return undefined;
         }
-        if (lower.includes('gpt-4o-mini')) {
+        if (lower.includes('gpt-4o-mini') || lower.includes('luna')) {
             pM = 0.15; cM = 0.60;
         } else if (lower.includes('gpt-4o')) {
             pM = 2.50; cM = 10.00;
-        } else if (lower.includes('gpt-5-mini')) {
+        } else if (lower.includes('gpt-5-mini') || lower.includes('terra')) {
             pM = 0.25; cM = 2.00;
+        } else if (lower.includes('astra') || lower.includes('gpt-6')) {
+            pM = 2.50; cM = 15.00;
         } else if (lower.includes('gpt-5')) {
             pM = 1.25; cM = 10.00;
         } else if (/^o\d/.test(lower) || lower.includes('heavy')) {
@@ -369,7 +396,7 @@ export function estimateCost(provider: UsageProviderId, model: string, prompt: n
     } else if (provider === 'claude') {
         if (lower.includes('haiku')) {
             pM = 0.25; cM = 1.25;
-        } else if (lower.includes('opus')) {
+        } else if (lower.includes('opus') || lower.includes('fable')) {
             pM = 15.00; cM = 75.00;
         } else {
             pM = 3.00; cM = 15.00;
@@ -421,6 +448,9 @@ export function summarize(): UsageSummaryRow[] {
         if (typeof r.cachedPromptTokens === 'number' && r.cachedPromptTokens > 0) {
             row.cachedPromptTokens += r.cachedPromptTokens;
         }
+        if (typeof r.thoughtsTokens === 'number' && r.thoughtsTokens > 0) {
+            row.thoughtsTokens = (row.thoughtsTokens ?? 0) + r.thoughtsTokens;
+        }
         if (typeof r.durationMs === 'number' && Number.isFinite(r.durationMs) && r.durationMs >= 0) {
             row.measuredCalls += 1;
             row.totalDurationMs += r.durationMs;
@@ -443,8 +473,8 @@ export function summarize(): UsageSummaryRow[] {
         } else {
             row.estCostDollars += estimate;
         }
-        // Worst-case cost: what this would cost with zero DeepSeek cache hits
-        if (r.provider === 'deepseek') {
+        // Worst-case cost: what this would cost with zero DeepSeek/Gemini cache hits
+        if (r.provider === 'deepseek' || r.provider === 'gemini') {
             const worst = estimateCost(r.provider, r.model, r.promptTokens, r.completionTokens);
             if (worst !== undefined) {
                 row.worstCaseCostDollars = (row.worstCaseCostDollars ?? 0) + worst;
@@ -570,13 +600,41 @@ export interface FallbackEvent {
 const fallbackEvents: FallbackEvent[] = [];
 const fallbackListeners = new Set<() => void>();
 
-export function recordFallbackEvent(provider: ProviderId, originalModel: string, fallbackModel: string, reason: string): void {
-    fallbackEvents.push({
+export function recordRouteGuardEvent(provider: UsageProviderId, tier: UsageTier, model: string, reason: string): void {
+    void appendProviderLedger({
+        version: 1,
+        kind: 'route_guard',
         timestamp: new Date().toISOString(),
+        provider,
+        tier,
+        model,
+        status: 'guarded',
+        reason,
+        policy: providerPolicySnapshot(),
+    });
+    notifyUsageListeners();
+}
+
+export function recordFallbackEvent(provider: ProviderId, originalModel: string, fallbackModel: string, reason: string): void {
+    const timestamp = new Date().toISOString();
+    fallbackEvents.push({
+        timestamp,
         provider,
         originalModel,
         fallbackModel,
         reason
+    });
+    void appendProviderLedger({
+        version: 1,
+        kind: 'fallback',
+        timestamp,
+        provider,
+        tier: 'coding',
+        model: originalModel,
+        servedModel: fallbackModel,
+        status: 'fallback',
+        reason,
+        policy: providerPolicySnapshot(),
     });
     for (const cb of fallbackListeners) {
         try { cb(); } catch { /* ignore */ }
@@ -591,3 +649,137 @@ export function onFallbackChange(cb: () => void): vscode.Disposable {
 export function getFallbackEvents(): FallbackEvent[] {
     return [...fallbackEvents].slice(-10); // Last 10 events
 }
+
+// ── Self-Calibrating CJK-Aware Token Estimator (Ordinary Least Squares) ──
+// Fits `promptTokens ≈ a * nonCjkChars + b * cjkChars` from real provider usage
+// rows where `usageReported !== false`, `promptTokens > 0`, and `promptChars > 0`.
+// Falls back to conservative seeds (`a = 1/3`, `b = 1.5`) until enough samples
+// are collected or if the normal equations are near-collinear.
+
+export interface CalibratedTokenCoefficients {
+    /** Tokens per non-CJK character (clamped to [0.15, 0.75]). */
+    nonCjkCoeff: number;
+    /** Tokens per CJK character (clamped to [0.40, 2.50]). */
+    cjkCoeff: number;
+    /** Number of verified usage observations used in the fit. */
+    sampleCount: number;
+    /** True when OLS fit succeeded (>= minSamples), false when using seed priors. */
+    calibrated: boolean;
+    /** 99th-percentile relative underestimate safety margin ( >= 1.05 when calibrated ). */
+    safetyMultiplier: number;
+}
+
+export const SEED_NON_CJK_COEFF = 1 / 3;
+export const SEED_CJK_COEFF = 1.5;
+const MIN_OLS_SAMPLES = 5;
+const MAX_OLS_WINDOW = 200;
+
+/**
+ * Pure two-parameter OLS fitter (`tokens ≈ a * nonCjk + b * cjk`) with Ridge
+ * regularization toward the seed priors so pure-English or pure-CJK sessions
+ * never produce singular or wild coefficients.
+ */
+export function fitTokenEstimatorCoefficients(
+    samples: ReadonlyArray<Pick<UsageRecord, 'promptTokens' | 'promptChars' | 'promptCjkChars' | 'usageReported'>>,
+    minSamples: number = MIN_OLS_SAMPLES
+): CalibratedTokenCoefficients {
+    const valid = samples.filter(s =>
+        s.usageReported !== false
+        && typeof s.promptTokens === 'number' && s.promptTokens > 0
+        && typeof s.promptChars === 'number' && s.promptChars > 0
+    ).slice(-MAX_OLS_WINDOW);
+
+    if (valid.length < minSamples) {
+        return {
+            nonCjkCoeff: SEED_NON_CJK_COEFF,
+            cjkCoeff: SEED_CJK_COEFF,
+            sampleCount: valid.length,
+            calibrated: false,
+            safetyMultiplier: 1.0,
+        };
+    }
+
+    // Ridge penalty (lambda) anchors each parameter gently to its seed prior
+    // when one character class (e.g., CJK in an all-English session) has near-zero variance.
+    const lambda = 1e4;
+    let sxx = lambda;
+    let sxy = 0;
+    let syy = lambda;
+    let sxz = lambda * SEED_NON_CJK_COEFF;
+    let syz = lambda * SEED_CJK_COEFF;
+
+    for (const row of valid) {
+        const cjk = Math.max(0, Math.min(row.promptChars!, row.promptCjkChars ?? 0));
+        const nonCjk = Math.max(0, row.promptChars! - cjk);
+        const y = row.promptTokens;
+        sxx += nonCjk * nonCjk;
+        sxy += nonCjk * cjk;
+        syy += cjk * cjk;
+        sxz += nonCjk * y;
+        syz += cjk * y;
+    }
+
+    const det = sxx * syy - sxy * sxy;
+    if (!Number.isFinite(det) || det <= 1e-6) {
+        return {
+            nonCjkCoeff: SEED_NON_CJK_COEFF,
+            cjkCoeff: SEED_CJK_COEFF,
+            sampleCount: valid.length,
+            calibrated: false,
+            safetyMultiplier: 1.0,
+        };
+    }
+
+    const rawA = (syy * sxz - sxy * syz) / det;
+    const rawB = (sxx * syz - sxy * sxz) / det;
+    const nonCjkCoeff = Math.min(0.75, Math.max(0.15, rawA));
+    const cjkCoeff = Math.min(2.50, Math.max(0.40, rawB));
+
+    // Compute p99 actual/predicted ratio so the guard maintains an empirical safety margin.
+    const ratios: number[] = [];
+    for (const row of valid) {
+        const cjk = Math.max(0, Math.min(row.promptChars!, row.promptCjkChars ?? 0));
+        const nonCjk = Math.max(0, row.promptChars! - cjk);
+        const pred = Math.max(1, nonCjk * nonCjkCoeff + cjk * cjkCoeff);
+        ratios.push(row.promptTokens / pred);
+    }
+    ratios.sort((a, b) => a - b);
+    const p99Idx = Math.min(ratios.length - 1, Math.floor(ratios.length * 0.99));
+    const safetyMultiplier = Math.min(1.35, Math.max(1.05, ratios[p99Idx] ?? 1.05));
+
+    return {
+        nonCjkCoeff,
+        cjkCoeff,
+        sampleCount: valid.length,
+        calibrated: true,
+        safetyMultiplier,
+    };
+}
+
+/**
+ * Estimate prompt tokens for `(promptChars, promptCjkChars)` using the session's
+ * self-calibrated OLS coefficients for `provider` (or global session records if
+ * provider-specific rows are < MIN_OLS_SAMPLES), falling back to the seed formula.
+ */
+export function estimateCalibratedPromptTokens(
+    promptChars: number,
+    promptCjkChars: number,
+    provider?: UsageProviderId,
+    customRecords?: ReadonlyArray<Pick<UsageRecord, 'provider' | 'promptTokens' | 'promptChars' | 'promptCjkChars' | 'usageReported'>>
+): number {
+    const safeChars = Math.max(0, promptChars);
+    const safeCjk = Math.max(0, Math.min(safeChars, promptCjkChars));
+    const nonCjkChars = Math.max(0, safeChars - safeCjk);
+
+    const pool = customRecords ?? records;
+    const providerFiltered = provider ? pool.filter(r => r.provider === provider) : pool;
+    const fit = fitTokenEstimatorCoefficients(
+        providerFiltered.length >= MIN_OLS_SAMPLES ? providerFiltered : pool
+    );
+
+    if (!fit.calibrated) {
+        return Math.ceil(nonCjkChars * SEED_NON_CJK_COEFF) + Math.ceil(safeCjk * SEED_CJK_COEFF);
+    }
+    return Math.ceil((nonCjkChars * fit.nonCjkCoeff + safeCjk * fit.cjkCoeff) * fit.safetyMultiplier);
+}
+

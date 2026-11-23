@@ -100,7 +100,7 @@ export async function listWorkerOutputs(limit = 20): Promise<{ path: string; lab
     try {
         const entries = await vscode.workspace.fs.readDirectory(dir);
         const files = entries
-            .filter(([, t]) => t === vscode.FileType.File && /.md$/.test(''))
+            .filter(([name, t]) => t === vscode.FileType.File && /\.md$/.test(name))
             .map(([name]) => {
                 const parts = name.match(/^(\d+)-(.+)-([0-9a-f]+)\.md$/);
                 const ts = parts ? parseInt(parts[1], 10) : 0;

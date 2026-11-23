@@ -72,8 +72,14 @@ export async function runOracle(
         timeoutMs: ORACLE_TIMEOUT_MS,
     });
 
-    // PASS — oracle passed
-    if (result.exitCode === 0 && !result.timedOut) {
+    // PASS — oracle passed (guard against vacuous 0-test runs)
+    const combinedInitialOutput = (result.stdout || '') + '\n' + (result.stderr || '');
+    const vacuousZeroTests = /\b0 passing\b|\bno tests found\b|\b0 tests? ran\b/i.test(combinedInitialOutput);
+    if (result.exitCode === 0 && !result.timedOut && !vacuousZeroTests) {
+        try {
+            const { recordEmpiricalOutcome } = await import('../primitives/uncertaintyFabric');
+            await recordEmpiricalOutcome({ source: 'oracle', taskKind: purpose || command, success: true });
+        } catch { /* non-fatal */ }
         return {
             outcome: 'PASS',
             exitCode: 0,
@@ -87,19 +93,47 @@ export async function runOracle(
         };
     }
 
-    // TIMEOUT — distinct failure signature
+    // TIMEOUT — distinct failure signature, tracked in spine attempt counter
     if (result.timedOut) {
         const sig = 'TIMEOUT';
+        try {
+            const { recordEmpiricalOutcome } = await import('../primitives/uncertaintyFabric');
+            await recordEmpiricalOutcome({ source: 'oracle', taskKind: purpose || command, success: false, reason: 'TIMEOUT' });
+        } catch { /* non-fatal */ }
+        const timeoutAttempt = recordOracleAttempt(sig);
+        const timeoutAttemptCount = timeoutAttempt?.count ?? getAttemptCount(sig) + 1;
+        const timeoutNudge = timeoutAttemptCount === NUDGE_AT;
+        if (timeoutAttemptCount >= MAX_ORACLE_ATTEMPTS) {
+            const spine = readSpine();
+            const taskGoal = spine?.taskGoal ?? 'unknown task';
+            blockTask(
+                `Oracle timed out ${timeoutAttemptCount}x (${ORACLE_TIMEOUT_MS}ms)`,
+                `Command timed out after ${ORACLE_TIMEOUT_MS}ms`,
+                timeoutAttemptCount,
+                `Repeated command timeout (${timeoutAttemptCount}x)`
+            );
+            return {
+                outcome: 'HALT',
+                exitCode: 2,
+                signature: sig,
+                attemptCount: timeoutAttemptCount,
+                nudge: false,
+                output: `Command timed out after ${ORACLE_TIMEOUT_MS}ms`,
+                durationMs: result.durationMs,
+                flakyQuarantined: false,
+                message: `🛑 HALT: Oracle timed out ${timeoutAttemptCount}x (${ORACLE_TIMEOUT_MS}ms). BLOCKED artifact written to spine.\nTask: ${taskGoal}`,
+            };
+        }
         return {
             outcome: 'TIMEOUT',
             exitCode: 1,
             signature: sig,
-            attemptCount: 0,
-            nudge: false,
+            attemptCount: timeoutAttemptCount,
+            nudge: timeoutNudge,
             output: `Command timed out after ${ORACLE_TIMEOUT_MS}ms`,
             durationMs: result.durationMs,
             flakyQuarantined: false,
-            message: `⏱️ Oracle TIMEOUT (${ORACLE_TIMEOUT_MS}ms) — ${purpose}`,
+            message: `⏱️ Oracle TIMEOUT (attempt ${timeoutAttemptCount}/${MAX_ORACLE_ATTEMPTS}, ${ORACLE_TIMEOUT_MS}ms) — ${purpose}`,
         };
     }
 
@@ -107,6 +141,10 @@ export async function runOracle(
     const combinedOutput = result.stdout + '\n' + result.stderr;
     const normalized = normalizeOutput(combinedOutput, workspaceRoot);
     const signature = hashFailureSignature(normalized);
+    try {
+        const { recordEmpiricalOutcome } = await import('../primitives/uncertaintyFabric');
+        await recordEmpiricalOutcome({ source: 'oracle', taskKind: purpose || command, success: false, reason: signature });
+    } catch { /* non-fatal */ }
 
     // Record attempt in spine (persists across compaction)
     const attempt = recordOracleAttempt(signature);

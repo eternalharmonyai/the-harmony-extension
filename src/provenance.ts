@@ -82,6 +82,15 @@ export const ENGINE_PROVENANCE: Record<string, EngineProvenance> = {
         rankingDisclosure: 'proprietary',
         retrievalClass: 'index',
     },
+    'deepseek': {
+        engine: 'deepseek',
+        index: 'DeepSeek Search (in-house AI-native web crawler)',
+        operator: 'DeepSeek, Inc.',
+        jurisdiction: 'CN',
+        removalRegime: 'PRC content regulation and anti-SEO/GEO/AIGC spam filtering',
+        rankingDisclosure: 'rerank_score (0..3) and authority tier (0..4) disclosed per result',
+        retrievalClass: 'index',
+    },
     'arxiv': {
         engine: 'arxiv',
         index: 'arXiv (scholarly, author-submitted)',

@@ -1,8 +1,10 @@
 [English](README.md) | [中文](README.zh-CN.md)
 
-> 🧪 **EXPERIMENTAL SOFTWARE — USE WITH DEEP CARE AND RESPONSIBILITY**
+> 🧪 **EXPERIMENTAL ETHICAL-SOURCE SOFTWARE — USE WITH DEEP CARE AND RESPONSIBILITY**
 >
-> The Harmony Extension is in active, early-stage development. Features — especially Swarm, DeepSwarm, Orchestration, and Translation — are powerful but experimental. They can incur **significant, unpredictable API costs** across multiple AI providers simultaneously. Read this entire README before using any feature. If you are uncertain about a feature's behavior, cost impact, or configuration, **do not use it.**
+> The Harmony Extension is in active, early-stage development under the [Hippocratic License 3.0](LICENSE) (ethical-source, provided **"AS IS"** without warranty). Features — especially Swarm, DeepSwarm, Orchestration, Fleet Mode, and Translation — are experimental and can incur **significant, unpredictable API charges** across multiple third-party AI providers simultaneously.
+>
+> **User Billing & Provider Terms Responsibility:** Harmony routes requests using **your** provider credentials. You pay your API provider(s) directly and are solely responsible for your accounts, keys, quotas, spend, and compliance with each provider's terms of service. Every token count, `~est.` figure, and cache indicator in Harmony is an **advisory local engineering estimate** — never an invoice, quote, or hard spend cap. **Context Shield** optimizes what Harmony sends locally; it cannot pause, cap, or control what upstream providers bill. Configure hard budget limits and billing alerts directly in each provider's official console before use. Read this entire README before enabling any feature.
 
 # The Harmony Extension
 
@@ -15,18 +17,23 @@ Harmony is a VS Code/Cursor extension for `@harmony` chat, workspace tools, prov
 - Provides guarded workspace tools, swarm planning, memory, receipts, and native UI diagnostics.
 - Keeps risky authority classes gated: source writes, terminal commands, provider calls, git mutation, package install, editor reload, and chat deletion stay separate.
 
-## ✨ What makes Harmony unique
+## ✨ Distinctive capabilities
 
-Harmony ships capabilities no other AI coding collaborator offers today. Each one is a short scroll away — click to jump.
+Harmony combines workflow primitives designed for human-in-the-loop coding. Each one is a short scroll away — click to jump.
 
-| Unique capability | Why it matters |
+| Distinctive capability | Why it matters |
 |:---|:---|
+| 🚀 [Fleet Mode & 3-Seat Collaborators](#fleet-mode) | Coordinates **Conductor** (sole write authority), **Orchestrator** (read-only repo impact packs), and **8 Collaborator roles** routed via your Context Shield offload target. |
+| 🖥️ [Sovereign Studio & Harmony Chat](#sovereign-studio) | Run all 201 tools inside VS Code or in a zero-account native Tauri 2 desktop window (`:8789`) — no browser account sync, no telemetry. |
+| 🔮 [Prism Sanctuary](#prism-sanctuary) | Reusable specialist personas (`Prisms`) with strict context isolation — zero cross-bleed into general workspace memory. |
+| 🛡️ [Context Shield](#context-shield) | Byte-locked KV-cache prefixes, superseded-read deduplication, and Collaborator offload routing *(local prompt optimization, never a spend cap)*. |
+| 🌗 [Dual-Lens Superposition](#dual-lens) | Neurodivergent-inspired pairing of Omnidirectional Field Radar and Forensic Deterministic Crystal invariants. |
 | 📥 [Whisper Mode](#whisper-mode) | Message Harmony **mid-turn** — while it's still working — without opening chat or restarting. A one-way async human→AI side channel. |
 | 🎭 [Concert Hall](#concert-hall) | Persistent multi-agent rooms that survive restarts — a living, reviewable paper trail of the AI's reasoning. |
 | 🎯 [Flow State Mode](#flow-state-mode) | Auto-continues to the next natural step and always asks what's next — designed with neurodivergent users in mind. |
 | 🔗 [Cross-Chat Continuity](#cross-chat-continuity) | One context thread across Copilot, Harmony, Gemini, and the terminal — pick up where you left off. |
 | 🛡️ [Reversible Effect Ledger](#effect-ledger) | Every tracked mutation is recorded and rollback-able — undo file writes, stop spawned processes, recover from interruption. |
-| 🛡️ [Self-Healing Harness](#self-healing-harness) | SHA256-verified atomic edits with checkpointing — partial writes are impossible, failed edits roll back. |
+| 🛡️ [Self-Healing Harness](#self-healing-harness) | SHA256-verified checkpointed edits — failed verification rolls back from pre-edit snapshots. |
 | 🧠 [HarmonyHub](#harmonyhub) | Local-first sovereign memory — the memory index stays on your machine. |
 | 🌐 [Translation Hub](#translation-hub) | Multi-model consensus EN↔ZH translation that guards against single-model errors — built for technical standards docs. |
 | 🌸 [CareBloom](#carebloom) | Self-improving tool usage, learned locally with zero extra API calls *(default off)*. |
@@ -39,7 +46,7 @@ Harmony ships capabilities no other AI coding collaborator offers today. Each on
 ┌─────────────────────────────────────────────────┐
 │  VS Code / Cursor                               │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │ @harmony │  │ Sidebar  │  │ 196+ Tools   │  │
+│  │ @harmony │  │ Sidebar  │  │ 200+ Tools   │  │
 │  │   Chat   │  │ Controls │  │ (primitives, │  │
 │  │Participant│  │ & Board  │  │ swarm, git,  │  │
 │  │          │  │          │  │ browser, ...) │  │
@@ -69,7 +76,7 @@ Harmony ships capabilities no other AI coding collaborator offers today. Each on
 └─────────────────────────────────────────────────┘
 ```
 
-The chat interface, sidebar, 196+ tools and 65 commands run inside VS Code. The 15 swarm primitives (convergence, memory, reasoning, planning, skills) form the cognitive foundation. AI model calls are routed through Harmony's own provider layer to external APIs via your API keys.
+The chat interface, sidebar, 200+ tools and 65 commands run inside VS Code. The 15 swarm primitives (convergence, memory, reasoning, planning, skills) form the cognitive foundation. AI model calls are routed through Harmony's own provider layer to external APIs via your API keys.
 
 ### Provider access — what makes Harmony different
 
@@ -98,6 +105,21 @@ Each AI provider supports up to **4 API key slots**, allowing different keys for
 The Harmony sidebar displays `[C]` `[A]` `[E]` `[V]` slot pills next to each provider. A green pill means a key is configured for that slot; a gray pill means no key is set. Click any pill to set or change the key for that slot.
 
 **Legacy key migration:** If you previously configured a single API key for a provider, Harmony automatically migrates it to slot 0 (Chat) on first launch. No manual reconfiguration is needed — your existing keys continue to work.
+
+## What's New in v0.4.17
+
+*v0.4.17 ships Fleet Mode + 3-Seat Collaborator Architecture and a pin-capable Quick-Jump Hub, brings full parity across Harmony Chat (VS Code Webview) and our zero-account Sovereign Desktop Studio (`:8789`) with Prism Sanctuary, completes the Gemini 4 lineup (`gemini-4-argon`, `gemini-4-carbon`, `gemini-4-neon`, `gemini-4-hydrogen`) with Vertex AI local credential support and 3-layer VPN/buffered-tool stream resilience, adds Renderer Memory Shield v3, and closes 7 cross-primitive verification and memory loops.*
+
+- **🚀 Fleet Mode, Collaborator Roles & Quick-Jump Hub (`harmony.orchestrateMode.fleetEnabled`)** — coordinates **Seat 1: Conductor** (planning, synthesis, Ask checkpoints, and sole write authority), **Seat 2: Orchestrator** (read-only repo impact packs), and **Seat 3: Collaborator Fleet** (`scout`, `researcher`, `planner`, `implementer`, `verifier`, `critic`, `cost_sentinel`, `hard_reasoner`) routed automatically through your Context Shield offload target, with optional isolated `git worktree` sandboxes and independent Critic + Verifier review. Adds a pin-capable **Quick-Jump Hub** (`🌟 Frontier Model`, `⚡ Orchestrate & Fleet`, `🛡️ Context Shield`, `📥 Whisper Box`, `🧭 Routing & Keys`, `📋 Plan & Usage`, `🧠 Sovereign Hub`).
+- **✨ Harmony Chat (VS Code Webview) & Sovereign Desktop Studio (`:8789`) Full Parity** — runs all **201 registered tools** inside VS Code (docked Secondary Side Bar or split tab) or in our zero-account native Tauri 2 desktop shell (`harmony-native-control --studio` / `harmony desktop` / MCP `/api/mcp`). Includes interactive inline Flow-State `harmony_ask_question` cards (`explore` / `decide`, `thought`, multi-select, `readyCheckbox`, `.harmony/ask-answers/` receipts), shared session continuity (`/save`, `/resume`, `/clear`, automatic `_autosave` recovery), **🔮 Prism Sanctuary** (`prismSanctuary.ts`) with strict per-Prism context isolation, per-render cryptographic nonce CSP, non-clipping responsive toolbars, and full Daylight / Emerald / Nebula / Calm Slate / Auto (VS Code) theming.
+- **🌟 Complete Gemini 4 Lineup (`gemini-4-argon`, `gemini-4-carbon`, `gemini-4-neon`, `gemini-4-hydrogen`) & Vertex AI Local Credential Store** — adds `gemini-4-neon` alongside `gemini-4-carbon`, `gemini-4-argon`, and `gemini-4-hydrogen` across all pickers, Vision selectors, and native `GenerateContent` routes (`1M` context window limit, `64K` per-step foreground output cap, automatic `MINIMAL → LOW` thinking clamp; provider limits and availability remain governed by upstream documentation). Supports Service Account JSON credentials in an OS-restricted local credential store (`vertexAuth.ts`), explicit opt-in gating (`allowDedicatedVmEndpoints`, default off) before addressing dedicated-VM endpoints, OS TCP `SO_KEEPALIVE` (`15s` wire probes inside VPN tunnels), a `300s` (`5m`) buffered-`functionCall` synthesis floor with retry escalation, and a zero-mutation `25s` host UI progress pulse (`vpnResilientTransport.ts`, `geminiNativeStreaming.ts`).
+- **🛡️ Renderer Memory Shield v3 (`rendererShield.ts`)** — reduces VS Code Renderer V8 heap pressure on long sessions via compact `<512 B` `ChatResult.metadata` tool records, Extension-Host-only payload retention for read-only/Fleet tools (`.harmony/fleet/`), bounded ring-buffer OutputChannels, `~25 fps` (`40 ms`) SSE token coalescing, reversible archival of completed todos to `.harmony/todos-archive.json` (`todoStore.ts`), and an `80`-message live Studio DOM cap.
+- **Dual-Lens Cognitive Superposition, DeepSeek Native Search & Declarative Governance Primitives** — adds `harmony_dual_lens` / `harmony_audhd_lens` (inspired by neurodivergent dual-focus cognition, pairing Chaos Engine 1 Omnidirectional Field Radar with Chaos Engine 2 Forensic Deterministic Crystal), wires DeepSeek's first-party Web Search & Fetch API (`/v1/tools/search` and `/v1/tools/fetch`) into `harmony_web_search` and `harmony_fetch_url` for cross-jurisdiction (`CN` + `US`) corroboration and Markdown extraction, and adds workspace-adaptable declarative governance primitives (`harmony_rule_matrix_eval`, `harmony_architecture_risk_audit`, and `harmony_policy_gate_check`).
+- **7 Cross-Primitive Verification & Memory Loops** — Proof-Carrying Patch Attestations (`citationRecord.ts` + `decisionLog.ts`), Counterfactual Shadow Worktrees & Empirical `Kairos` Arbitration (`temporalBranch.ts` + `convergenceArbiter.ts`), Closed-Loop Epistemic Calibration (`uncertaintyFabric.ts`), Witness-Gated `Rigor` Verification (`thoughtGraph.ts`), Holographic Working Memory Stubs & CJK-Aware Token Calibration (`inTurnCompaction.ts` + `costTracker.ts`), Autonomous Antibody Crystallizer (`careBloom.ts`), and Two-Stage Consultant / Reverse-Whisper (`whisperInbox.ts`).
+- **🛡️ Context Shield & Explicit User Billing Responsibility (`harmony.costShield.mode`, `harmony.costShield.workerRoute`)** — locks system-prompt and tool-schema prefixes byte-for-byte across multi-hop agent turns, deduplicates superseded same-file reads in place, and adapts thinking effort on mechanical hops. *Important Billing Notice: You pay your API provider(s) directly, not Harmony. In-app token counts and `~est.` figures are unofficial local approximations only, are not invoices, and cannot reflect live provider rate updates, long-context/tier pricing, thinking tokens, retries/fallbacks, temporary pre-authorization cache holds, or taxes. Context Shield optimizes prompt context and routing — it is **not** a spend cap. Always check your official provider billing dashboard (Google Cloud Billing / AI Studio, DeepSeek, Anthropic, OpenAI, etc.) as the sole source of truth and configure hard budget alerts there.*
+- **17-Provider Health Tie-Break Fix** — `rankProviders` (`providerHealth.ts`) now covers all 17 configured provider IDs in `prefOrder` so unlisted providers never sort at index `-1` ahead of `deepseek` on fresh installs.
+
+Full detail: [release-notes-v0.4.17.md](release-notes-v0.4.17.md)
 
 ## What's New in v0.4.16
 
@@ -156,6 +178,8 @@ A new **premium** cost tier sits above heavy for the most expensive models, gate
 |:--|:--|:--|:--|:--|:--|
 | OpenAI | `gpt-6-astra` | `gpt-5.6-sol` | `gpt-5.6-terra` | `gpt-5.6-luna` | `gpt-5.6-sol` |
 | Claude | `claude-fable-5-1` | `claude-opus-5` | `claude-sonnet-5` | `claude-haiku-4-5-20251001` | `claude-opus-5` |
+
+> *Note on model IDs:* Harmony's default registry includes both generally available (GA) and forward/preview/custom-gateway model identifiers (such as `gemini-4-argon`, `deepseek-flash`, `gpt-6-astra`, and `claude-fable-5-1`). Any tier or provider model ID can be overridden in VS Code settings (`harmony.<provider>.<tier>Model`) or `.env` to match the exact model slugs enabled on your provider account or OpenAI-compatible gateway.
 
 Claude requests also gained per-model thinking/temperature handling (Fable omits the thinking param; the 5-family uses adaptive; Haiku uses budget tokens; temperature is omitted entirely, matching Moonshot/Kimi).
 
@@ -824,6 +848,40 @@ By default, Harmony detects when a model describes using tools but forgets to ac
 
 Harmony includes several unique capabilities beyond the core workflow. These features are what make Harmony more than just another AI chat extension.
 
+<a id="fleet-mode"></a>
+
+### 🚀 Fleet Mode — 3-Seat Conductor, Orchestrator & Collaborator Architecture
+
+Fleet Mode (`harmony.orchestrateMode.fleetEnabled`) separates frontier synthesis from high-volume codebase exploration across three explicit seats:
+
+- **Seat 1 — Conductor (Primary Chat):** Holds architecture, synthesis, `harmony_ask_question` human checkpoints, and sole file/terminal write authority.
+- **Seat 2 — Orchestrator (`harmony_orchestrate_codebase`):** Builds long-context read-only repository impact packs before cross-file changes.
+- **Seat 3 — Collaborator Fleet (`harmony_parallel` / `harmony_spawn_worker`):** Dispatches parallel read-only specialists (`scout`, `researcher`, `planner`, `implementer`, `verifier`, `critic`, `cost_sentinel`, `hard_reasoner`) through your configured Context Shield offload target, inlining workspace files locally at zero Conductor output-token cost and storing full worker outputs under `.harmony/fleet/`.
+
+<a id="sovereign-studio"></a>
+
+### 🖥️ Sovereign Desktop Studio (`:8789`) & Harmony Chat
+
+Run all **201 registered Harmony tools** either docked inside VS Code (Harmony Chat webview / full Studio editor tab) or in a dedicated native Tauri 2 desktop window (`harmony-native-control --studio`). Unlike browser `--app` wrappers, the native Studio shell enforces loopback origin pinning with zero consumer browser profile sync, zero Microsoft/Google account auto-login, and zero telemetry, while sharing live session continuity (`/save`, `/resume`, `_autosave`) and inline Flow-State `harmony_ask_question` cards.
+
+<a id="prism-sanctuary"></a>
+
+### 🔮 Prism Sanctuary — Context-Isolated Specialists
+
+Prism Sanctuary (`prismSanctuary.ts`) lets you create, import, and switch reusable specialist personas (`Prisms`) inside Harmony Chat and Sovereign Desktop Studio. Each Prism maintains strict context isolation under `.harmony/sanctuary/` so domain-specific instructions and reference notes never bleed into unrelated workspace turns.
+
+<a id="context-shield"></a>
+
+### 🛡️ Context Shield — Prefix-Locked Prompt Hygiene & Offload Routing
+
+Context Shield (`harmony.costShield.mode`, `harmony.costShield.workerRoute`) keeps system-prompt and 201-tool JSON schemas byte-for-byte deterministic across multi-hop turns to maximize upstream KV-cache reuse, deduplicates superseded same-file reads in place, and routes read-only Collaborator sweeps to your chosen worker route. *(Context Shield optimizes local prompt construction and routing only — it is never a billing cap or spend guarantee; always configure hard budget alerts in your provider's official billing console.)*
+
+<a id="dual-lens"></a>
+
+### 🌗 Dual-Lens Cognitive Superposition (`harmony_dual_lens` / `harmony_audhd_lens`)
+
+Inspired by neurodivergent dual-focus cognition, Dual-Lens Superposition pairs **Chaos Engine 1 (Omnidirectional Field Radar)** — scanning cross-domain edge seams and real-world floor signals — with **Chaos Engine 2 (Forensic Deterministic Crystal)** — locking every discovered seam into testable structural invariants before code is written.
+
 <a id="concert-hall"></a>
 
 ### 🎭 Concert Hall — Persistent Collaboration Rooms
@@ -912,9 +970,8 @@ Full browser automation toolkit for testing, design review, and performance audi
 
 Harmony's file editing tools use SHA256-verified atomic edits with checkpointing and rollback. Before every edit, a checkpoint is written. After every edit, the change is verified. If verification fails, the harness rolls back to the last known-good state.
 
-- **SHA256 verification** — every edit is cryptographically verified
-- **Atomic writes** — partial writes are impossible; the file is either fully written or unchanged
-- **Checkpointing** — pre-edit snapshots enable instant rollback
+- **SHA256 verification** — every edit is cryptographically verified after write
+- **Checkpointed rollback** — pre-edit snapshots enable rollback if post-write verification fails or a crash interrupts work
 - **Conflict detection** — stale/conflicting edits are detected and refused
 
 See [Optional: Python & Self-Healing Harness](#optional-python--self-healing-harness) for setup. A TypeScript fallback works without Python.
@@ -941,7 +998,9 @@ Harmony speaks Chinese. Full i18n with `locales/zh.json`, `package.nls.zh-cn.jso
 
 **Privacy:** Harmony stores API keys in VS Code Secret Storage. Chat history, continuity handoffs, and tool-call metadata are stored locally under `.harmony/`. Harmony sends no telemetry, analytics, or usage data to any third party. Provider API calls are subject to each provider's respective privacy policy.
 
-**Bad Actors:** Harmony is a source-available developer tool (Hippocratic License 3.0). It is not designed to circumvent provider rate limits, terms of service, or local security boundaries. If you use Harmony in ways that violate a provider's acceptable use policy, you assume full responsibility.
+**Bad Actors & Ethical-Source Terms:** Harmony is an ethical-source developer tool licensed under the [Hippocratic License 3.0](LICENSE). It is not designed to circumvent provider rate limits, terms of service, or local security boundaries. You are solely responsible for complying with all applicable laws and third-party provider terms; if you use Harmony in ways that violate a provider's acceptable-use policy or the Hippocratic License, you assume full responsibility.
+
+**Third-Party Trademarks & Non-Affiliation:** Google, Gemini, and Vertex AI are trademarks of Google LLC; Claude is a trademark of Anthropic, PBC; OpenAI is a trademark of OpenAI, Inc.; Microsoft, VS Code, and GitHub Copilot are trademarks of Microsoft Corporation; all other product and company names are trademarks of their respective holders. Harmony is an independent project by Eternal Harmony LLC and is not affiliated with, endorsed by, or sponsored by any third-party provider.
 
 ## Package Artifacts
 

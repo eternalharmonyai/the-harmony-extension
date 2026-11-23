@@ -1,7 +1,24 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
-import { recordUsage, recordFallbackEvent, evaluateProviderPolicy, recordProviderPolicyBlock } from './costTracker';
+import { recordUsage, recordFallbackEvent, recordRouteGuardEvent, evaluateProviderPolicy, recordProviderPolicyBlock } from './costTracker';
 import { recordHealth, rankProviders, isHealthy } from './providerHealth';
+import { parseSseLinesIncremental } from './sovereignChatStream';
+import { vpnResilientFetch } from './vpnResilientTransport';
+import {
+    GEMINI_VERTEX_EXPRESS_BASE_URL,
+    VERTEX_AUTH_SENTINEL,
+    VertexAuthConfigurationError,
+    VertexDedicatedVmBlockedError,
+    ResolvedVertexAuth,
+    resolveVertexAuthAsync,
+    buildVertexGenerateContentEndpoint,
+    buildVertexOpenAiCompatEndpoint,
+    assertVertexServerlessEndpointUrl,
+    enrichVertexHttpError,
+    hasVertexAmbientCredentialsSync,
+    invalidateVertexTokenCache,
+    redactUrlCredentials,
+} from './vertexAuth';
 
 /** Per-model maximum output tokens. Used to clamp user-configured token budget. */
 const MODEL_MAX_TOKENS: Record<string, number> = {
@@ -31,6 +48,9 @@ const MODEL_MAX_TOKENS: Record<string, number> = {
     'gemini-2.0-flash': 8192,
     'gemini-3.7-flash': 65536,
     'gemini-3.8-flash': 65536,
+    'gemini-4-hydrogen': 65536,
+    'gemini-4-neon': 65536,
+    'gemini-4-carbon': 65536,
     'gemini-4-argon': 65536,
     'qwen-max': 8192,
     'qwen-plus': 8192,
@@ -61,6 +81,18 @@ function computeTimeout(maxTokens: number): number {
     return Math.min(ceiling, Math.max(floor, est));
 }
 
+/** Read VS Code's explicit HTTP proxy configuration so resilient fetches honor user proxy settings. */
+export function getVscodeHttpProxyOptions(): { explicitProxySetting: string; proxySupport?: string } {
+    try {
+        const httpCfg = vscode.workspace.getConfiguration('http');
+        const explicitProxySetting = typeof httpCfg?.get === 'function' ? (httpCfg.get<string>('proxy') ?? '').trim() : '';
+        const proxySupport = typeof httpCfg?.get === 'function' ? httpCfg.get<string>('proxySupport') : undefined;
+        return { explicitProxySetting, proxySupport };
+    } catch {
+        return { explicitProxySetting: '' };
+    }
+}
+
 /**
  * Sanitize an HTTP error response body for display.
  * Returns a concise, human-readable message even when the server returns
@@ -73,7 +105,7 @@ function sanitizeHttpError(status: number, body: string, label: string): string 
         const title = titleMatch ? titleMatch[0].replace(/<\/?title>/gi, '').trim() : '';
         return `${label} HTTP ${status}: ${title || 'Server returned an HTML error page (likely a gateway/proxy issue). Retry in a moment.'}`;
     }
-    return `${label} HTTP ${status}: ${trimmed.slice(0, 500)}`;
+    return `${label} HTTP ${status}: ${redactUrlCredentials(trimmed).slice(0, 500)}`;
 }
 
 /** Fallback models for OpenRouter coding tier (free models, in order of preference). */
@@ -109,9 +141,10 @@ export type ProviderId = 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gem
 export type Tier = 'light' | 'mid' | 'heavy' | 'coding' | 'premium';
 export type CollabModelPreset = 'auto' | 'economy' | 'balanced' | 'power' | 'custom';
 export type CollabDirectProvider = ProviderId | 'auto';
-export type ProviderEndpointProfile = 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'asia' | 'europe' | 'custom';
+export type ProviderEndpointProfile = 'default' | 'international' | 'mainland' | 'us' | 'beijing' | 'asia' | 'europe' | 'ai-studio' | 'vertex' | 'custom';
 
 const DEEPSEEK_DEFAULT_BASE_URL = 'https://api.deepseek.com/v1';
+const GEMINI_AISTUDIO_OPENAI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai';
 const MOONSHOT_DEFAULT_BASE_URL = 'https://api.moonshot.ai/v1';
 // KimiCode membership keys (sk-kimi-...) authenticate ONLY against the Kimi Code
 // coding endpoint — NOT the Moonshot open-platform endpoint. Per official docs:
@@ -148,6 +181,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, ProviderTierMap> = {
         light: 'deepseek-flash',
         mid: 'deepseek-flash',
         heavy: 'deepseek-v4-pro',
+        premium: 'deepseek-v4-pro',
         coding: 'deepseek-flash'
     },
     alibaba: {
@@ -344,9 +378,237 @@ function configuredEndpointProfile(key: string, fallback: ProviderEndpointProfil
     return raw && allowed.includes(raw as ProviderEndpointProfile) ? raw as ProviderEndpointProfile : fallback;
 }
 
-export type EndpointProviderId = Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'stepfun' | 'doubao' | 'byteplus'>;
+export type EndpointProviderId = Extract<ProviderId, 'deepseek' | 'alibaba' | 'moonshot' | 'kimiCode' | 'gemini' | 'tencent' | 'zhipu' | 'zhipu-coding' | 'stepfun' | 'doubao' | 'byteplus'>;
+
+export function isGeminiVertexProfile(): boolean {
+    return configuredEndpointProfile('gemini.endpointProfile', 'ai-studio', ['ai-studio', 'vertex', 'custom']) === 'vertex';
+}
+
+export function resolveGeminiGenerateContentRequest(
+    model: string,
+    apiKey: string,
+    method: 'generateContent' | 'streamGenerateContent' = 'generateContent',
+    sse = false
+): { url: string; headers: Record<string, string>; backend: ProviderEndpointProfile } {
+    const cfg = vscode.workspace.getConfiguration('harmony');
+    const profile = configuredEndpointProfile('gemini.endpointProfile', 'ai-studio', ['ai-studio', 'vertex', 'custom']);
+    const modelId = model.trim().replace(/^models\//, '');
+    const query = sse ? '?alt=sse' : '';
+    const rawTrimmed = apiKey.trim();
+    const trimmedKey = rawTrimmed === VERTEX_AUTH_SENTINEL ? '' : rawTrimmed;
+    const envBearer = (
+        process.env.HARMONY_VERTEX_ACCESS_TOKEN ||
+        process.env.VERTEX_ACCESS_TOKEN ||
+        process.env.GOOGLE_OAUTH_ACCESS_TOKEN ||
+        process.env.CLOUDSDK_AUTH_ACCESS_TOKEN ||
+        ''
+    ).trim();
+    const isBearerKey = /^ya29\./.test(trimmedKey);
+
+    if (profile === 'vertex') {
+        const configuredProject = (cfg.get<string>('gemini.vertexProjectId') ?? '').trim();
+        const envProject = (
+            process.env.HARMONY_VERTEX_PROJECT_ID ||
+            process.env.VERTEX_PROJECT_ID ||
+            process.env.GOOGLE_CLOUD_PROJECT ||
+            process.env.GCLOUD_PROJECT ||
+            process.env.CLOUDSDK_CORE_PROJECT ||
+            ''
+        ).trim();
+        const projectId = configuredProject || envProject;
+        const location = (cfg.get<string>('gemini.vertexLocation') ?? 'global').trim() || 'global';
+        const isExplicitExpressKey = /^AQ\./.test(trimmedKey) && !configuredProject;
+        const useVertexBearer = isBearerKey || (!!envBearer && !isExplicitExpressKey);
+        if (useVertexBearer) {
+            const bearerToken = isBearerKey ? trimmedKey : envBearer;
+            const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+            const base = projectId
+                ? `https://${host}/v1beta1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(modelId)}`
+                : `${GEMINI_VERTEX_EXPRESS_BASE_URL}/models/${encodeURIComponent(modelId)}`;
+            return {
+                url: `${base}:${method}${query}`,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${bearerToken}`
+                },
+                backend: 'vertex'
+            };
+        }
+        const envVertexKey = (
+            process.env.HARMONY_VERTEX_API_KEY ||
+            process.env.VERTEX_API_KEY ||
+            process.env.GOOGLE_CLOUD_API_KEY ||
+            ''
+        ).trim();
+        const expressKey = isExplicitExpressKey ? trimmedKey : (envVertexKey || trimmedKey);
+        const expressQuery = sse
+            ? `?alt=sse&key=${encodeURIComponent(expressKey)}`
+            : `?key=${encodeURIComponent(expressKey)}`;
+        return {
+            url: `${GEMINI_VERTEX_EXPRESS_BASE_URL}/models/${encodeURIComponent(modelId)}:${method}${expressQuery}`,
+            headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': expressKey
+            },
+            backend: 'vertex'
+        };
+    }
+
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(isBearerKey
+            ? { 'Authorization': `Bearer ${trimmedKey}` }
+            : { 'x-goog-api-key': trimmedKey })
+    };
+
+    if (profile === 'custom') {
+        const rawCustom = (cfg.get<string>('gemini.baseUrl') ?? '').trim().replace(/\/$/, '').replace(/\/openai$/, '');
+        const baseRoot = rawCustom || 'https://generativelanguage.googleapis.com/v1beta';
+        return {
+            url: `${baseRoot}/models/${encodeURIComponent(modelId)}:${method}${query}`,
+            headers,
+            backend: 'custom'
+        };
+    }
+
+    return {
+        url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:${method}${query}`,
+        headers,
+        backend: 'ai-studio'
+    };
+}
+
+export async function resolveGeminiGenerateContentRequestAsync(
+    model: string,
+    apiKey: string,
+    method: 'generateContent' | 'streamGenerateContent' = 'generateContent',
+    sse = false,
+    options?: { bypassVertexCache?: boolean }
+): Promise<{ url: string; headers: Record<string, string>; backend: ProviderEndpointProfile; vertexAuth?: ResolvedVertexAuth }> {
+    const profile = configuredEndpointProfile('gemini.endpointProfile', 'ai-studio', ['ai-studio', 'vertex', 'custom']);
+    if (profile !== 'vertex') {
+        return resolveGeminiGenerateContentRequest(model, apiKey, method, sse);
+    }
+    const cfg = vscode.workspace.getConfiguration('harmony');
+    const allowDedicatedVmEndpoints = cfg.get<boolean>('gemini.allowDedicatedVmEndpoints') === true;
+    const modelId = model.trim().replace(/^models\//, '');
+    const dotenv = await readWorkspaceDotenv();
+    const proxyOpts = getVscodeHttpProxyOptions();
+    const vertexAuth = await resolveVertexAuthAsync({
+        apiKey,
+        configuredProjectId: (cfg.get<string>('gemini.vertexProjectId') ?? '').trim(),
+        configuredLocation: (cfg.get<string>('gemini.vertexLocation') ?? 'global').trim() || 'global',
+        dotenv,
+        bypassCache: options?.bypassVertexCache,
+        ...proxyOpts,
+        onGuardEvent: (reason) => {
+            try { recordRouteGuardEvent('gemini', 'native', modelId, reason); } catch { /* best-effort */ }
+        },
+    });
+    try {
+        const built = buildVertexGenerateContentEndpoint(modelId, method, sse, vertexAuth, { allowDedicatedVmEndpoints });
+        return {
+            url: built.url,
+            headers: built.headers,
+            backend: 'vertex',
+            vertexAuth,
+        };
+    } catch (err: any) {
+        if (err instanceof VertexAuthConfigurationError || err instanceof VertexDedicatedVmBlockedError) {
+            recordRouteGuardEvent('gemini', 'coding', modelId, err.message);
+        }
+        throw err;
+    }
+}
+
+export async function resolveGeminiOpenAiCompatRequestAsync(
+    model: string,
+    apiKey: string,
+    options?: { bypassVertexCache?: boolean }
+): Promise<{ baseUrl: string; bearerToken: string; model: string; backend: ProviderEndpointProfile } | undefined> {
+    const profile = configuredEndpointProfile('gemini.endpointProfile', 'ai-studio', ['ai-studio', 'vertex', 'custom']);
+    if (profile !== 'vertex') {
+        const trimmed = apiKey.trim() === VERTEX_AUTH_SENTINEL ? '' : apiKey.trim();
+        if (!trimmed) return undefined;
+        const baseUrl = providerBaseUrlForCall('gemini');
+        const allowDedicatedVm = vscode.workspace.getConfiguration('harmony').get<boolean>('gemini.allowDedicatedVmEndpoints') === true;
+        assertVertexServerlessEndpointUrl(baseUrl, allowDedicatedVm);
+        return {
+            baseUrl,
+            bearerToken: trimmed,
+            model,
+            backend: profile,
+        };
+    }
+    const cfg = vscode.workspace.getConfiguration('harmony');
+    const allowDedicatedVmEndpoints = cfg.get<boolean>('gemini.allowDedicatedVmEndpoints') === true;
+    const dotenv = await readWorkspaceDotenv();
+    const proxyOpts = getVscodeHttpProxyOptions();
+    const vertexAuth = await resolveVertexAuthAsync({
+        apiKey,
+        configuredProjectId: (cfg.get<string>('gemini.vertexProjectId') ?? '').trim(),
+        configuredLocation: (cfg.get<string>('gemini.vertexLocation') ?? 'global').trim() || 'global',
+        dotenv,
+        bypassCache: options?.bypassVertexCache,
+        ...proxyOpts,
+        onGuardEvent: (reason) => {
+            try { recordRouteGuardEvent('gemini', 'coding', model, reason); } catch { /* best-effort */ }
+        },
+    });
+    const compat = buildVertexOpenAiCompatEndpoint(model, vertexAuth, { allowDedicatedVmEndpoints });
+    if (!compat) return undefined;
+    return {
+        ...compat,
+        backend: 'vertex',
+    };
+}
 
 export function providerEndpointInfo(provider: EndpointProviderId): ProviderEndpointInfo {
+    if (provider === 'gemini') {
+        const profile = configuredEndpointProfile('gemini.endpointProfile', 'ai-studio', ['ai-studio', 'vertex', 'custom']);
+        const custom = explicitConfigString('gemini.baseUrl');
+        const cfg = vscode.workspace.getConfiguration('harmony');
+        const projectId = (cfg.get<string>('gemini.vertexProjectId') ?? '').trim();
+        const location = (cfg.get<string>('gemini.vertexLocation') ?? 'global').trim() || 'global';
+        if (profile === 'vertex') {
+            const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+            const baseUrl = projectId
+                ? `https://${host}/v1beta1/projects/${projectId}/locations/${location}/endpoints/openapi`
+                : GEMINI_VERTEX_EXPRESS_BASE_URL;
+            return {
+                provider,
+                profile,
+                label: projectId ? `Google Cloud Vertex AI (${location})` : 'Google Cloud Vertex AI (Express / API Key)',
+                baseUrl,
+                baseUrlSetting: 'harmony.gemini.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: projectId
+                    ? `Uses Google Cloud Vertex AI project "${projectId}" (${location}) — billed to your GCP account/credits with enterprise quotas.`
+                    : 'Uses Google Cloud Vertex AI (aiplatform.googleapis.com) — billed to GCP invoice/credits instead of AI Studio prepay.'
+            };
+        }
+        if (profile === 'custom') {
+            const baseUrl = custom.value || GEMINI_AISTUDIO_OPENAI_BASE_URL;
+            return {
+                provider,
+                profile,
+                label: 'Gemini custom endpoint',
+                baseUrl: baseUrl.replace(/\/$/, ''),
+                baseUrlSetting: 'harmony.gemini.baseUrl',
+                needsCustomBaseUrl: false,
+                detail: 'Uses harmony.gemini.baseUrl.'
+            };
+        }
+        return {
+            provider,
+            profile: 'ai-studio',
+            label: 'Google AI Studio (default)',
+            baseUrl: GEMINI_AISTUDIO_OPENAI_BASE_URL,
+            baseUrlSetting: 'harmony.gemini.baseUrl',
+            needsCustomBaseUrl: false,
+            detail: 'Uses Google AI Studio / Generative Language API (generativelanguage.googleapis.com).'
+        };
+    }
     if (provider === 'deepseek') {
         const profile = configuredEndpointProfile('deepseek.endpointProfile', 'default', ['default', 'custom']);
         const custom = explicitConfigString('deepseekBaseUrl');
@@ -735,7 +997,7 @@ const PROVIDER_ENV_NAMES: Record<ProviderId, string[]> = {
     alibaba: ['HARMONY_ALIBABA_API_KEY', 'ALIBABA_API_KEY', 'DASHSCOPE_API_KEY', 'ALIBABA_AGENT_API_KEY', 'ALIBABA_EXTERNAL_API_KEY', 'ALIBABA_VISION_API_KEY'],
     moonshot: ['HARMONY_MOONSHOT_API_KEY', 'MOONSHOT_API_KEY', 'MOONSHOT_AGENT_API_KEY', 'MOONSHOT_EXTERNAL_API_KEY'],
     kimiCode: ['HARMONY_KIMICODE_API_KEY', 'KIMICODE_API_KEY', 'KIMICODE_AGENT_API_KEY', 'KIMICODE_EXTERNAL_API_KEY'],
-    gemini: ['HARMONY_GEMINI_API_KEY', 'GEMINI_API_KEY'],
+    gemini: ['HARMONY_GEMINI_API_KEY', 'GEMINI_API_KEY', 'HARMONY_VERTEX_API_KEY', 'VERTEX_API_KEY', 'GOOGLE_API_KEY'],
     openrouter: ['HARMONY_OPENROUTER_API_KEY', 'OPENROUTER_API_KEY'],
     openai: ['HARMONY_OPENAI_API_KEY', 'OPENAI_API_KEY', 'openai_api_key'],
     claude: ['HARMONY_CLAUDE_API_KEY', 'CLAUDE_API_KEY', 'ANTHROPIC_API_KEY'],
@@ -848,7 +1110,16 @@ export async function resolveProviderKeyDetailed(
     const legacy = (await secrets.get(SECRET_KEY[provider]))?.trim();
     if (legacy) return { key: legacy, source: 'legacy' };
     // 4. process.env / workspace .env
-    return providerKeyFromEnv(provider);
+    const fromEnv = await providerKeyFromEnv(provider);
+    if (fromEnv.key) return fromEnv;
+    // 5. Vertex AI ambient GCP credentials (ADC / Service Account / OAuth token / gcloud)
+    if (provider === 'gemini' && isGeminiVertexProfile()) {
+        const dotenv = await readWorkspaceDotenv().catch(() => new Map<string, string>());
+        if (hasVertexAmbientCredentialsSync({ dotenv })) {
+            return { key: VERTEX_AUTH_SENTINEL, source: 'process-env' };
+        }
+    }
+    return { key: '', source: 'none' };
 }
 
 export async function resolveProviderKey(
@@ -913,6 +1184,14 @@ export async function hasKey(secrets: vscode.SecretStorage, provider: ProviderId
         const fromEnv = await providerKeyFromEnv(provider);
         if (fromEnv.key) { keyCache.set(provider, { value: true, ts: Date.now() }); return true; }
     }
+    // Vertex AI ambient GCP auth (ADC / Service Account / OAuth env / gcloud)
+    if (provider === 'gemini' && isGeminiVertexProfile()) {
+        const dotenv = await readWorkspaceDotenv().catch(() => new Map<string, string>());
+        if (hasVertexAmbientCredentialsSync({ dotenv })) {
+            keyCache.set(provider, { value: true, ts: Date.now() });
+            return true;
+        }
+    }
     // Tencent dual auth: also check native SecretId+SecretKey
     if (provider === 'tencent') {
         const sid = await secrets.get('harmony.tencent.secretId');
@@ -929,8 +1208,10 @@ export async function hasKey(secrets: vscode.SecretStorage, provider: ProviderId
 export function invalidateKeyCache(provider?: ProviderId): void {
     if (provider) {
         keyCache.delete(provider);
+        if (provider === 'gemini') invalidateVertexTokenCache();
     } else {
         keyCache.clear();
+        invalidateVertexTokenCache();
     }
     // A re-saved key often means an edited .env too — drop the parsed copy.
     dotenvCache.clear();
@@ -946,12 +1227,18 @@ export interface ConsultRequest {
     provider: ProviderId;
     tier: Tier;
     question: string;
+    /** Optional explicit model ID override (e.g. 'gemini-4-carbon', 'gemini-4-hydrogen'). */
+    modelOverride?: string;
     /** Optional system message / preamble. */
     system?: string;
     /** Hard cap on output tokens. */
     maxTokens?: number;
     /** Multi-key slot index: 0=Chat (default), 1=Agents, 2=External, 3=Vision. */
     slotIndex?: number;
+    /** Optional live streaming callback invoked as visible text deltas arrive. */
+    onDelta?: (deltaText: string) => void;
+    /** Optional callback invoked if a failed partial stream resets before a fallback retry. */
+    onReset?: () => void;
 }
 
 export interface ConsultResponse {
@@ -974,7 +1261,7 @@ export async function consult(
     token: vscode.CancellationToken
 ): Promise<ConsultResponse> {
     const tier = req.tier;
-    const model = modelFor(req.provider, tier);
+    const model = req.modelOverride?.trim() || modelFor(req.provider, tier);
     const policy = evaluateProviderPolicy(req.provider, tier, model, { includeModelFilters: req.provider !== 'openrouter' });
     if (!policy.allowed) {
         const reason = policy.reason ?? 'Provider policy blocked this call.';
@@ -1022,7 +1309,7 @@ export async function consult(
             if (!tkSid2 || !tkSkey2) throw new Error(`No Tencent credentials for fallback.`);
         }
         const pKey = rawKey!; // Narrowed by the guards above
-        const pModel: string = fallbackModel ?? modelFor(provider, tier);
+        const pModel: string = fallbackModel ?? (provider === req.provider && req.modelOverride?.trim() ? req.modelOverride.trim() : modelFor(provider, tier));
         const pPolicy = evaluateProviderPolicy(provider, tier, pModel, { includeModelFilters: provider !== 'openrouter' });
         if (!pPolicy.allowed) {
             const reason = pPolicy.reason ?? 'Provider policy blocked this call.';
@@ -1032,25 +1319,28 @@ export async function consult(
         const t0 = Date.now();
         switch (provider) {
             case 'openai':
-                return await openaiCompat(pKey, 'https://api.openai.com/v1', pModel, system, req.question, maxTokens, token, 'openai');
+                return await openaiCompat(pKey, 'https://api.openai.com/v1', pModel, system, req.question, maxTokens, token, 'openai', undefined, req.onDelta);
             case 'deepseek': {
                 const baseUrl = providerBaseUrlForCall('deepseek');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'deepseek');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'deepseek', undefined, req.onDelta);
             }
             case 'claude':
-                return await anthropicCall(pKey, pModel, system, req.question, maxTokens, token);
+                return await anthropicCall(pKey, pModel, system, req.question, maxTokens, token, req.onDelta);
             case 'gemini':
-                return await geminiCall(pKey, pModel, system, req.question, maxTokens, token);
+                return await geminiCall(pKey, pModel, system, req.question, maxTokens, token, req.onDelta);
             case 'openrouter': {
                 const cfg2 = vscode.workspace.getConfiguration('harmony');
                 const baseUrl = (cfg2.get<string>('openrouter.baseUrl') ?? 'https://openrouter.ai/api/v1').replace(/\/$/, '');
                 const fallbacks = tier === 'coding' ? CODING_FALLBACKS : OPENROUTER_FREE_FALLBACKS;
                 let lastError: any = null;
+                let hadAttempt = false;
                 for (const tryModel of Array.from(new Set([pModel, ...fallbacks]))) {
                     const cp = evaluateProviderPolicy(provider, tier, tryModel);
                     if (!cp.allowed) { recordProviderPolicyBlock(provider, tier, tryModel, cp.reason ?? 'policy'); continue; }
+                    if (hadAttempt) req.onReset?.();
+                    hadAttempt = true;
                     try {
-                        const r = await openaiCompat(pKey, baseUrl, tryModel, system, req.question, maxTokens, token, 'openrouter');
+                        const r = await openaiCompat(pKey, baseUrl, tryModel, system, req.question, maxTokens, token, 'openrouter', undefined, req.onDelta);
                         if (tryModel !== pModel) recordFallbackEvent(provider, pModel, tryModel, 'model fallback');
                         return r;
                     } catch (e) { lastError = e; }
@@ -1060,61 +1350,63 @@ export async function consult(
             case 'moonshot': {
                 const baseUrl = providerBaseUrlForCall('moonshot');
                 // kimi-k2.7+ requires temperature=1.0 or omitting it entirely; omit to avoid strict validation
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'moonshot');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'moonshot', undefined, req.onDelta);
             }
             case 'kimiCode': {
                 const baseUrl = providerBaseUrlForCall('kimiCode');
                 // kimi-k2.7+ requires temperature=1.0 or omitting it entirely; omit to avoid strict validation
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'kimiCode');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'kimiCode', undefined, req.onDelta);
             }
             case 'alibaba': {
                 const baseUrl = providerBaseUrlForCall('alibaba');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'alibaba');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'alibaba', undefined, req.onDelta);
             }
             case 'tencent': {
                 // Try OpenAI-compatible single-key first, fall back to native SecretId+SecretKey
                 const tkCompat = await secrets.get('harmony.tencent.apiKey');
                 if (tkCompat) {
                     const baseUrl = providerBaseUrlForCall('tencent');
-                    return await openaiCompat(tkCompat, baseUrl, pModel, system, req.question, maxTokens, token, 'tencent');
+                    return await openaiCompat(tkCompat, baseUrl, pModel, system, req.question, maxTokens, token, 'tencent', undefined, req.onDelta);
                 }
                 const tkSid = await secrets.get('harmony.tencent.secretId');
                 const tkSkey = await secrets.get('harmony.tencent.secretKey');
                 if (tkSid && tkSkey) {
-                    return await tencentNativeCall(tkSid, tkSkey, pModel, system, req.question, maxTokens, token);
+                    const tnRes = await tencentNativeCall(tkSid, tkSkey, pModel, system, req.question, maxTokens, token);
+                    if (tnRes.text) req.onDelta?.(tnRes.text);
+                    return tnRes;
                 }
                 throw new Error(`No Tencent credentials found. Set harmony.tencent.apiKey for OpenAI-compatible or harmony.tencent.secretId + harmony.tencent.secretKey for native auth.`);
             }
             case 'zhipu': {
                 const baseUrl = providerBaseUrlForCall('zhipu');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'zhipu');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'zhipu', undefined, req.onDelta);
             }
             case 'zhipu-coding': {
                 const baseUrl = providerBaseUrlForCall('zhipu-coding');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'zhipu-coding');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'zhipu-coding', undefined, req.onDelta);
             }
             case 'doubao': {
                 const baseUrl = providerBaseUrlForCall('doubao');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'doubao');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'doubao', undefined, req.onDelta);
             }
             case 'doubao-coding':
             case 'doubao-rewards': {
                 // Doubao Coding/Rewards reuse the standard Doubao Ark endpoint + key
                 const baseUrl = providerBaseUrlForCall('doubao');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, provider);
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, provider, undefined, req.onDelta);
             }
             case 'byteplus': {
                 const baseUrl = providerBaseUrlForCall('byteplus');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'byteplus');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'byteplus', undefined, req.onDelta);
             }
             case 'byteplus-coding': {
                 // ByteDance Coding Plan reuses the BytePlus ModelArk endpoint + key
                 const baseUrl = providerBaseUrlForCall('byteplus');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'byteplus-coding');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'byteplus-coding', undefined, req.onDelta);
             }
             case 'stepfun': {
                 const baseUrl = providerBaseUrlForCall('stepfun');
-                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'stepfun');
+                return await openaiCompat(pKey, baseUrl, pModel, system, req.question, maxTokens, token, 'stepfun', undefined, req.onDelta);
             }
             default:
                 throw new Error(`Unsupported provider: ${provider}`);
@@ -1126,12 +1418,16 @@ export async function consult(
         recordHealth({ ts: Date.now(), provider: req.provider, tier, success: true, latencyMs: Date.now() - startedAt });
     } catch (firstError: any) {
         recordHealth({ ts: Date.now(), provider: req.provider, tier, success: false, latencyMs: Date.now() - startedAt });
+        // Do not mask user-requested cancellation with provider fallbacks
+        if (token.isCancellationRequested) throw firstError;
         // Try provider-level fallback: rank alternatives by health, try each
         const fallbackProviders = await rankProviders(secrets, tier, [req.provider]);
         let lastError = firstError;
         for (const fb of fallbackProviders) {
             // Skip if the original provider already tried this one (e.g. openrouter fallback)
             if (fb === req.provider) continue;
+            if (token.isCancellationRequested) break;
+            req.onReset?.();
             try {
                 const fbModel = modelFor(fb, tier);
                 result = await attemptCall(fb, fbModel);
@@ -1179,7 +1475,8 @@ async function openaiCompat(
     maxTokens: number,
     token: vscode.CancellationToken,
     provider: ProviderId,
-    temperature?: number
+    temperature?: number,
+    onDelta?: (deltaText: string) => void
 ): Promise<ConsultResponse> {
     const controller = new AbortController();
     const sub = token.onCancellationRequested(() => controller.abort());
@@ -1220,27 +1517,54 @@ async function openaiCompat(
             const errText = await r.text();
             throw new Error(sanitizeHttpError(r.status, errText, providerDisplayName(provider)));
         }
-        // Parse SSE stream — accumulate delta chunks into full response
-        const rawStream = await r.text();
-        const lines = rawStream.split('\n');
+        // Parse SSE stream incrementally when live streaming is active (with fallback for mock responses)
         let content = '';
         let usage: any = undefined;
-        for (const line of lines) {
+        let reasoningChars = 0;
+        const processSseLine = (line: string) => {
             const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith('data:')) continue;
+            if (!trimmed || !trimmed.startsWith('data:')) return;
             const data = trimmed.slice(5).trim();
-            if (data === '[DONE]') continue;
+            if (data === '[DONE]') return;
             try {
                 const chunk = JSON.parse(data);
                 const delta = chunk?.choices?.[0]?.delta?.content;
-                if (typeof delta === 'string') content += delta;
+                if (typeof delta === 'string' && delta.length > 0) {
+                    content += delta;
+                    onDelta?.(delta);
+                }
                 if (chunk?.usage) usage = chunk.usage;
-                // DeepSeek reasoning_content (thinking tokens)
                 const reasoning = chunk?.choices?.[0]?.delta?.reasoning_content;
                 if (typeof reasoning === 'string') {
-                    console.log(`[Harmony] ${provider} reasoning consumed: ${reasoning.length} chars`);
+                    reasoningChars += reasoning.length;
                 }
             } catch { /* skip malformed SSE chunks */ }
+        };
+
+        if (onDelta && r.body && typeof (r.body as any).getReader === 'function') {
+            const reader = (r.body as any).getReader();
+            const decoder = new TextDecoder();
+            const lineState = { buffer: '' };
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                const decoded = decoder.decode(value, { stream: true });
+                for (const line of parseSseLinesIncremental(lineState, decoded, false)) {
+                    processSseLine(line);
+                }
+            }
+            const tailDecoded = decoder.decode();
+            for (const line of parseSseLinesIncremental(lineState, tailDecoded, true)) {
+                processSseLine(line);
+            }
+        } else {
+            const rawStream = await r.text();
+            for (const line of rawStream.split('\n')) {
+                processSseLine(line);
+            }
+        }
+        if (reasoningChars > 0) {
+            console.log(`[Harmony] ${provider} reasoning consumed: ${reasoningChars} chars`);
         }
         // DeepSeek cache header
         const cachedPromptTokens = parseInt(r.headers.get('x-ds-usage-cached-tokens') ?? '0', 10) || undefined;
@@ -1277,7 +1601,8 @@ async function anthropicCall(
     system: string,
     question: string,
     maxTokens: number,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
+    onDelta?: (deltaText: string) => void
 ): Promise<ConsultResponse> {
     const cfg = vscode.workspace.getConfiguration('harmony');
     const thinkingEnabled = cfg.get<boolean>('claude.enableThinking') ?? false;
@@ -1326,6 +1651,9 @@ async function anthropicCall(
         if (claudeSystem !== undefined) {
             body.system = claudeSystem;
         }
+        if (onDelta) {
+            body.stream = true;
+        }
         const r = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
@@ -1336,8 +1664,54 @@ async function anthropicCall(
             body: JSON.stringify(body),
             signal: controller.signal as any
         });
+        if (!r.ok) {
+            const errText = await r.text();
+            throw new Error(sanitizeHttpError(r.status, errText, 'Claude'));
+        }
+        if (onDelta && r.body && typeof (r.body as any).getReader === 'function') {
+            const reader = (r.body as any).getReader();
+            const decoder = new TextDecoder();
+            const lineState = { buffer: '' };
+            let content = '';
+            let promptTokens = 0;
+            let completionTokens = 0;
+            const processClaudeLine = (line: string) => {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith('data:')) return;
+                const data = trimmed.slice(5).trim();
+                if (!data || data === '[DONE]') return;
+                try {
+                    const ev = JSON.parse(data);
+                    if (ev?.type === 'content_block_delta' && ev?.delta?.type === 'text_delta' && typeof ev.delta.text === 'string') {
+                        content += ev.delta.text;
+                        onDelta(ev.delta.text);
+                    } else if (ev?.type === 'message_start' && ev?.message?.usage) {
+                        const u = ev.message.usage;
+                        promptTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+                        completionTokens = u.output_tokens ?? completionTokens;
+                    } else if (ev?.type === 'message_delta' && ev?.usage?.output_tokens !== undefined) {
+                        completionTokens = ev.usage.output_tokens;
+                    }
+                } catch { /* skip malformed SSE frame */ }
+            };
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                for (const line of parseSseLinesIncremental(lineState, decoder.decode(value, { stream: true }), false)) {
+                    processClaudeLine(line);
+                }
+            }
+            for (const line of parseSseLinesIncremental(lineState, decoder.decode(), true)) {
+                processClaudeLine(line);
+            }
+            return {
+                provider: 'claude',
+                model,
+                text: content,
+                usage: (promptTokens || completionTokens) ? { promptTokens, completionTokens } : undefined
+            };
+        }
         const text = await r.text();
-        if (!r.ok) throw new Error(sanitizeHttpError(r.status, text, 'Claude'));
         const json = JSON.parse(text);
         // Content may include thinking blocks; extract only text blocks for the response.
         const content = Array.isArray(json?.content)
@@ -1370,27 +1744,137 @@ async function geminiCall(
     system: string,
     question: string,
     maxTokens: number,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
+    onDelta?: (deltaText: string) => void
 ): Promise<ConsultResponse> {
     const controller = new AbortController();
     const sub = token.onCancellationRequested(() => controller.abort());
-    const timeoutId = setTimeout(() => controller.abort(new Error(`Gemini request timed out after ${Math.round(computeTimeout(maxTokens) / 1000)}s`)), computeTimeout(maxTokens));
+    const baseTimeoutMs = computeTimeout(maxTokens);
+    const isFrontierGemini4 = /(^|[-_.])(argon|carbon|neon)($|[-_.])/i.test(model);
+    const ttfbMs = Math.max(baseTimeoutMs, isFrontierGemini4 ? 240_000 : 180_000);
+    const outerTimeoutMs = Math.max(ttfbMs + 120_000, 300_000);
+    const timeoutId = setTimeout(
+        () => controller.abort(new Error(`Gemini request timed out after ${Math.round(outerTimeoutMs / 1000)}s`)),
+        outerTimeoutMs
+    );
+    const proxyOpts = getVscodeHttpProxyOptions();
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const useSse = Boolean(onDelta);
+        const rpcMethod = useSse ? 'streamGenerateContent' : 'generateContent';
+        let reqInfo = await resolveGeminiGenerateContentRequestAsync(model, apiKey, rpcMethod, useSse);
         const body = {
             systemInstruction: { parts: [{ text: system }] },
             contents: [{ role: 'user', parts: [{ text: question }] }],
             // Gemini: no sampling params — deprecated by Google.
             generationConfig: { maxOutputTokens: maxTokens }
         };
-        const r = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-            signal: controller.signal as any
-        });
+        const serializedBody = JSON.stringify(body);
+        const runGeminiFetch = (url: string, headers: Record<string, string>) =>
+            vpnResilientFetch(url, {
+                method: 'POST',
+                headers,
+                body: serializedBody,
+                signal: controller.signal,
+                label: `Gemini (${model})`,
+                ttfbTimeoutMs: ttfbMs,
+                ...proxyOpts,
+                onGuardEvent: (reason) => {
+                    try { recordRouteGuardEvent('gemini', isFrontierGemini4 ? 'heavy' : 'native', model, reason); } catch { /* best-effort */ }
+                },
+            });
+        let r = await runGeminiFetch(reqInfo.url, reqInfo.headers);
+        if (r.status === 401 && reqInfo.backend === 'vertex' && reqInfo.vertexAuth?.cacheKey) {
+            try { await r.body?.cancel(); } catch { /* ignore */ }
+            invalidateVertexTokenCache(reqInfo.vertexAuth.cacheKey);
+            try {
+                recordRouteGuardEvent('gemini', isFrontierGemini4 ? 'heavy' : 'native', model, `Gemini (${model}) Vertex OAuth token expired (HTTP 401); refreshing token automatically`);
+            } catch { /* best-effort */ }
+            reqInfo = await resolveGeminiGenerateContentRequestAsync(model, apiKey, rpcMethod, useSse, { bypassVertexCache: true });
+            r = await runGeminiFetch(reqInfo.url, reqInfo.headers);
+        }
+        if (!r.ok) {
+            const errText = await r.text();
+            if (reqInfo.backend === 'vertex') {
+                throw new Error(enrichVertexHttpError(r.status, errText, model, reqInfo.vertexAuth));
+            }
+            throw new Error(sanitizeHttpError(r.status, errText, 'Gemini'));
+        }
+        if (useSse && onDelta) {
+            let content = '';
+            let usage: any = undefined;
+            const processGeminiSseLine = (line: string) => {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith('data:')) return;
+                const data = trimmed.slice(5).trim();
+                if (!data || data === '[DONE]') return;
+                try {
+                    const frame = JSON.parse(data);
+                    const parts = frame?.candidates?.[0]?.content?.parts ?? [];
+                    for (const p of parts) {
+                        if (p?.thought === true) continue;
+                        if (typeof p?.text === 'string' && p.text.length > 0) {
+                            content += p.text;
+                            onDelta(p.text);
+                        }
+                    }
+                    if (frame?.usageMetadata) usage = frame.usageMetadata;
+                } catch { /* skip malformed SSE frame */ }
+            };
+            if (r.body && typeof (r.body as any).getReader === 'function') {
+                const reader = (r.body as any).getReader();
+                const decoder = new TextDecoder();
+                const lineState = { buffer: '' };
+                const cfgIdleSec = vscode.workspace.getConfiguration('harmony').get<number>('streamIdleTimeoutSec');
+                const baseIdleSec = (typeof cfgIdleSec === 'number' && Number.isFinite(cfgIdleSec) && cfgIdleSec >= 30)
+                    ? Math.min(cfgIdleSec, 900)
+                    : 120;
+                const sseIdleMs = (baseIdleSec <= 120 && isFrontierGemini4) ? 240_000 : baseIdleSec * 1000;
+                let streamDone = false;
+                try {
+                    while (true) {
+                        const readPromise: Promise<{ value?: Uint8Array; done: boolean }> = reader.read();
+                        readPromise.catch(() => {});
+                        let idleTimer: ReturnType<typeof setTimeout> | undefined;
+                        const idleGuard = new Promise<never>((_, reject) => {
+                            idleTimer = setTimeout(() => {
+                                controller.abort();
+                                reject(new Error(`Gemini (${model}) stream idle timeout after ${Math.round(sseIdleMs / 1000)}s without data — connection stalled`));
+                            }, sseIdleMs);
+                        });
+                        const { value, done } = await Promise.race([readPromise, idleGuard]).finally(() => {
+                            if (idleTimer) clearTimeout(idleTimer);
+                        });
+                        if (done) {
+                            streamDone = true;
+                            break;
+                        }
+                        for (const line of parseSseLinesIncremental(lineState, decoder.decode(value, { stream: true }), false)) {
+                            processGeminiSseLine(line);
+                        }
+                    }
+                    for (const line of parseSseLinesIncremental(lineState, decoder.decode(), true)) {
+                        processGeminiSseLine(line);
+                    }
+                } finally {
+                    if (!streamDone) {
+                        try { void Promise.resolve(reader.cancel()).catch(() => {}); } catch { /* ignore */ }
+                    }
+                    try { reader.releaseLock(); } catch { /* ignore */ }
+                }
+            } else {
+                const rawSse = await r.text();
+                for (const line of rawSse.split('\n')) {
+                    processGeminiSseLine(line);
+                }
+            }
+            return {
+                provider: 'gemini',
+                model,
+                text: content,
+                usage: usage ? { promptTokens: usage.promptTokenCount, completionTokens: usage.candidatesTokenCount } : undefined
+            };
+        }
         const text = await r.text();
-        if (!r.ok) throw new Error(sanitizeHttpError(r.status, text, 'Gemini'));
         const json = JSON.parse(text);
         const parts = json?.candidates?.[0]?.content?.parts ?? [];
         const content = parts.map((p: any) => (typeof p?.text === 'string' ? p.text : '')).join('\n');
@@ -1416,7 +1900,7 @@ async function geminiCall(
 }
 
 function isPremiumModelName(model: string): boolean {
-    return /(^|[-_.])pro($|[-_.])|(^|[-_.])opus($|[-_.])|(^|[-_.])o4($|[-_.])|(^|[-_.])astra($|[-_.])|(^|[-_.])fable($|[-_.])|(^|[-_.])argon($|[-_.])/i.test(model);
+    return /(^|[-_.])pro($|[-_.])|(^|[-_.])opus($|[-_.])|(^|[-_.])o4($|[-_.])|(^|[-_.])astra($|[-_.])|(^|[-_.])fable($|[-_.])|(^|[-_.])argon($|[-_.])|(^|[-_.])carbon($|[-_.])|(^|[-_.])neon($|[-_.])/i.test(model);
 }
 
 export async function confirmPremiumModel(provider: ProviderId, tier: Tier, model: string, purpose = 'helper model call'): Promise<boolean> {
@@ -1466,7 +1950,7 @@ export async function discoverModels(
     provider: ProviderId,
     token: vscode.CancellationToken
 ): Promise<string[]> {
-    const apiKey = await secrets.get(secretKeyFor(provider));
+    const apiKey = await resolveProviderKey(secrets, provider);
     if (!apiKey) throw new Error(`No API key for ${provider}`);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
@@ -1491,9 +1975,48 @@ export async function discoverModels(
                 headers['x-api-key'] = apiKey;
                 headers['anthropic-version'] = '2023-06-01';
                 break;
-            case 'gemini':
-                url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
-                break;
+            case 'gemini': {
+                const reqInfo = await resolveGeminiGenerateContentRequestAsync('gemini-3.8-flash', apiKey, 'generateContent', false);
+                if (reqInfo.backend === 'ai-studio') {
+                    url = 'https://generativelanguage.googleapis.com/v1beta/models';
+                    Object.assign(headers, reqInfo.headers);
+                    break;
+                }
+                // Vertex AI / custom endpoints may not expose a /v1beta/models list
+                // with an Express API key; try the endpoint first and fall back to the
+                // curated Gemini model catalog (including Argon, Carbon, and Hydrogen).
+                try {
+                    const keyQueryMatch = reqInfo.url.match(/[?&](key=[^&#]+)/);
+                    const modelsBase = reqInfo.url.replace(/\/models\/[^/:?]+:generateContent.*$/, '/models');
+                    const modelsUrl = keyQueryMatch ? `${modelsBase}?${keyQueryMatch[1]}` : modelsBase;
+                    const rGem = await fetch(modelsUrl, {
+                        method: 'GET',
+                        headers: reqInfo.headers,
+                        signal: controller.signal as any
+                    });
+                    if (rGem.ok) {
+                        const jsonGem = JSON.parse(await rGem.text());
+                        const itemsGem: any[] = jsonGem?.data ?? jsonGem?.models ?? [];
+                        const parsedIds = Array.from(new Set(itemsGem.map((m: any) => {
+                            const raw = m?.id ?? m?.name ?? '';
+                            return typeof raw === 'string' ? raw.replace(/^models\//, '').replace(/^publishers\/google\/models\//, '') : '';
+                        }).filter(Boolean))).sort();
+                        if (parsedIds.length > 0) return parsedIds;
+                    }
+                } catch { /* fall through to curated Gemini list */ }
+                return [
+                    'gemini-4-argon',
+                    'gemini-4-carbon',
+                    'gemini-4-neon',
+                    'gemini-4-hydrogen',
+                    'gemini-3.8-flash',
+                    'gemini-3.7-flash',
+                    'gemini-3.6-flash',
+                    'gemini-3.5-flash',
+                    'gemini-3.1-flash-lite',
+                    'gemini-3.1-pro-preview'
+                ];
+            }
             case 'openrouter': {
                 const cfg = vscode.workspace.getConfiguration('harmony');
                 const baseUrl = (cfg.get<string>('openrouter.baseUrl') ?? 'https://openrouter.ai/api/v1').replace(/\/$/, '');

@@ -35,6 +35,22 @@ if (!fs.existsSync(binDir)) {
   fs.mkdirSync(binDir, { recursive: true });
 }
 
+// Optional Sovereign Studio Tauri shell binary staging (stages into bin/ for VSIX packaging when built)
+const tauriExeName = process.platform === 'win32' ? 'harmony-native-control.exe' : 'harmony-native-control';
+const tauriDest = path.join(binDir, tauriExeName);
+const tauriBuildCandidate = path.resolve(__dirname, '..', 'native-ui', 'src-tauri', 'target', 'release', tauriExeName);
+for (const candidate of [process.env.HARMONY_NATIVE_CONTROL_EXE, tauriBuildCandidate]) {
+  if (candidate && fs.existsSync(candidate)) {
+    fs.copyFileSync(candidate, tauriDest);
+    if (process.platform !== 'win32') {
+      try { fs.chmodSync(tauriDest, 0o755); } catch { /* best effort */ }
+    }
+    console.log(`bundle-hub: bundled ${tauriExeName}`);
+    console.log(`bundle-hub: tauri sha256 ${sha256(tauriDest)}`);
+    break;
+  }
+}
+
 if (source) {
   fs.copyFileSync(source, dest);
   // VSIX archives do not reliably preserve the Unix execute bit, so set it here

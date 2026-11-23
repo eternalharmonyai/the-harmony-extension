@@ -232,6 +232,31 @@ class HeadlessLanguageModelToolResult {
     constructor(public readonly content: Array<HeadlessLanguageModelTextPart | unknown>) {}
 }
 
+class HeadlessChatResponseMarkdownPart {
+    readonly value: HeadlessMarkdownString;
+    constructor(value: string | HeadlessMarkdownString) {
+        this.value = typeof value === 'string' ? new HeadlessMarkdownString(value) : value;
+    }
+}
+
+class HeadlessChatRequestTurn {
+    constructor(
+        public readonly prompt: string,
+        public readonly command: string | undefined,
+        public readonly references: readonly any[] = [],
+        public readonly participant = 'harmony.chat',
+        public readonly toolReferences: readonly any[] = []
+    ) {}
+}
+
+class HeadlessChatResponseTurn {
+    constructor(
+        public readonly response: ReadonlyArray<HeadlessChatResponseMarkdownPart | unknown>,
+        public readonly result: Record<string, any> = {},
+        public readonly participant = 'harmony.chat'
+    ) {}
+}
+
 class HeadlessLanguageModelChatMessage {
     static User(content: string | any[], name?: string): any {
         return { role: 1, content, name };
@@ -369,9 +394,247 @@ async function headlessFindFiles(includePattern: any, excludePattern?: any, maxR
 }
 
 export function createVscodeShimModule(): Record<string, any> {
+    const g = globalThis as Record<string, any>;
+    if (g.__harmonyVscodeShimSingleton) {
+        return g.__harmonyVscodeShimSingleton;
+    }
     const noopDisposable = () => new HeadlessDisposable();
 
-    return {
+    class HeadlessCodeActionKind {
+        static readonly Empty = new HeadlessCodeActionKind('');
+        static readonly QuickFix = new HeadlessCodeActionKind('quickfix');
+        static readonly Refactor = new HeadlessCodeActionKind('refactor');
+        static readonly RefactorExtract = new HeadlessCodeActionKind('refactor.extract');
+        static readonly RefactorInline = new HeadlessCodeActionKind('refactor.inline');
+        static readonly RefactorRewrite = new HeadlessCodeActionKind('refactor.rewrite');
+        static readonly Source = new HeadlessCodeActionKind('source');
+        static readonly SourceOrganizeImports = new HeadlessCodeActionKind('source.organizeImports');
+        static readonly SourceFixAll = new HeadlessCodeActionKind('source.fixAll');
+        constructor(public readonly value: string) {}
+        append(parts: string): HeadlessCodeActionKind {
+            return new HeadlessCodeActionKind(this.value ? `${this.value}.${parts}` : parts);
+        }
+        intersects(other: HeadlessCodeActionKind): boolean {
+            return this.contains(other) || other.contains(this);
+        }
+        contains(other: HeadlessCodeActionKind): boolean {
+            return this.value === other.value || other.value.startsWith(this.value + '.');
+        }
+    }
+
+    class HeadlessDiagnostic {
+        source?: string;
+        code?: string | number;
+        constructor(
+            public readonly range: HeadlessRange,
+            public readonly message: string,
+            public readonly severity: number = 0
+        ) {}
+    }
+
+    class HeadlessWorkspaceEdit {
+        private readonly byUri = new Map<string, { uri: HeadlessUri; edits: Array<{ range: HeadlessRange; newText: string }> }>();
+
+        private bucket(uri: HeadlessUri) {
+            const key = path.resolve(uri.fsPath);
+            let b = this.byUri.get(key);
+            if (!b) {
+                b = { uri: HeadlessUri.file(key), edits: [] };
+                this.byUri.set(key, b);
+            }
+            return b;
+        }
+
+        replace(uri: HeadlessUri, range: HeadlessRange, newText: string): void {
+            this.bucket(uri).edits.push({ range, newText });
+        }
+
+        insert(uri: HeadlessUri, position: HeadlessPosition, newText: string): void {
+            this.bucket(uri).edits.push({ range: new HeadlessRange(position, position), newText });
+        }
+
+        delete(uri: HeadlessUri, range: HeadlessRange): void {
+            this.bucket(uri).edits.push({ range, newText: '' });
+        }
+
+        set(uri: HeadlessUri, edits: Array<{ range: HeadlessRange; newText: string }>): void {
+            this.bucket(uri).edits = [...(edits ?? [])];
+        }
+
+        get(uri: HeadlessUri): Array<{ range: HeadlessRange; newText: string }> {
+            return this.byUri.get(path.resolve(uri.fsPath))?.edits ?? [];
+        }
+
+        has(uri: HeadlessUri): boolean {
+            return this.byUri.has(path.resolve(uri.fsPath));
+        }
+
+        entries(): Array<[HeadlessUri, Array<{ range: HeadlessRange; newText: string }>]> {
+            return [...this.byUri.values()].map(b => [b.uri, b.edits]);
+        }
+
+        get size(): number {
+            return this.byUri.size;
+        }
+    }
+
+    class HeadlessCodeAction {
+        edit?: HeadlessWorkspaceEdit;
+        diagnostics?: HeadlessDiagnostic[];
+        command?: { title: string; command: string; arguments?: any[] };
+        isPreferred?: boolean;
+        disabled?: { reason: string };
+        constructor(public readonly title: string, public readonly kind?: HeadlessCodeActionKind) {}
+    }
+
+    function extractWordAtPosition(lineText: string, character: number): { word: string; startCol: number; endCol: number } | null {
+        const re = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(lineText)) !== null) {
+            const start = m.index;
+            const end = start + m[0].length;
+            if (character >= start && character <= end) {
+                return { word: m[0], startCol: start, endCol: end };
+            }
+        }
+        return null;
+    }
+
+    function escapeRegexLiteral(s: string): string {
+        return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    async function resolveHeadlessSymbolAt(uri: HeadlessUri, pos: HeadlessPosition): Promise<{ word: string; fsPath: string; lines: string[] } | null> {
+        try {
+            const fsPath = uri.fsPath;
+            const raw = await fsp.readFile(fsPath, 'utf8');
+            const lines = raw.split(/\r?\n/);
+            const lineText = lines[pos.line] ?? '';
+            const hit = extractWordAtPosition(lineText, pos.character);
+            if (!hit) return null;
+            return { word: hit.word, fsPath, lines };
+        } catch {
+            return null;
+        }
+    }
+
+    async function findHeadlessSymbolLocations(
+        uri: HeadlessUri,
+        pos: HeadlessPosition,
+        mode: 'definition' | 'references',
+        includeDeclaration = true
+    ): Promise<HeadlessLocation[]> {
+        const sym = await resolveHeadlessSymbolAt(uri, pos);
+        if (!sym) return [];
+        const escaped = escapeRegexLiteral(sym.word);
+        const defRe = new RegExp(
+            `(?:\\b(?:function|class|interface|type|enum|const|let|var|def|fn|struct|trait)\\s+(${escaped})\\b|^\\s*(?:export\\s+)?(?:public\\s+|private\\s+|protected\\s+|static\\s+|readonly\\s+|async\\s+)*(${escaped})\\s*(?:\\(|=|:))`
+        );
+        const wordRe = new RegExp(`\\b${escaped}\\b`, 'g');
+
+        const candidateUris = await headlessFindFiles('**/*.{ts,tsx,js,jsx,mjs,cjs,py,rs,go}', undefined, 500);
+        const orderedUris = [
+            HeadlessUri.file(sym.fsPath),
+            ...candidateUris.filter(u => path.resolve(u.fsPath) !== path.resolve(sym.fsPath)),
+        ];
+
+        const definitions: HeadlessLocation[] = [];
+        const references: HeadlessLocation[] = [];
+
+        for (const fileUri of orderedUris) {
+            let content: string;
+            try {
+                content = await fsp.readFile(fileUri.fsPath, 'utf8');
+            } catch {
+                continue;
+            }
+            if (!content.includes(sym.word)) continue;
+            const fileLines = content.split(/\r?\n/);
+            for (let lineIdx = 0; lineIdx < fileLines.length; lineIdx++) {
+                const lineStr = fileLines[lineIdx];
+                if (!lineStr.includes(sym.word)) continue;
+                const isDefLine = defRe.test(lineStr);
+                wordRe.lastIndex = 0;
+                let m: RegExpExecArray | null;
+                while ((m = wordRe.exec(lineStr)) !== null) {
+                    const loc = new HeadlessLocation(
+                        fileUri,
+                        new HeadlessRange(lineIdx, m.index, lineIdx, m.index + sym.word.length)
+                    );
+                    if (isDefLine) {
+                        definitions.push(loc);
+                        if (includeDeclaration) references.push(loc);
+                    } else {
+                        references.push(loc);
+                    }
+                }
+            }
+        }
+
+        if (mode === 'definition') {
+            return definitions.length > 0 ? definitions : references.slice(0, 5);
+        }
+        return references;
+    }
+
+    function computeFileDiagnosticsSync(fsPath: string): HeadlessDiagnostic[] {
+        try {
+            if (!fs.existsSync(fsPath)) return [];
+            const ext = path.extname(fsPath).toLowerCase();
+            const text = fs.readFileSync(fsPath, 'utf8');
+            if (ext === '.json') {
+                try {
+                    JSON.parse(text);
+                    return [];
+                } catch (err: any) {
+                    return [new HeadlessDiagnostic(new HeadlessRange(0, 0, 0, 1), err?.message ?? String(err), 0)];
+                }
+            }
+            if (['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'].includes(ext)) {
+                try {
+                    // eslint-disable-next-line @typescript-eslint/no-var-requires
+                    const ts = require('typescript') as typeof import('typescript');
+                    const res = ts.transpileModule(text, {
+                        fileName: fsPath,
+                        reportDiagnostics: true,
+                        compilerOptions: {
+                            target: ts.ScriptTarget.ES2022,
+                            module: ts.ModuleKind.CommonJS,
+                            jsx: ext.endsWith('x') ? ts.JsxEmit.React : undefined,
+                        },
+                    });
+                    const out: HeadlessDiagnostic[] = [];
+                    for (const d of res.diagnostics ?? []) {
+                        const msg = ts.flattenDiagnosticMessageText(d.messageText, '\n');
+                        let line = 0;
+                        let character = 0;
+                        if (d.file && typeof d.start === 'number') {
+                            const lc = d.file.getLineAndCharacterOfPosition(d.start);
+                            line = lc.line;
+                            character = lc.character;
+                        }
+                        const sev = d.category === ts.DiagnosticCategory.Error ? 0
+                            : d.category === ts.DiagnosticCategory.Warning ? 1 : 2;
+                        out.push(new HeadlessDiagnostic(
+                            new HeadlessRange(line, character, line, character + Math.max(1, d.length ?? 1)),
+                            msg,
+                            sev
+                        ));
+                    }
+                    return out;
+                } catch {
+                    return [];
+                }
+            }
+            return [];
+        } catch {
+            return [];
+        }
+    }
+
+    const customDiagnostics = new Map<string, Map<string, { uri: HeadlessUri; diags: HeadlessDiagnostic[] }>>();
+
+    const shim = {
         Position: HeadlessPosition,
         Range: HeadlessRange,
         Location: HeadlessLocation,
@@ -384,6 +647,9 @@ export function createVscodeShimModule(): Record<string, any> {
         LanguageModelToolCallPart: HeadlessLanguageModelToolCallPart,
         LanguageModelToolResultPart: HeadlessLanguageModelToolResultPart,
         LanguageModelToolResult: HeadlessLanguageModelToolResult,
+        ChatResponseMarkdownPart: HeadlessChatResponseMarkdownPart,
+        ChatRequestTurn: HeadlessChatRequestTurn,
+        ChatResponseTurn: HeadlessChatResponseTurn,
         LanguageModelChatMessage: HeadlessLanguageModelChatMessage,
         LanguageModelChatMessageRole: { User: 1, Assistant: 2 },
         StatusBarAlignment: { Left: 1, Right: 2 },
@@ -391,12 +657,10 @@ export function createVscodeShimModule(): Record<string, any> {
         DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
         ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
         FileType: { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 },
-        WorkspaceEdit: class {
-            private readonly edits: Array<{ uri: HeadlessUri; range: HeadlessRange; newText: string }> = [];
-            replace(uri: HeadlessUri, range: HeadlessRange, newText: string): void {
-                this.edits.push({ uri, range, newText });
-            }
-        },
+        CodeActionKind: HeadlessCodeActionKind,
+        CodeAction: HeadlessCodeAction,
+        Diagnostic: HeadlessDiagnostic,
+        WorkspaceEdit: HeadlessWorkspaceEdit,
         workspace: {
             get workspaceFolders() {
                 return [{
@@ -408,6 +672,8 @@ export function createVscodeShimModule(): Record<string, any> {
             get rootPath() {
                 return activeWorkspaceRoot;
             },
+            isTrusted: true,
+            onDidGrantWorkspaceTrust: noopDisposable,
             getWorkspaceFolder(uri: HeadlessUri) {
                 return {
                     uri: HeadlessUri.file(activeWorkspaceRoot),
@@ -440,19 +706,71 @@ export function createVscodeShimModule(): Record<string, any> {
                     }),
                 };
             },
-            async applyEdit(): Promise<boolean> {
-                return false;
+            async applyEdit(edit: HeadlessWorkspaceEdit): Promise<boolean> {
+                if (!edit || typeof edit.entries !== 'function') return false;
+                try {
+                    for (const [uri, edits] of edit.entries()) {
+                        if (!edits || edits.length === 0) continue;
+                        const fsPath = uri.fsPath;
+                        const raw = await fsp.readFile(fsPath, 'utf8');
+                        const eol = raw.includes('\r\n') ? '\r\n' : '\n';
+                        const lines = raw.split(/\r?\n/);
+                        const lineStarts: number[] = [];
+                        let acc = 0;
+                        for (let i = 0; i < lines.length; i++) {
+                            lineStarts.push(acc);
+                            acc += lines[i].length + eol.length;
+                        }
+                        const toOffset = (pos: HeadlessPosition): number => {
+                            const l = Math.max(0, Math.min(pos.line, lines.length - 1));
+                            const c = Math.max(0, Math.min(pos.character, (lines[l] ?? '').length));
+                            return (lineStarts[l] ?? 0) + c;
+                        };
+                        const resolvedEdits = edits
+                            .map(e => ({
+                                start: toOffset(e.range.start),
+                                end: toOffset(e.range.end),
+                                newText: e.newText,
+                            }))
+                            .sort((a, b) => (b.start - a.start) || (b.end - a.end));
+                        let updated = raw;
+                        for (const item of resolvedEdits) {
+                            updated = updated.slice(0, item.start) + item.newText + updated.slice(item.end);
+                        }
+                        await fsp.writeFile(fsPath, updated, 'utf8');
+                    }
+                    return true;
+                } catch {
+                    return false;
+                }
             },
             onDidChangeConfiguration: noopDisposable,
             onDidChangeWorkspaceFolders: noopDisposable,
             onDidSaveTextDocument: noopDisposable,
             fs: {
+                async createDirectory(uri: HeadlessUri): Promise<void> {
+                    await fsp.mkdir(uri.fsPath, { recursive: true });
+                },
+                async readDirectory(uri: HeadlessUri): Promise<Array<[string, number]>> {
+                    const entries = await fsp.readdir(uri.fsPath, { withFileTypes: true });
+                    return entries.map(e => [e.name, e.isDirectory() ? 2 : (e.isSymbolicLink() ? 64 : 1)]);
+                },
                 async readFile(uri: HeadlessUri): Promise<Uint8Array> {
                     return await fsp.readFile(uri.fsPath);
                 },
                 async writeFile(uri: HeadlessUri, content: Uint8Array): Promise<void> {
                     await fsp.mkdir(path.dirname(uri.fsPath), { recursive: true });
                     await fsp.writeFile(uri.fsPath, Buffer.from(content));
+                },
+                async delete(uri: HeadlessUri, options?: { recursive?: boolean }): Promise<void> {
+                    await fsp.rm(uri.fsPath, { recursive: !!options?.recursive, force: true });
+                },
+                async rename(source: HeadlessUri, target: HeadlessUri, options?: { overwrite?: boolean }): Promise<void> {
+                    if (options?.overwrite === false && fs.existsSync(target.fsPath)) {
+                        throw new Error(`Target already exists: ${target.fsPath}`);
+                    }
+                    await fsp.mkdir(path.dirname(target.fsPath), { recursive: true });
+                    await fsp.rename(source.fsPath, target.fsPath);
                 },
                 async stat(uri: HeadlessUri) {
                     const st = await fsp.stat(uri.fsPath);
@@ -466,14 +784,21 @@ export function createVscodeShimModule(): Record<string, any> {
             },
         },
         window: {
-            activeTextEditor: undefined,
-            visibleTextEditors: [],
+            activeTextEditor: undefined as any,
+            visibleTextEditors: [] as any[],
             async showInformationMessage(): Promise<undefined> { return undefined; },
             async showWarningMessage(): Promise<undefined> { return undefined; },
             async showErrorMessage(): Promise<undefined> { return undefined; },
             async showQuickPick(): Promise<undefined> { return undefined; },
             async showInputBox(): Promise<undefined> { return undefined; },
-            async showTextDocument(doc: any) { return { document: doc }; },
+            async showTextDocument(docOrUri: any) {
+                const doc = docOrUri && typeof docOrUri.getText === 'function'
+                    ? docOrUri
+                    : await shim.workspace.openTextDocument(docOrUri);
+                const editor = { document: doc };
+                shim.window.activeTextEditor = editor;
+                return editor;
+            },
             createOutputChannel(name: string) {
                 return {
                     name,
@@ -506,10 +831,78 @@ export function createVscodeShimModule(): Record<string, any> {
             async executeCommand(id: string, ...args: any[]) {
                 const handler = registeredCommands.get(id);
                 if (handler) return await handler(...args);
+                if (
+                    id === 'vscode.executeDefinitionProvider' ||
+                    id === 'vscode.executeTypeDefinitionProvider' ||
+                    id === 'vscode.executeImplementationProvider'
+                ) {
+                    const [uri, pos] = args as [HeadlessUri, HeadlessPosition];
+                    if (!uri || !pos) return [];
+                    return await findHeadlessSymbolLocations(uri, pos, 'definition', true);
+                }
+                if (id === 'vscode.executeReferenceProvider') {
+                    const [uri, pos, includeDecl] = args as [HeadlessUri, HeadlessPosition, boolean | undefined];
+                    if (!uri || !pos) return [];
+                    return await findHeadlessSymbolLocations(uri, pos, 'references', includeDecl ?? true);
+                }
+                if (id === 'vscode.executeDocumentRenameProvider') {
+                    const [uri, pos, newName] = args as [HeadlessUri, HeadlessPosition, string];
+                    if (!uri || !pos || !newName) return undefined;
+                    const locations = await findHeadlessSymbolLocations(uri, pos, 'references', true);
+                    const wsEdit = new HeadlessWorkspaceEdit();
+                    for (const loc of locations) {
+                        wsEdit.replace(loc.uri, loc.range, String(newName));
+                    }
+                    return wsEdit;
+                }
+                if (id === 'vscode.executeCodeActionProvider') {
+                    const [uri, range] = args as [HeadlessUri, HeadlessRange];
+                    if (!uri || !range) return [];
+                    const actions: HeadlessCodeAction[] = [];
+                    try {
+                        const doc = await shim.workspace.openTextDocument(uri);
+                        const lineObj = doc.lineAt(range.start.line);
+                        const trimmedRight = lineObj.text.replace(/[ \t]+$/, '');
+                        if (trimmedRight.length < lineObj.text.length) {
+                            const action = new HeadlessCodeAction('Trim trailing whitespace on line', HeadlessCodeActionKind.QuickFix);
+                            action.isPreferred = true;
+                            const edit = new HeadlessWorkspaceEdit();
+                            edit.replace(uri, new HeadlessRange(range.start.line, 0, range.start.line, lineObj.text.length), trimmedRight);
+                            action.edit = edit;
+                            actions.push(action);
+                        }
+                        if (/\bvar\s+[A-Za-z_$]/.test(lineObj.text)) {
+                            const action = new HeadlessCodeAction('Convert var to const', HeadlessCodeActionKind.RefactorRewrite);
+                            action.isPreferred = true;
+                            const edit = new HeadlessWorkspaceEdit();
+                            edit.replace(
+                                uri,
+                                new HeadlessRange(range.start.line, 0, range.start.line, lineObj.text.length),
+                                lineObj.text.replace(/\bvar\s+/, 'const ')
+                            );
+                            action.edit = edit;
+                            actions.push(action);
+                        }
+                    } catch {
+                        /* ignore */
+                    }
+                    return actions;
+                }
+                if (id === 'workbench.action.reloadWindow' || id === 'typescript.restartTsServer' || id === 'notifications.clearAll') {
+                    return { ok: true, mode: 'headless-noop', command: id };
+                }
                 return undefined;
             },
             async getCommands(): Promise<string[]> {
-                return [...registeredCommands.keys()];
+                return [
+                    ...registeredCommands.keys(),
+                    'vscode.executeDefinitionProvider',
+                    'vscode.executeTypeDefinitionProvider',
+                    'vscode.executeImplementationProvider',
+                    'vscode.executeReferenceProvider',
+                    'vscode.executeDocumentRenameProvider',
+                    'vscode.executeCodeActionProvider',
+                ];
             },
         },
         extensions: {
@@ -546,9 +939,49 @@ export function createVscodeShimModule(): Record<string, any> {
             },
         },
         languages: {
-            getDiagnostics() { return []; },
+            getDiagnostics(resource?: HeadlessUri): any {
+                if (resource) {
+                    const key = path.resolve(resource.fsPath);
+                    const collected: HeadlessDiagnostic[] = [...computeFileDiagnosticsSync(key)];
+                    for (const col of customDiagnostics.values()) {
+                        const hit = col.get(key);
+                        if (hit) collected.push(...hit.diags);
+                    }
+                    return collected;
+                }
+                const byFile = new Map<string, [HeadlessUri, HeadlessDiagnostic[]]>();
+                for (const col of customDiagnostics.values()) {
+                    for (const [k, v] of col.entries()) {
+                        const prev = byFile.get(k);
+                        if (prev) prev[1].push(...v.diags);
+                        else byFile.set(k, [v.uri, [...v.diags]]);
+                    }
+                }
+                return [...byFile.values()];
+            },
             createDiagnosticCollection(name: string) {
-                return { name, set() {}, delete() {}, clear() {}, dispose() {} };
+                let store = customDiagnostics.get(name);
+                if (!store) {
+                    store = new Map();
+                    customDiagnostics.set(name, store);
+                }
+                return {
+                    name,
+                    set(uri: HeadlessUri, diags: HeadlessDiagnostic[] | undefined) {
+                        const key = path.resolve(uri.fsPath);
+                        if (!diags || diags.length === 0) store!.delete(key);
+                        else store!.set(key, { uri: HeadlessUri.file(key), diags: [...diags] });
+                    },
+                    delete(uri: HeadlessUri) {
+                        store!.delete(path.resolve(uri.fsPath));
+                    },
+                    clear() {
+                        store!.clear();
+                    },
+                    dispose() {
+                        customDiagnostics.delete(name);
+                    },
+                };
             },
         },
         chat: {
@@ -557,6 +990,8 @@ export function createVscodeShimModule(): Record<string, any> {
             },
         },
     };
+    g.__harmonyVscodeShimSingleton = shim;
+    return shim;
 }
 
 /**
@@ -670,11 +1105,49 @@ export function createHeadlessExtensionContext(workspaceRoot = activeWorkspaceRo
     };
 }
 
+export function isRunningInRealVscodeHost(): boolean {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const vsc = require('vscode');
+        const g = globalThis as Record<string, any>;
+        return Boolean(
+            vsc &&
+            vsc !== g.__harmonyVscodeShimSingleton &&
+            vsc.env?.appName !== 'Harmony Headless Host'
+        );
+    } catch {
+        return false;
+    }
+}
+
+function readPackageManifestToolNames(): string[] {
+    try {
+        const pkgPath = path.resolve(__dirname, '..', '..', 'package.json');
+        const raw = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        const lmTools: any[] = raw?.contributes?.languageModelTools ?? [];
+        return lmTools
+            .map(e => (e && typeof e.name === 'string' ? e.name : ''))
+            .filter(name => name.startsWith('harmony_'))
+            .sort();
+    } catch {
+        return [];
+    }
+}
+
 /**
  * Register all Harmony LanguageModelTools into the headless registry so they can
  * be invoked from CLI, MCP, or other headless hosts.
+ * When called inside the real VS Code extension host, returns the registered
+ * Harmony tool count without re-registering tools or touching SecretStorage.
  */
 export function ensureHeadlessHarmonyToolsRegistered(workspaceRoot = activeWorkspaceRoot): number {
+    if (workspaceRoot) setHeadlessWorkspaceRoot(workspaceRoot);
+    if (isRunningInRealVscodeHost()) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const vsc = require('vscode') as typeof import('vscode');
+        const liveHarmonyTools = (vsc.lm?.tools ?? []).filter(t => t.name.startsWith('harmony_'));
+        return liveHarmonyTools.length > 0 ? liveHarmonyTools.length : readPackageManifestToolNames().length;
+    }
     installVscodeHostShim(workspaceRoot);
     if (toolsBootstrappedForRoot === activeWorkspaceRoot && registeredTools.size > 0) {
         return registeredTools.size;
@@ -713,6 +1186,15 @@ export function ensureHeadlessHarmonyToolsRegistered(workspaceRoot = activeWorks
 }
 
 export function listHeadlessHarmonyTools(workspaceRoot = activeWorkspaceRoot): string[] {
+    if (isRunningInRealVscodeHost()) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const vsc = require('vscode') as typeof import('vscode');
+        const liveNames = (vsc.lm?.tools ?? [])
+            .map(t => t.name)
+            .filter(name => name.startsWith('harmony_'))
+            .sort();
+        return liveNames.length > 0 ? liveNames : readPackageManifestToolNames();
+    }
     ensureHeadlessHarmonyToolsRegistered(workspaceRoot);
     return [...registeredTools.keys()].sort();
 }
@@ -739,8 +1221,33 @@ export async function invokeHeadlessHarmonyTool(
     workspaceRoot = activeWorkspaceRoot,
     timeoutMs = 120_000
 ): Promise<{ ok: boolean; tool: string; result: string }> {
-    ensureHeadlessHarmonyToolsRegistered(workspaceRoot);
     const normalized = toolName.startsWith('harmony_') ? toolName : `harmony_${toolName}`;
+    if (isRunningInRealVscodeHost()) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const vsc = require('vscode') as typeof import('vscode');
+        const cts = new vsc.CancellationTokenSource();
+        const timer = setTimeout(() => cts.cancel(), Math.max(1000, timeoutMs));
+        try {
+            const raw = await vsc.lm.invokeTool(normalized, { input, toolInvocationToken: undefined }, cts.token);
+            const text = extractToolResultText(raw);
+            return {
+                ok: !/^error:/i.test(text.trim()),
+                tool: normalized,
+                result: text,
+            };
+        } catch (err: any) {
+            return {
+                ok: false,
+                tool: normalized,
+                result: `error: ${err?.message ?? String(err)}`,
+            };
+        } finally {
+            clearTimeout(timer);
+            cts.dispose();
+        }
+    }
+
+    ensureHeadlessHarmonyToolsRegistered(workspaceRoot);
     const tool = registeredTools.get(normalized) ?? registeredTools.get(toolName);
     if (!tool) {
         return {

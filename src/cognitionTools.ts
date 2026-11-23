@@ -349,7 +349,156 @@ class ContextTriageTool implements vscode.LanguageModelTool<ContextTriageInput> 
     async prepareInvocation() { return { invocationMessage: 'Triaging task context' }; }
 }
 
+const AUDHD_LENS_STATE_KEY = 'harmony.cognition.audhdLensState';
+
+type AudhdLensMode = 'omnidirectional' | 'crystal' | 'superposition';
+
+interface AudhdLensInput {
+    action?: 'analyze' | 'set_active_lens' | 'status';
+    lens?: AudhdLensMode;
+    problem?: string;
+    domain_signals?: string[];
+    invariants?: string[];
+}
+
+interface AudhdLensState {
+    active_lens: AudhdLensMode;
+    updated_at: string;
+    last_problem?: string;
+}
+
+function normalizeAudhdLens(value: unknown): AudhdLensMode {
+    if (value === 'omnidirectional' || value === 'crystal' || value === 'superposition') {
+        return value;
+    }
+    return 'superposition';
+}
+
+class AudhdLensTool implements vscode.LanguageModelTool<AudhdLensInput> {
+    constructor(private readonly context: vscode.ExtensionContext) {}
+
+    async invoke(options: vscode.LanguageModelToolInvocationOptions<AudhdLensInput>) {
+        const action = options.input.action ?? 'analyze';
+        const savedState = this.context.workspaceState.get<AudhdLensState>(AUDHD_LENS_STATE_KEY, {
+            active_lens: 'superposition',
+            updated_at: new Date().toISOString(),
+        });
+        const requestedLens = options.input.lens ? normalizeAudhdLens(options.input.lens) : savedState.active_lens;
+        const memory = this.context.workspaceState.get<WorkingMemoryItem[]>(WORKING_MEMORY_KEY, []);
+        const uncertainties = this.context.workspaceState.get<UncertaintyItem[]>(UNCERTAINTY_KEY, []);
+
+        if (action === 'status') {
+            return jsonResult({
+                ok: true,
+                action,
+                state: savedState,
+                working_memory_count: memory.length,
+                uncertainty_count: uncertainties.length,
+            });
+        }
+
+        const nextState: AudhdLensState = {
+            active_lens: requestedLens,
+            updated_at: new Date().toISOString(),
+            last_problem: options.input.problem?.trim() || savedState.last_problem,
+        };
+        await this.context.workspaceState.update(AUDHD_LENS_STATE_KEY, nextState);
+
+        if (action === 'set_active_lens') {
+            return jsonResult({
+                ok: true,
+                action,
+                state: nextState,
+                message: `AuDHD lens locked to '${requestedLens}'.`,
+            });
+        }
+
+        const problem = (options.input.problem ?? nextState.last_problem ?? '').trim();
+        if (!problem) {
+            return textResult('error: problem is required for action="analyze"');
+        }
+
+        const domainSignals = normalizeStringArray(options.input.domain_signals);
+        const customInvariants = normalizeStringArray(options.input.invariants);
+
+        const chaosEngine1 = {
+            name: 'Chaos Engine 1 — Hyper-Divergent ADHD Omnidirectional Field Radar',
+            posture: 'Fires in 12 directions simultaneously; sees the whole living web of human, upstream, time, state, and edge-case interactions at once.',
+            six_vector_scan: [
+                '1. Human / Floor UX Vector: What happens when a user or operator clicks fast, refreshes mid-flight, or switches surfaces?',
+                '2. Upstream / Carrier / Provider Rejection Vector: Which external API, filter, schema, or rate-limit silently drops or rejects the payload?',
+                '3. Time / Window / Timezone Boundary Vector: What happens across quiet hours, timeouts, retries, or clock/session boundaries?',
+                '4. Cross-Channel State Drift Vector: Where do two subsystems (UI, CLI, DB, cache, provider fallback) fail to share a single atomic brain?',
+                '5. Adversarial / Dirty-Input Vector: What happens with malformed JSON, missing signatures, empty inputs, or partial stream chunks?',
+                '6. Silent-Failure / Observability Vector: Where could a guard or fallback fire without leaving a user-visible signal and ledger entry?',
+            ],
+            domain_threads: domainSignals.length > 0
+                ? domainSignals
+                : [
+                    'Trace all callers and fallback branches of the target function before editing.',
+                    'Check whether live state vs. compiled static code is involved (AGENTS.md §2).',
+                ],
+            tentative_working_memory: memory.filter(item => item.status !== 'confirmed'),
+            open_uncertainties: uncertainties.filter(u => u.confidence_0_to_100 < 80),
+        };
+
+        const chaosEngine2 = {
+            name: 'Chaos Engine 2 — Hyper-Focused Autistic Deterministic Crystal',
+            posture: 'Locks onto every seam spotted by Chaos Engine 1 with uncompromising structural precision, strict state-machine invariants, and zero hand-waving.',
+            core_crystal_invariants: [
+                '1. Exact Representation Invariant: Zero floating-point or schema drift; strict typed contracts and 1:1 request/response pairing.',
+                '2. Pre-Flight Gate Invariant: Validate preconditions in memory before any mutation, network call, or external dispatch.',
+                '3. Atomic State & Rollback Invariant: All-or-nothing writes with pre-edit snapshot/backup and cross-channel state synchronization.',
+                '4. Cryptographic / Empirical Proof Invariant: Verify with compile, deterministic test suites, SHA-256 hash checks, or live ledger lines.',
+                '5. AGENTS.md §6 Zero-Silent-Failure Invariant: Every guard, fallback, or retry must emit both a human-readable signal and a ledger entry.',
+            ],
+            locked_invariants: customInvariants,
+            confirmed_working_memory: memory.filter(item => item.status === 'confirmed'),
+        };
+
+        const superpositionSynthesis = {
+            mode: requestedLens,
+            philosophy: 'Two extreme chaos engines balancing one another perfectly into directional omnidirectional harmony: high-velocity breadth + forensic crystal depth at the exact same time.',
+            active_engines: requestedLens === 'omnidirectional'
+                ? { chaos_engine_1: chaosEngine1 }
+                : requestedLens === 'crystal'
+                    ? { chaos_engine_2: chaosEngine2 }
+                    : { chaos_engine_1: chaosEngine1, chaos_engine_2: chaosEngine2 },
+            seam_to_crystal_action_matrix: [
+                {
+                    seam: 'Upstream / Fallback / Schema Boundary',
+                    radar_question: 'What if the primary path fails or streams partial chunks across lines?',
+                    crystal_lock: 'Persist state outside per-chunk loops, backfill trailing metadata, and make fallback paths self-sanitizing.',
+                },
+                {
+                    seam: 'Live State vs. Compiled Output',
+                    radar_question: 'Is a running process writing to this file, or is an extension host running stale compiled JS?',
+                    crystal_lock: 'Never edit live-written ledgers in place; compile + sync out/ + verify by SHA-256 and reload when needed.',
+                },
+                {
+                    seam: 'Verification & Receipt',
+                    radar_question: 'Did the fix actually run in the target environment, or did we only assume it did?',
+                    crystal_lock: 'Prove with exit-0 compile, test gates, and exact ledger/hash evidence before declaring victory.',
+                },
+            ],
+        };
+
+        return jsonResult({
+            ok: true,
+            problem,
+            state: nextState,
+            ...superpositionSynthesis,
+        });
+    }
+
+    async prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<AudhdLensInput>) {
+        const lens = options.input.lens ?? 'superposition';
+        return { invocationMessage: `Engaging AuDHD Dual-Lens (${lens})` };
+    }
+}
+
 export function registerCognitionTools(context: vscode.ExtensionContext) {
+    const dualLensTool = new AudhdLensTool(context);
     context.subscriptions.push(
         vscode.lm.registerTool('harmony_working_memory', new WorkingMemoryTool(context)),
         vscode.lm.registerTool('harmony_uncertainty_map', new UncertaintyMapTool(context)),
@@ -357,5 +506,7 @@ export function registerCognitionTools(context: vscode.ExtensionContext) {
         vscode.lm.registerTool('harmony_intent_model', new IntentModelTool()),
         vscode.lm.registerTool('harmony_output_preview', new OutputPreviewTool()),
         vscode.lm.registerTool('harmony_context_triage', new ContextTriageTool()),
+        vscode.lm.registerTool('harmony_dual_lens', dualLensTool),
+        vscode.lm.registerTool('harmony_audhd_lens', dualLensTool),
     );
 }

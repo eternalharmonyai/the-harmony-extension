@@ -1,8 +1,10 @@
 ﻿[English](README.md) | [中文](README.zh-CN.md)
 
-> 🧪 **实验性软件 — 请以深切的关怀与责任使用**
+> 🧪 **实验性伦理源码软件 — 请以深切的关怀与责任使用**
 >
-> Harmony 扩展处于活跃的早期开发阶段。各项功能——尤其是协奏群（Swarm）、深度协奏群（DeepSwarm）、协奏模式（Orchestration）和翻译功能——功能强大但仍属实验性质。它们可能同时通过多个 AI 服务商产生**显著且不可预测的 API 费用**。使用任何功能前，请通读本 README。若对某项功能的行为、费用影响或配置不确定，**请勿使用**。
+> Harmony 扩展基于 [Hippocratic License 3.0](LICENSE)（伦理源码许可，按**“现状（AS IS）”**提供，不附带任何担保）处于早期活跃开发阶段。各项功能——尤其是协奏群（Swarm）、深度协奏群（DeepSwarm）、协奏模式（Orchestration）、舰队模式（Fleet Mode）和翻译功能——均属实验性质，可能同时通过多个第三方 AI 服务商产生**显著且不可预测的 API 费用**。
+>
+> **用户计费与服务商条款责任声明：** Harmony 使用**您自己配置**的 API 凭证发起调用。所有 API 费用均由您直接向服务商支付，您对自己的账户、密钥、配额、账单支出及遵守各服务商服务条款承担全部责任。Harmony 内显示的所有令牌计数、`~est.` 金额与缓存指标均为**本地工程估算参考**——绝非正式账单、报价或硬性消费封顶。**上下文护盾（Context Shield）**仅在本地优化发送的提示词上下文，无法暂停、封顶或控制上游服务商的实际扣费。使用前请务必在各服务商官方计费控制台配置硬性预算限额与告警，并通读本 README。
 
 # Harmony 扩展（The Harmony Extension）
 
@@ -15,18 +17,23 @@ Harmony 是 VS Code/Cursor 扩展，提供 `@harmony` 聊天、工作区工具�
 - 提供受保护的工作区工具、协奏群规划、记忆、凭证和原生界面诊断。
 - 高风险权限类别保持隔离：源码写入、终端命令、服务商调用、git 变更、包安装、编辑器重载和聊天删除各自独立。
 
-## ✨ Harmony 的独特之处
+## ✨ Harmony 的特色能力
 
-Harmony 提供其他 AI 编码协作者所没有的能力。每一项都只需向下滚动即可跳转查看。
+Harmony 融合了面向人机协同编程的工作流原语。每一项都只需向下滚动即可跳转查看。
 
-| 独特能力 | 为何重要 |
+| 特色能力 | 为何重要 |
 |:---|:---|
+| 🚀 [舰队模式与三席协同架构](#fleet-mode) | 协同调度**总指挥**（唯一写入权限）、**总编排**（只读仓库影响分析）与 **8 类专业协作者角色**，默认经上下文护盾分流执行。 |
+| 🖥️ [独立主权桌面 Studio 与 Harmony Chat](#sovereign-studio) | 在 VS Code 内或零账号同步的原生 Tauri 2 桌面窗口（`:8789`）运行全部 201 个工具——无浏览器账号自动登录，零遥测。 |
+| 🔮 [棱镜圣殿（Prism Sanctuary）](#prism-sanctuary) | 支持严格上下文隔离的可复用专业角色（`Prisms`），确保专项指令绝不串入日常工作区记忆。 |
+| 🛡️ [上下文护盾（Context Shield）](#context-shield) | 前缀逐字节锁定提升 KV 缓存复用、同文件覆盖读取自动去重及协作者分流路由 *（仅本地提示词优化，绝非消费封顶）*。 |
+| 🌗 [双透镜认知叠加（Dual-Lens）](#dual-lens) | 受神经多样性双焦点认知启发，将“全方位场域雷达”与“取证级确定性晶体”不变量深度结合。 |
 | 📥 [密语模式](#whisper-mode) | 在 Harmony **执行过程中**给它发消息——无需打开聊天或重新开始。一条单向异步的人→AI 旁路通道。 |
 | 🎭 [音乐会大厅](#concert-hall) | 重启后依然保留的多智能体协作空间——AI 推理的活生生、可审查的书面记录。 |
 | 🎯 [心流模式](#flow-state-mode) | 自动推进到下一个自然步骤，并始终询问接下来做什么——专为神经多样性用户设计。 |
 | 🔗 [跨聊天连续性](#cross-chat-continuity) | 在 Copilot、Harmony、Gemini 和终端之间保持同一条上下文线索——从哪里停下就从哪里继续。 |
 | 🛡️ [可逆操作账本](#effect-ledger) | 每一次已追踪的变更都被记录并可回滚——撤销文件写入、停止已启动的进程、从中断中恢复。 |
-| 🛡️ [自愈引擎](#self-healing-harness) | 带检查点的 SHA256 校验原子编辑——部分写入不可能发生，失败编辑自动回滚。 |
+| 🛡️ [自愈引擎](#self-healing-harness) | 带编辑前检查点快照的 SHA256 校验编辑——校验未通过时可从快照回滚。 |
 | 🧠 [HarmonyHub](#harmonyhub) | 本地优先的主权记忆——记忆索引保存在您自己的机器上。 |
 | 🌐 [翻译中心](#translation-hub) | 多模型共识的英中互译，防范单一模型出错——专为技术标准文档设计。 |
 | 🌸 [CareBloom](#carebloom) | 自我改进的工具使用，本地学习且零额外 API 调用 *（默认关闭）*。 |
@@ -39,7 +46,7 @@ Harmony 提供其他 AI 编码协作者所没有的能力。每一项都只需�
 ┌─────────────────────────────────────────────────┐
 │  VS Code / Cursor                               │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │ @harmony │  │  侧边栏  │  │  196+ 工具   │  │
+│  │ @harmony │  │  侧边栏  │  │  200+ 工具   │  │
 │  │   聊天   │  │  控制面板 │  │ (基元工具、  │  │
 │  │ 参与者   │  │  & 面板  │  │ 协奏群、git、│  │
 │  │          │  │          │  │ 浏览器等)    │  │
@@ -69,7 +76,7 @@ Harmony 提供其他 AI 编码协作者所没有的能力。每一项都只需�
 └─────────────────────────────────────────────────┘
 ```
 
-聊天界面、侧边栏、196+ 个工具和 65 个命令均在 VS Code 内部运行。15 个协奏群基元工具（收敛、记忆、推理、规划、技能）构成认知基础。AI 模型调用通过 Harmony 自有的服务商层路由到外部 API，使用您自己的 API 密钥。
+聊天界面、侧边栏、200+ 个工具和 65 个命令均在 VS Code 内部运行。15 个协奏群基元工具（收敛、记忆、推理、规划、技能）构成认知基础。AI 模型调用通过 Harmony 自有的服务商层路由到外部 API，使用您自己的 API 密钥。
 
 ### 服务商访问 — Harmony 的独特之处
 
@@ -98,6 +105,21 @@ Harmony 通过您自己的 API 密钥将您连接到多样化的 AI 服务商—
 Harmony 侧边栏在每个服务商旁边显示 `[C]` `[A]` `[E]` `[V]` 槽位标签。绿色标签表示该槽位已配置密钥；灰色标签表示尚未设置。点击任意标签可设置或更改该槽位的密钥。
 
 **旧版密钥迁移：** 若您之前为某服务商配置了单一 API 密钥，Harmony 在首次启动时自动将其迁移至槽位 0（聊天）。无需手动重新配置——您现有的密钥继续有效。
+
+## v0.4.17 更新内容
+
+*v0.4.17 推出舰队模式（Fleet Mode）三席协同架构与支持固定的快捷跳转中枢；实现 Harmony Chat（VS Code Webview）与零账号同步的独立原生桌面 Studio（`:8789`）及棱镜圣殿（Prism Sanctuary）全面对齐；完整集齐 Gemini 4 系列模型（`gemini-4-argon`、`gemini-4-carbon`、`gemini-4-neon`、`gemini-4-hydrogen`）并提供本地服务账号 / ADC / OAuth 凭证支持与三层 VPN/大工具流韧性恢复；加入渲染进程内存护盾 v3（Renderer Memory Shield v3）；并打通 7 项跨原语验证与记忆闭环。*
+
+- **🚀 舰队模式（Fleet Mode）、专业协作者角色与快捷跳转中枢（`harmony.orchestrateMode.fleetEnabled`）**——协同调度 **席位 1：总指挥（Conductor）**（负责规划、综合、提问确认点及唯一文件/终端写入权限）、**席位 2：总编排（Orchestrator）**（只读长上下文仓库影响分析）与 **席位 3：并行协作者舰队（Collaborator Fleet）**（`scout`、`researcher`、`planner`、`implementer`、`verifier`、`critic`、`cost_sentinel`、`hard_reasoner`），默认经上下文护盾分流路由执行，并支持隔离的 `git worktree` 沙箱与独立 Critic + Verifier 联合评审。新增支持吸顶固定的**快捷跳转中枢**（`🌟 前沿主模型`、`⚡ 协奏与舰队`、`🛡️ 上下文护盾与分流`、`📥 悄悄话信箱`、`🧭 路由与密钥`、`📋 计划与用量`、`🧠 主权中枢`）。
+- **✨ Harmony Chat（VS Code Webview）与独立原生桌面 Studio（`:8789`）全面对齐**——在 VS Code 内（右侧副边栏或分屏标签页）及零账号同步的原生 Tauri 2 桌面壳（`harmony-native-control --studio` / `harmony desktop` / MCP `/api/mcp`）共享全部 **201 个注册工具**。现已完整支持内联心流交互提问卡片 `harmony_ask_question`（`explore` / `decide` 模式、`thought` 思考框、多选、`readyCheckbox` 及 `.harmony/ask-answers/` 留档）、跨界面会话连续性（`/save`、`/resume`、`/clear` 与 `_autosave` 自动恢复）、严格上下文隔离的 **🔮 棱镜圣殿（Prism Sanctuary，`prismSanctuary.ts`）**、逐次渲染加密 Nonce CSP、窄侧边栏自适应不裁切工具栏，以及完整多主题色彩适配。
+- **🌟 完整 Gemini 4 家族（`gemini-4-argon`、`gemini-4-carbon`、`gemini-4-neon`、`gemini-4-hydrogen`）与本地凭证存储**——在所有模型选择器、视觉模型选择器与原生 `GenerateContent` 路由中新增帕累托前沿模型 `gemini-4-neon`（`1M` 上下文窗口上限、`64K` 单步前台输出上限、自动 `MINIMAL → LOW` 思考级别钳制；具体配额与行为以上游服务商最新文档为准），与 `gemini-4-carbon`、`gemini-4-argon` 及高速 `gemini-4-hydrogen` 协同工作。支持操作系统权限隔离的本地服务账号 JSON 凭证存储（`vertexAuth.ts`）、专属虚拟机端点显式开启开关（`allowDedicatedVmEndpoints` 默认关闭）、VPN 隧道内 `15s` TCP `SO_KEEPALIVE` 探测、`300s`（5 分钟）大体积 `functionCall` 缓冲流超时下限（含重试自动递增）以及零副作用的 `25s` 界面进度心跳（`vpnResilientTransport.ts`、`geminiNativeStreaming.ts`）。
+- **🛡️ 渲染进程内存护盾 v3（`rendererShield.ts`）**——通过精简 `<512 B` `ChatResult.metadata` 元数据、只读与舰队工具大体积载荷保留在扩展宿主进程（`.harmony/fleet/`）、有界环形缓冲日志通道、`~25 fps`（`40 ms`）SSE 流式合并渲染、已完成待办事项可逆归档至 `.harmony/todos-archive.json`（`todoStore.ts`）以及 Studio 实时 DOM `80` 条消息上限减轻渲染进程内存压力。
+- **双透镜认知叠加、DeepSeek 原生网页搜索及声明式治理原语**——新增 `harmony_dual_lens` / `harmony_audhd_lens`（受神经多样性双焦点认知优势启发，融合“全方位场域雷达”与“取证级确定性晶体”），将 DeepSeek 官方网页搜索与抓取 API（`/v1/tools/search` 与 `/v1/tools/fetch`）接入 `harmony_web_search` 与 `harmony_fetch_url`，并新增声明式治理原语（`harmony_rule_matrix_eval`、`harmony_architecture_risk_audit` 与 `harmony_policy_gate_check`）。
+- **7 项跨原语验证与记忆闭环**——涵盖携带证明的补丁见证（`citationRecord.ts` + `decisionLog.ts`）、反事实影子工作树与 `Kairos` 经验仲裁（`temporalBranch.ts` + `convergenceArbiter.ts`）、闭环认知校准（`uncertaintyFabric.ts`）、见证门控 `Rigor` 验证（`thoughtGraph.ts`）、全息工作记忆摘要与中日韩感知令牌校准（`inTurnCompaction.ts` + `costTracker.ts`）、自主抗体结晶器（`careBloom.ts`）以及两阶段顾问 / 反向耳语（`whisperInbox.ts`）。
+- **🛡️ 上下文护盾与用户计费责任声明（`harmony.costShield.mode`、`harmony.costShield.workerRoute`）**——在多跳智能体轮次间保持系统提示词与工具 Schema 前缀逐字节锁定、自动去重同文件覆盖读取，并在机械步骤自适应下调思考消耗。*重要计费责任说明：API 费用由您的云服务商直接收取，而非 Harmony。应用内显示的令牌数与 `~est.` 金额仅为本地静态费率表的非官方近似估算，并非账单，无法实时反映服务商调价、长上下文分段计费、思考令牌、重试/回退、临时缓存预授权冻结或税费。上下文护盾仅优化本地提示词与分流路由，**并非**硬性消费封顶。请务必直接登录您的官方服务商计费控制台（Google Cloud Billing / AI Studio、DeepSeek、Anthropic、OpenAI 等）核实真实账单并设置硬性预算告警。*
+- **17 服务商健康度平局排序修复**——`rankProviders`（`providerHealth.ts`）的 `prefOrder` 现已覆盖全部 17 个服务商 ID，避免未列出的服务商在首次安装时以 `-1` 排在 `deepseek` 之前。
+
+完整说明：[release-notes-v0.4.17.md](release-notes-v0.4.17.md)
 
 ## v0.4.16 更新内容
 
@@ -156,6 +178,8 @@ DeepSeek V4 Flash Vision（实验性多模态）已注册为原生模型并接�
 |:--|:--|:--|:--|:--|:--|
 | OpenAI | `gpt-6-astra` | `gpt-5.6-sol` | `gpt-5.6-terra` | `gpt-5.6-luna` | `gpt-5.6-sol` |
 | Claude | `claude-fable-5-1` | `claude-opus-5` | `claude-sonnet-5` | `claude-haiku-4-5-20251001` | `claude-opus-5` |
+
+> *关于模型 ID 的说明：* Harmony 的默认注册表同时包含已公开可用（GA）的模型标识以及前沿/预览/自定义网关模型标识（如 `gemini-4-argon`、`deepseek-flash`、`gpt-6-astra` 与 `claude-fable-5-1`）。任何层级或服务商的模型 ID 均可在 VS Code 设置（`harmony.<provider>.<tier>Model`）或 `.env` 中覆盖，以匹配您服务商账户或 OpenAI 兼容网关上实际启用的模型名称。
 
 Claude 请求还获得了按模型的思考/温度处理（Fable 省略思考参数；5 系列使用自适应；Haiku 使用预算令牌；温度参数完全省略，与 Moonshot/Kimi 一致）。
 
@@ -835,6 +859,40 @@ Harmony 的协奏、DeepSwarm 和音乐会大厅建立在 15 个企业级基元�
 
 Harmony 包含核心工作流之外的若干独特能力。这些功能使 Harmony 不仅仅是一个 AI 聊天扩展。
 
+<a id="fleet-mode"></a>
+
+### 🚀 舰队模式（Fleet Mode）——三席总指挥、总编排与协作者架构
+
+舰队模式（`harmony.orchestrateMode.fleetEnabled`）将高阶架构决策与高频代码库探索清晰拆分为三个协同席位：
+
+- **席位 1 — 总指挥（Conductor，主聊天）：** 执掌整体架构、最终综合、`harmony_ask_question` 人类确认点，以及唯一的文件与终端写入权限。
+- **席位 2 — 总编排（Orchestrator，`harmony_orchestrate_codebase`）：** 在跨文件重构前生成只读长上下文仓库影响图谱。
+- **席位 3 — 并行协作者舰队（Collaborator Fleet，`harmony_parallel` / `harmony_spawn_worker`）：** 通过您配置的上下文护盾分流目标并发调度 8 类只读专家角色（`scout`、`researcher`、`planner`、`implementer`、`verifier`、`critic`、`cost_sentinel`、`hard_reasoner`），在本地零总指挥输出令牌开销注入工作区文件，并将完整协作者记录保存于 `.harmony/fleet/`。
+
+<a id="sovereign-studio"></a>
+
+### 🖥️ 独立主权桌面 Studio（`:8789`）与 Harmony Chat
+
+既可在 VS Code 内（右侧副边栏 Harmony Chat 或全屏 Studio 编辑器标签页）使用，也可在独立原生 Tauri 2 桌面窗口（`harmony-native-control --studio`）中直接运行全部 **201 个已注册 Harmony 工具**。原生桌面壳在进程边界锁定本地回环源，杜绝消费级浏览器配置同步、Windows/Google 账号自动登录与遥测上传，同时共享会话连续性（`/save`、`/resume`、`_autosave`）与内联心流提问卡片。
+
+<a id="prism-sanctuary"></a>
+
+### 🔮 棱镜圣殿（Prism Sanctuary）——严格上下文隔离的专项角色库
+
+棱镜圣殿（`prismSanctuary.ts`）支持在 Harmony Chat 与独立桌面 Studio 中创建、导入并切换可复用的专业角色（`Prisms`）。每个棱镜在 `.harmony/sanctuary/` 下保持严格的独立上下文边界，避免专项提示词与参考笔记污染常规工作区对话。
+
+<a id="context-shield"></a>
+
+### 🛡️ 上下文护盾（Context Shield）——前缀锁定提示词优化与协作者分流
+
+上下文护盾（`harmony.costShield.mode`、`harmony.costShield.workerRoute`）在多跳智能体轮次间逐字节锁定系统提示词与 201 个工具 JSON Schema 前缀以提升上游 KV 缓存命中率，原地去重同文件覆盖读取，并将只读协作者任务路由至指定分流模型。*（上下文护盾仅执行本地提示词整理与路由优化，绝非消费封顶或账单担保；请务必在各服务商官方计费控制台配置硬性预算告警。）*
+
+<a id="dual-lens"></a>
+
+### 🌗 双透镜认知叠加（`harmony_dual_lens` / `harmony_audhd_lens`）
+
+受神经多样性双焦点认知优势启发，双透镜叠加将 **混沌引擎 1（全方位场域雷达）**——跨领域扫描真实业务边界与潜在缝隙——与 **混沌引擎 2（取证级确定性晶体）**——在动笔修改代码前将每处边界收敛为可验证的结构化不变量——深度结合。
+
 <a id="concert-hall"></a>
 
 ### 🎭 音乐会大厅（Concert Hall）——持久协作空间
@@ -923,9 +981,8 @@ Harmony Creative 通过本地创作后端（端口 8896）提供图像生成、�
 
 Harmony 的文件编辑工具使用 SHA256 验证的原子编辑，具备检查点和回滚功能。每次编辑前写入检查点。每次编辑后验证变更。若验证失败，引擎回滚到上一个已知良好状态。
 
-- **SHA256 验证**——每次编辑经密码学验证
-- **原子写入**——不可能出现部分写入；文件要么完全写入，要么不变
-- **检查点**——编辑前快照支持即时回滚
+- **SHA256 验证**——每次写入后经密码学哈希校验
+- **检查点回滚**——编辑前快照支持在校验未通过或异常中断后恢复
 - **冲突检测**——检测并拒绝过时/冲突编辑
 
 设置见[可选：Python & 自愈引擎](#可选python--自愈引擎)。TypeScript 回退无需 Python 即可工作。
@@ -963,7 +1020,9 @@ Harmony 会说中文。完整的 i18n，具备 `locales/zh.json`、`package.nls.
 
 **隐私：** Harmony 将 API 密钥存储在 VS Code Secret Storage 中。聊天历史、连续性交接和工具调用元数据存储在 `.harmony/` 下。Harmony 不向任何第三方发送任何遥测、分析或使用数据。服务商 API 调用受各服务商各自隐私政策约束。
 
-**不良行为者：** Harmony 是源代码公开的开发者工具（Hippocratic License 3.0）。它并非设计用于规避服务商速率限制、服务条款或本地安全边界。若您以违反服务商可接受使用政策的方式使用 Harmony，您承担全部责任。
+**伦理源码与合规使用：** Harmony 是基于 [Hippocratic License 3.0](LICENSE) 发布的伦理源码（Ethical-Source）开发者工具。它并非设计用于规避服务商速率限制、服务条款或本地安全边界。您须自行负责遵守适用法律及各第三方服务商条款；若您以违反服务商可接受使用政策或 Hippocratic License 的方式使用 Harmony，您承担全部责任。
+
+**第三方商标与非关联声明：** Google、Gemini 与 Vertex AI 为 Google LLC 的商标；Claude 为 Anthropic, PBC 的商标；OpenAI 为 OpenAI, Inc. 的商标；Microsoft、VS Code 与 GitHub Copilot 为 Microsoft Corporation 的商标；其余所有产品与公司名称均为其各自所有者的商标。Harmony 由 Eternal Harmony LLC 独立开发，与任何第三方 API 服务商均无隶属、背书或赞助关系。
 
 ## 包产物
 

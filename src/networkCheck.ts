@@ -17,6 +17,7 @@ import * as dns from 'dns';
 import { execFile } from 'child_process';
 import { LanguageManager } from './languageManager';
 import { providerEndpointInfo, type EndpointProviderId } from './providers';
+import { createBoundedOutputChannel, type BoundedOutputChannel } from './rendererShield';
 
 const tr = (key: string) => LanguageManager.getInstance().getString(key);
 
@@ -179,7 +180,7 @@ async function probe(url: string): Promise<{ ok: boolean; detail: string; ms: nu
  * the silent-redirect class on their own.
  */
 export async function runNetworkCheck(
-    options: { dnsOnly?: boolean; channel?: vscode.OutputChannel } = {}
+    options: { dnsOnly?: boolean; channel?: Pick<vscode.OutputChannel, 'appendLine'> } = {}
 ): Promise<NetworkFinding[]> {
     const { dnsOnly = false, channel } = options;
     const findings: NetworkFinding[] = [];
@@ -299,11 +300,14 @@ async function copyFixCommands(text: string) {
 }
 
 export function registerNetworkCheck(context: vscode.ExtensionContext) {
-    let channel: vscode.OutputChannel | undefined;
+    let channel: BoundedOutputChannel | undefined;
     const getChannel = () => {
         if (!channel) {
-            channel = vscode.window.createOutputChannel('Harmony Network Check');
-            context.subscriptions.push(channel);
+            channel = createBoundedOutputChannel(
+                () => vscode.window.createOutputChannel('Harmony Network Check'),
+                { name: 'Harmony Network Check', ignoreDispose: true }
+            );
+            context.subscriptions.push({ dispose: () => channel?.disposeForShutdown() });
         }
         return channel;
     };

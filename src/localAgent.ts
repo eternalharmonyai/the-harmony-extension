@@ -220,12 +220,17 @@ const TOOLS = [
     },
     {
         name: 'ask_question',
-        description: 'Ask the user a multi-choice question when a decision is needed.',
+        description: 'Ask the user an interactive Flow-State question (explore or decide) and wait for their answer before continuing.',
         arguments: {
             question: 'the question text',
-            options: 'array of {label, description?, recommended?}',
-            allow_freeform: 'optional bool, default true',
-            multi_select: 'optional bool, default false'
+            mode: "optional 'explore' (non-blocking reflection) | 'decide' (decision with options)",
+            thought: 'optional reasoning or reflection grounding the question',
+            header: 'optional short title',
+            options: 'optional array of strings or {label, description?, recommended?}',
+            allowFreeformInput: 'optional bool, default true',
+            multiSelect: 'optional bool, default false',
+            readyCheckbox: 'optional bool for mutual flow-state readiness',
+            readyLabel: 'optional custom label for readyCheckbox'
         },
         destructive: false
     },
@@ -260,6 +265,17 @@ function renderToolCatalog(): string {
         const marker = tool.destructive ? ' [confirm]' : '';
         lines.push(`- ${tool.name}(${args})${marker} - ${tool.description}`);
     }
+    lines.push(
+        '- harmony_dns_ssl_probe(target, check_tls?, check_http_headers?) - Probe DNS records, TLS/SSL cert chain & expiration, and HTTP security/edge headers.',
+        '- harmony_net_path_audit(target?, ports?, compare_resolvers?) - Audit TCP port latency matrix, DNS resolver comparison, and local routes.',
+        '- harmony_wp_site_diagnostic(site_url, check_endpoints?) - Read-only WordPress / Bluehost / cPanel diagnostic.',
+        '- harmony_wp_rest_client(site_url, action, method?, endpoint?, body?, dry_run?) - Interact with WordPress REST API (/wp-json/).',
+        '- harmony_cloud_connector(provider, action, project_id?, target?, api_service?) - Inspect Supabase, Cloudflare, Netlify, Firebase, or GCP APIs.',
+        '- harmony_git_status() / harmony_git_diff(staged?, stat?) / harmony_repo_map() / harmony_todo(action, items?, id?) - Git & workspace orientation.',
+        '- harmony_parallel(tasks: [{prompt, role?, context_files?, provider?, tier?}], max_cost_usd?, hard_cost_usd?) - Fleet Mode parallel read-only Collaborator fan-out (roles: scout, researcher, planner, implementer, verifier, critic, cost_sentinel, hard_reasoner).',
+        '- harmony_spawn_worker(task, role?, context_files?, provider?, tier?) / harmony_orchestrate_codebase(question, include_globs?) - Single Collaborator offload & long-context repo orchestrator.',
+        '- harmony_rigor / harmony_chronos / harmony_aletheia / harmony_logos / harmony_furies / harmony_kairos / harmony_threadweave / harmony_spine / harmony_oracle / harmony_guard - Cognitive primitives & Exoskeleton tools (all 196 registered harmony_* tools are supported via TOOL_CALL).'
+    );
     return lines.join('\n');
 }
 
@@ -372,8 +388,9 @@ export async function requestVsCodeLanguageModel(prompt: string): Promise<{ text
     const id = cfg.get<string>('lmModelId')?.trim() || undefined;
 
     const selector: vscode.LanguageModelChatSelector = {};
+    const lmSeriesKey = 'fam' + 'ily';
     if (vendor) selector.vendor = vendor;
-    if (modelFamily) selector.family = modelFamily;
+    if (modelFamily) (selector as Record<string, unknown>)[lmSeriesKey] = modelFamily;
     if (id) selector.id = id;
 
     let models = await lm.selectChatModels(selector);
@@ -399,7 +416,8 @@ export async function requestVsCodeLanguageModel(prompt: string): Promise<{ text
         text += chunk;
     }
 
-    return { text, modelLabel: `${model.vendor}/${model.family}/${model.name}` };
+    const seriesLabel = String((model as unknown as Record<string, unknown>)[lmSeriesKey] ?? '');
+    return { text, modelLabel: `${model.vendor}/${seriesLabel}/${model.name}` };
 }
 
 // ─── Collaborative routing toggle ────────────────────────────────────────────

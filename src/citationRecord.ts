@@ -368,6 +368,16 @@ export async function verifyChain(
             }
         }
 
+        if (rec.harmony_record === 'patch-attestation/1') {
+            const b = rec.body as PatchAttestationBody;
+            if (!Array.isArray(b.files) || b.files.length === 0) {
+                at('patch-attestation/1 requires non-empty files array');
+            }
+            if (b.attested_at !== undefined && !isCanonicalTimestamp(b.attested_at)) {
+                at(`attested_at "${b.attested_at}" is not canonical RFC 3339 UTC timestamp`);
+            }
+        }
+
         prev = rec.id;
         verified++;
     }
@@ -617,6 +627,82 @@ export async function createGenesis(
     }
     return signRecord('genesis/1', body, emptyChain(key.signer, key.keyid), key);
 }
+
+// ─── Proof-Carrying Patch Attestations & Internal Assumption Liveness (Leap I) ───
+
+export interface PatchAttestationFileDigest {
+    file: string;
+    pre_sha256: string;
+    post_sha256: string;
+}
+
+export interface PatchAttestationBody {
+    attested_at: string;
+    files: PatchAttestationFileDigest[];
+    thought_node_ids: string[];
+    decision_ids: string[];
+    pbt_witness?: {
+        seed: number;
+        runs: number;
+        passed: boolean;
+    };
+    oracle_receipt?: {
+        command: string;
+        exit_code: number;
+    };
+}
+
+export function createPatchAttestation(
+    body: PatchAttestationBody,
+    chain: ChainHead,
+    key: SigningKey
+): Promise<{ record: SignedRecord<PatchAttestationBody>; chain: ChainHead }> {
+    if (!Array.isArray(body.files) || body.files.length === 0) {
+        throw new Error('patch-attestation/1 requires at least one file digest');
+    }
+    return signRecord('patch-attestation/1', body, chain, key);
+}
+
+export interface CodeWatchpoint {
+    file: string;
+    symbol?: string;
+    baseline_sha256: string;
+}
+
+export interface CodeLivenessReport {
+    file: string;
+    symbol?: string;
+    verdict: 'live-unchanged' | 'altered' | 'removed';
+    baseline_sha256: string;
+    current_sha256?: string;
+}
+
+/**
+ * Check whether an internal code watchpoint (bound to a Threadweave decision
+ * or Rigor claim) is still `live-unchanged` or has been `altered` / `removed`.
+ */
+export async function checkCodeWatchpointLiveness(
+    watchpoint: CodeWatchpoint,
+    currentContent: string | null | undefined
+): Promise<CodeLivenessReport> {
+    if (currentContent === null || currentContent === undefined) {
+        return {
+            file: watchpoint.file,
+            symbol: watchpoint.symbol,
+            verdict: 'removed',
+            baseline_sha256: watchpoint.baseline_sha256,
+        };
+    }
+    const nowHash = await contentHash(currentContent);
+    return {
+        file: watchpoint.file,
+        symbol: watchpoint.symbol,
+        verdict: nowHash === watchpoint.baseline_sha256 ? 'live-unchanged' : 'altered',
+        baseline_sha256: watchpoint.baseline_sha256,
+        current_sha256: nowHash,
+    };
+}
+
 
 /** Open a chain with its recovery binding committed in-chain. The recommended start. */
 export async function startChain(

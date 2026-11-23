@@ -246,3 +246,61 @@ export class ConvergenceArbiterTool extends BasePrimitive<ConvergenceArbiterInpu
         return textResult(JSON.stringify(v, null, 2));
     }
 }
+
+// ── Empirical Convergence Arbitration (Kairos v2 — Leap II) ─────────────────
+// Evaluates competing counterfactual branches by empirical execution metrics
+// (`compilePass`, `oraclePass`, `pbtPassRate`, `diffLoc`, `durationMs`, `costUsd`)
+// so working code beats persuasive prose in multi-model races.
+
+export interface EmpiricalBranchCandidate {
+    branchId: string;
+    model?: string;
+    compilePass: boolean;
+    oraclePass: boolean;
+    /** Property-based test pass rate in [0, 1]. Defaults to 1.0 when not applicable. */
+    pbtPassRate?: number;
+    /** Total lines added + removed in the candidate diff. */
+    diffLoc?: number;
+    durationMs?: number;
+    costUsd?: number;
+}
+
+export interface EmpiricalBranchScore {
+    branchId: string;
+    model?: string;
+    eligible: boolean;
+    utility: number;
+    rank: number;
+}
+
+export function arbitrateEmpiricalBranches(
+    candidates: ReadonlyArray<EmpiricalBranchCandidate>
+): { winner?: EmpiricalBranchScore; ranked: EmpiricalBranchScore[] } {
+    const scored: EmpiricalBranchScore[] = candidates.map(c => {
+        const eligible = Boolean(c.compilePass && c.oraclePass);
+        if (!eligible) {
+            return { branchId: c.branchId, model: c.model, eligible: false, utility: 0, rank: 0 };
+        }
+        const pbt = Math.min(1, Math.max(0, c.pbtPassRate ?? 1));
+        const locPenalty = Math.min(0.30, Math.max(0, (c.diffLoc ?? 0) / 2000) * 0.30);
+        const latencyPenalty = Math.min(0.15, Math.max(0, (c.durationMs ?? 0) / 60_000) * 0.15);
+        const costPenalty = Math.min(0.15, Math.max(0, (c.costUsd ?? 0) / 1.0) * 0.15);
+        const rawUtility = 100 * pbt - 100 * (locPenalty + latencyPenalty + costPenalty);
+        return {
+            branchId: c.branchId,
+            model: c.model,
+            eligible: true,
+            utility: Math.round(Math.max(0.01, rawUtility) * 100) / 100,
+            rank: 0,
+        };
+    });
+
+    scored.sort((a, b) => {
+        if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
+        return b.utility - a.utility;
+    });
+    scored.forEach((s, idx) => { s.rank = idx + 1; });
+    const winner = scored.find(s => s.eligible);
+    return { winner, ranked: scored };
+}
+

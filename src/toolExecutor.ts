@@ -335,7 +335,7 @@ function resolveWorkspacePath(p: string): string | undefined {
         const relativePath = normalized.startsWith(folderPrefix) ? normalized.slice(folderPrefix.length) : p;
         const resolved = path.isAbsolute(p) ? path.resolve(p) : path.resolve(root, relativePath);
         const rel = path.relative(root, resolved);
-        if (!rel.startsWith('..') && !path.isAbsolute(rel)) return resolved;
+        if (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) return resolved;
     }
 
     return undefined;
@@ -345,7 +345,7 @@ function workspaceRootForPath(resolvedPath: string): string | undefined {
     for (const folder of workspaceFoldersByPriority()) {
         const root = folder.uri.fsPath;
         const rel = path.relative(root, resolvedPath);
-        if (!rel.startsWith('..') && !path.isAbsolute(rel)) return root;
+        if (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) return root;
     }
     return undefined;
 }
@@ -459,7 +459,7 @@ async function writeFileTool(args: any): Promise<ToolResult> {
         const verifyError = await verifyTextOnDisk(p, resolved, content);
         if (verifyError) return { tool_call_id: id, ok: false, result: verifyError };
         await recordEffect({ kind: 'file', target: p, action: 'write', inverse: snapshot.snapshot?.id, compensating: snapshot.snapshot?.restoreCommand }).catch(() => undefined);
-        return { tool_call_id: id, ok: true, result: `verified write of ${String(content).length} chars to ${p}${formatSnapshotNote(snapshot.snapshot)}` };
+        return { tool_call_id: id, ok: true, result: `verified write of ${String(content).length} chars to ${p}${formatSnapshotNote(snapshot.snapshot, snapshot.warnings)}` };
     } catch (e: any) {
         return { tool_call_id: id, ok: false, result: e?.message ?? String(e) };
     }
@@ -825,11 +825,16 @@ const NON_INTERACTIVE_TOOLS: Record<string, (args: any) => Promise<ToolResult>> 
  * by the chat view directly.
  */
 export async function executeTool(call: ToolCall): Promise<ToolResult | null> {
-    if (isInteractiveTool(call.name)) return null;
+    if (!call || typeof call.name !== 'string' || isInteractiveTool(call.name)) return null;
     const stripped = call.name.replace(/^harmony_/, '');
-    const handler = NON_INTERACTIVE_TOOLS[call.name] ?? NON_INTERACTIVE_TOOLS[stripped];
+    const hasOwn = (k: string) => Object.prototype.hasOwnProperty.call(NON_INTERACTIVE_TOOLS, k);
+    const handler = hasOwn(call.name)
+        ? NON_INTERACTIVE_TOOLS[call.name]
+        : hasOwn(stripped)
+            ? NON_INTERACTIVE_TOOLS[stripped]
+            : undefined;
     if (handler) {
-        return await handler({ ...call.arguments, _id: call.id });
+        return await handler({ ...(call.arguments ?? {}), _id: call.id });
     }
     try {
         const { invokeHeadlessHarmonyTool } = await import('./host/vscodeHostShim');

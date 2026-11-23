@@ -7,11 +7,20 @@
  */
 'use strict';
 
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
 const {
     planInTurnCompaction,
+    deduplicateSupersededToolResults,
     OFFLOAD_MARKER,
+    OFFLOAD_MARKER_PREFIX,
+    MAX_HOLOGRAPHIC_STUB_CHARS,
     COMPACTION_KEEP_NEWEST_MESSAGES,
     isContextLengthError,
+    extractHolographicSummary,
+    buildHolographicStub,
+    rehydrateSpilledToolResult,
 } = require('../out/inTurnCompaction');
 
 let pass = 0;
@@ -117,6 +126,123 @@ check('keep-newest constant is 8 (window width)', COMPACTION_KEEP_NEWEST_MESSAGE
     check('classifier: reasoning-param 400 NOT matched', isContextLengthError('DeepSeek HTTP 400: reasoning_effort is not supported for this model') === false);
     check('classifier: plain network error NOT matched', isContextLengthError('fetch failed') === false);
     check('classifier: window wording on a 500 NOT matched (4xx only)', isContextLengthError('DeepSeek HTTP 500: maximum context length internal error') === false);
+}
+
+// 7 — Holographic Structural Stubs + Turn-Spill Rehydration (Leap V)
+{
+    const samplePayload = [
+        'File: src/inTurnCompaction.ts:42:5',
+        'export function planInTurnCompaction(messages: CompactionMessage[]) {',
+        'export interface HolographicSummary { sha256Prefix: string; }',
+        'Error: HTTP 400 ECONNRESET ERR_INVALID_ARG_TYPE',
+        big(2500),
+    ].join('\n');
+    const summary = extractHolographicSummary(samplePayload);
+    check('holographic: extracts SHA-256 12-char prefix', typeof summary.sha256Prefix === 'string' && summary.sha256Prefix.length === 12);
+    check('holographic: extracts file:line reference', summary.files.includes('src/inTurnCompaction.ts:42:5'));
+    check('holographic: extracts function/interface symbols', summary.symbols.includes('planInTurnCompaction') && summary.symbols.includes('HolographicSummary'));
+    check('holographic: extracts HTTP and error codes', summary.codes.includes('HTTP 400') && summary.codes.includes('ECONNRESET'));
+
+    const stub = buildHolographicStub(samplePayload, 'call_abc123');
+    check('holographic: stub begins with OFFLOAD_MARKER_PREFIX (idempotency preserved)', stub.startsWith(OFFLOAD_MARKER_PREFIX));
+    check('holographic: stub length is bounded <= MAX_HOLOGRAPHIC_STUB_CHARS', stub.length <= MAX_HOLOGRAPHIC_STUB_CHARS);
+
+    const tmpSpill = fs.mkdtempSync(path.join(os.tmpdir(), 'harmony-spill-test-'));
+    try {
+        const msgs = [
+            { role: 'tool', tool_call_id: 'call_abc123', content: samplePayload },
+            ...freshMessages().slice(8),
+        ];
+        const r = planInTurnCompaction(msgs, 500, 8, { holographic: true, spillDir: tmpSpill });
+        check('holographic compaction: stubs 1 and records spilledIds', r.stubbed === 1 && Array.isArray(r.spilledIds) && r.spilledIds[0] === 'call_abc123');
+        check('holographic compaction: second run is idempotent', planInTurnCompaction(msgs, 500, 8, { holographic: true }).stubbed === 0);
+
+        const sliceRes = rehydrateSpilledToolResult(tmpSpill, 'call_abc123', { startChar: 0, maxChars: 90 });
+        check('holographic rehydration: restores exact character slice and sha256Prefix',
+            sliceRes.ok === true && sliceRes.sha256Prefix === summary.sha256Prefix && sliceRes.slice.startsWith('File: src/inTurnCompaction.ts:42:5'));
+
+        const grepRes = rehydrateSpilledToolResult(tmpSpill, 'call_abc123', { pattern: 'HolographicSummary' });
+        check('holographic rehydration: pattern search locates matching line',
+            grepRes.ok === true && Array.isArray(grepRes.matches) && grepRes.matches.length === 1 && grepRes.matches[0].startsWith('L3:'));
+    } finally {
+        fs.rmSync(tmpSpill, { recursive: true, force: true });
+    }
+}
+
+// 8 — Frontier Cost Shield: Same-File Read Deduplication & Deterministic Gemini Prefix
+{
+    const { installVscodeHostShim } = require('../out/host/vscodeHostShim');
+    installVscodeHostShim(process.cwd());
+    const { convertToolsToGemini } = require('../out/geminiNativeStreaming');
+    const { estimateCost } = require('../out/costTracker');
+
+    const oldRead = big(2500);
+    const coveringRead = big(2800);
+    const msgs = [
+        { role: 'user', content: 'Inspect foo.ts' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'c1', function: { name: 'harmony_read_file', arguments: JSON.stringify({ path: 'src/foo.ts', start_line: 10, end_line: 40 }) } }] },
+        { role: 'tool', tool_call_id: 'c1', content: oldRead },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'c2', function: { name: 'harmony_read_file', arguments: JSON.stringify({ path: 'src/foo.ts', start_line: 1, end_line: 100 }) } }] },
+        { role: 'tool', tool_call_id: 'c2', content: coveringRead },
+    ];
+    const dedup = deduplicateSupersededToolResults(msgs);
+    check('cost-shield dedup: stubs covered earlier read', dedup.stubbed === 1 && dedup.charsSaved > 2000);
+    check('cost-shield dedup: preserves OFFLOAD_MARKER_PREFIX and newer read verbatim',
+        msgs[2].content.startsWith(OFFLOAD_MARKER_PREFIX) && msgs[4].content === coveringRead);
+    check('cost-shield dedup: idempotent on second pass', deduplicateSupersededToolResults(msgs).stubbed === 0);
+
+    const toolsA = [
+        { function: { name: 'harmony_z', description: 'Z', parameters: { type: 'object', properties: { b: { type: 'string' }, a: { type: 'number' } }, required: ['b', 'a'] } } },
+        { function: { name: 'harmony_a', description: 'A', parameters: { type: 'object', properties: { y: { type: 'boolean' }, x: { type: 'string' } }, required: ['y', 'x'] } } },
+    ];
+    const toolsB = [
+        { function: { name: 'harmony_a', description: 'A', parameters: { type: 'object', properties: { x: { type: 'string' }, y: { type: 'boolean' } }, required: ['x', 'y'] } } },
+        { function: { name: 'harmony_z', description: 'Z', parameters: { type: 'object', properties: { a: { type: 'number' }, b: { type: 'string' } }, required: ['a', 'b'] } } },
+    ];
+    check('cost-shield prefix: convertToolsToGemini produces byte-identical sorted schemas',
+        JSON.stringify(convertToolsToGemini(toolsA)) === JSON.stringify(convertToolsToGemini(toolsB)));
+
+    const uncached = estimateCost('gemini', 'gemini-4-argon', 100000, 2000);
+    const cached = estimateCost('gemini', 'gemini-4-argon', 100000, 2000, 80000);
+    check('cost-shield accounting: Gemini 75% cached prompt discount applied accurately',
+        Math.abs(uncached - 0.135) < 1e-6 && Math.abs(cached - 0.06) < 1e-6);
+
+    const carbonUncached = estimateCost('gemini', 'gemini-4-carbon', 100000, 2000);
+    const carbonCached = estimateCost('gemini', 'gemini-4-carbon', 100000, 2000, 80000);
+    check('cost-shield accounting: Gemini 4 Carbon uses frontier pricing + 75% cache discount',
+        Math.abs(carbonUncached - 0.135) < 1e-6 && Math.abs(carbonCached - 0.06) < 1e-6);
+
+    const hydrogenUncached = estimateCost('gemini', 'gemini-4-hydrogen', 100000, 2000);
+    const hydrogenCached = estimateCost('gemini', 'gemini-4-hydrogen', 100000, 2000, 80000);
+    check('cost-shield accounting: Gemini 4 Hydrogen uses fast/light pricing + 75% cache discount',
+        Math.abs(hydrogenUncached - 0.0081) < 1e-6 && Math.abs(hydrogenCached - 0.0036) < 1e-6);
+
+    const { resolveGeminiGenerateContentRequest } = require('../out/providers');
+    const { convertMessagesToGeminiContents } = require('../out/geminiNativeStreaming');
+    const aiStudioReq = resolveGeminiGenerateContentRequest('gemini-4-carbon', 'AIzaSyTestKey', 'streamGenerateContent', true);
+    check('gemini endpoint resolver: default ai-studio targets generativelanguage.googleapis.com with x-goog-api-key header',
+        aiStudioReq.backend === 'ai-studio'
+        && aiStudioReq.url.includes('generativelanguage.googleapis.com/v1beta/models/gemini-4-carbon:streamGenerateContent?alt=sse')
+        && aiStudioReq.headers['x-goog-api-key'] === 'AIzaSyTestKey');
+
+    const bearerReq = resolveGeminiGenerateContentRequest('gemini-4-argon', 'ya29.a0AfH6SMTestToken', 'generateContent', false);
+    check('gemini endpoint resolver: ya29.* OAuth token uses Authorization Bearer header',
+        bearerReq.headers['Authorization'] === 'Bearer ya29.a0AfH6SMTestToken'
+        && !bearerReq.headers['x-goog-api-key']);
+
+    const unionTools = [
+        { function: { name: 'harmony_union_test', description: 'Union param test', parameters: { type: 'object', properties: { nullableText: { type: ['string', 'null'] } } } } }
+    ];
+    const convertedUnion = convertToolsToGemini(unionTools);
+    check('gemini schema converter: handles JSON-Schema union array type ["string","null"] without throwing',
+        convertedUnion[0].parameters.properties.nullableText.type === 'STRING');
+
+    const orphanHistory = convertMessagesToGeminiContents([
+        { role: 'user', content: 'Hello' },
+        { role: 'tool', tool_call_id: 'call_orphaned_123', content: 'Orphaned result' }
+    ]);
+    check('gemini history converter: degrades orphaned tool result to text instead of invalid functionResponse',
+        orphanHistory.contents.every((c) => c.parts.every((p) => !p.functionResponse)));
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

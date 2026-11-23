@@ -313,5 +313,134 @@ export function formatWhispersForPrompt(whispers: Whisper[]): string {
         const ts = new Date(w.createdAt).toISOString().slice(0, 16).replace('T', ' ');
         return `[${ts}] ${w.body}`;
     });
-    return `📥 WHISPER INBOX — ${whispers.length} queued message(s) from terminal/commands:\n\n${blocks.join('\n\n')}\n\n(These were sent via @harmony in the terminal or Harmony: Write Whisper. They appear as user context — treat them as the user's words.)`;
+    return `📥 WHISPER INBOX — ${whispers.length} live message(s) from terminal/commands:\n\n${blocks.join('\n\n')}\n\n(These were sent via @harmony in the terminal or Harmony: Write Whisper. They appear as user context — treat them as the user's words.)`;
 }
+
+// ── Reverse-Whisper (Non-Blocking AI → Human Side-Channel) ─────
+// Allows an active turn to surface a non-blocking value/tradeoff card with
+// 2–4 principle options and a default path so Flow State is never halted.
+// If the human selects an override option, it writes directly into the
+// mid-session Whisper Inbox so the agent receives it on the next step.
+
+export interface ReverseWhisperOption {
+    id: string;
+    label: string;
+    principle?: string;
+}
+
+export interface ReverseWhisperCard {
+    id: string;
+    createdAt: number;
+    question: string;
+    options: ReverseWhisperOption[];
+    defaultOptionId: string;
+    selectedOptionId?: string;
+    resolvedAt?: number;
+    status: 'pending' | 'resolved';
+}
+
+function outboxDir(): vscode.Uri | undefined {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!root) return undefined;
+    return vscode.Uri.joinPath(root, '.harmony', 'outbox');
+}
+
+export async function emitReverseWhisperCard(input: {
+    question: string;
+    options: ReverseWhisperOption[];
+    defaultOptionId?: string;
+}): Promise<ReverseWhisperCard> {
+    const dir = outboxDir();
+    if (!dir) throw new Error('No workspace folder open.');
+    if (!input.question?.trim() || !Array.isArray(input.options) || input.options.length === 0) {
+        throw new Error('Reverse-whisper requires a question and at least one option.');
+    }
+    try { await vscode.workspace.fs.createDirectory(dir); } catch { /* ok */ }
+    const card: ReverseWhisperCard = {
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+        question: sanitizeBody(input.question),
+        options: input.options.slice(0, 5).map(o => ({
+            id: String(o.id).trim(),
+            label: sanitizeBody(String(o.label)),
+            principle: o.principle ? sanitizeBody(String(o.principle)) : undefined,
+        })),
+        defaultOptionId: input.defaultOptionId ?? input.options[0].id,
+        status: 'pending',
+    };
+    const fileUri = vscode.Uri.joinPath(dir, `${card.id}.json`);
+    await vscode.workspace.fs.writeFile(fileUri, Buffer.from(JSON.stringify(card, null, 2), 'utf-8'));
+    onWhisperChange.fire();
+    return card;
+}
+
+export async function resolveReverseWhisperChoice(cardId: string, selectedOptionId: string): Promise<Whisper> {
+    const dir = outboxDir();
+    if (!dir) throw new Error('No workspace folder open.');
+    const fileUri = vscode.Uri.joinPath(dir, `${cardId}.json`);
+    const raw = await vscode.workspace.fs.readFile(fileUri);
+    const card = JSON.parse(Buffer.from(raw).toString('utf-8')) as ReverseWhisperCard;
+    const chosen = card.options.find(o => o.id === selectedOptionId) ?? { id: selectedOptionId, label: selectedOptionId };
+    card.selectedOptionId = chosen.id;
+    card.resolvedAt = Date.now();
+    card.status = 'resolved';
+    await vscode.workspace.fs.writeFile(fileUri, Buffer.from(JSON.stringify(card, null, 2), 'utf-8'));
+    return await writeWhisper(
+        `[Reverse-Whisper Override for "${card.question}"] Selected option "${chosen.label}" (${chosen.id}).`,
+        'sidebar'
+    );
+}
+
+// ── Two-Stage Socratic Consultant Context-Pull Parser ──────────
+// Parses a Stage-1 Consultant Scout response for requested file/line spans
+// or symbol lookups so local zero-cost tools can fulfill only the needed slices.
+
+export interface ConsultantSpanRequest {
+    file: string;
+    startLine?: number;
+    endLine?: number;
+    symbol?: string;
+}
+
+export function parseConsultantContextManifest(rawText: string): ConsultantSpanRequest[] {
+    const requests: ConsultantSpanRequest[] = [];
+    const seen = new Set<string>();
+    const addReq = (req: ConsultantSpanRequest) => {
+        const cleanFile = req.file.trim().replace(/^`|`$/g, '');
+        if (!cleanFile || cleanFile.includes('..')) return;
+        const key = `${cleanFile}:${req.startLine ?? ''}-${req.endLine ?? ''}:${req.symbol ?? ''}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        requests.push({ ...req, file: cleanFile });
+    };
+
+    // 1. Try fenced or inline JSON array/object containing `spans` or `requests`
+    const jsonMatch = rawText.match(/\{[\s\S]*?"(?:spans|requests)"\s*:\s*\[[\s\S]*?\][\s\S]*?\}/);
+    if (jsonMatch) {
+        try {
+            const parsed = JSON.parse(jsonMatch[0]);
+            const arr = Array.isArray(parsed.spans) ? parsed.spans : (Array.isArray(parsed.requests) ? parsed.requests : []);
+            for (const item of arr) {
+                if (item && typeof item.file === 'string') {
+                    addReq({
+                        file: item.file,
+                        startLine: typeof item.startLine === 'number' ? item.startLine : undefined,
+                        endLine: typeof item.endLine === 'number' ? item.endLine : undefined,
+                        symbol: typeof item.symbol === 'string' ? item.symbol : undefined,
+                    });
+                }
+            }
+        } catch { /* fall through to line-range regex */ }
+    }
+
+    // 2. Fallback regex for `path/to/file.ts:10-50` or `path/to/file.ts#L10-L50`
+    const spanRe = /\b((?:[\w.-]+\/)+[\w.-]+\.[a-zA-Z0-9]{1,6})(?::|#L)(\d+)(?:-(?:L)?(\d+))?\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = spanRe.exec(rawText)) !== null && requests.length < 15) {
+        const startLine = Number(m[2]);
+        const endLine = m[3] ? Number(m[3]) : startLine + 40;
+        addReq({ file: m[1], startLine, endLine });
+    }
+    return requests;
+}
+

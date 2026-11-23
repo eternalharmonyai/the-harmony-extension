@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as cp from 'child_process';
 import * as crypto from 'crypto';
+import { analyzeSecurityPlaneMerge } from './securityPlane';
 
 const COST_LEDGER_PATH = '.harmony/cost-ledger.json';
 
@@ -837,6 +838,680 @@ class RepoHealthScanTool implements vscode.LanguageModelTool<RepoHealthScanInput
     async prepareInvocation() { return { invocationMessage: 'Scanning repository health' }; }
 }
 
+interface RulePredicate {
+    field: string;
+    op: 'gte' | 'lte' | 'gt' | 'lt' | 'eq' | 'neq' | 'in' | 'not_in' | 'contains' | 'not_contains';
+    value: unknown;
+    label?: string;
+}
+
+interface DeclarativeRuleTier {
+    id: string;
+    name: string;
+    priority_label: string;
+    /** Lower number = higher priority. Orders qualified tiers deterministically; defaults to array position. */
+    priority?: number;
+    predicates: RulePredicate[];
+    capacity_formula?: {
+        base_field: string;
+        multiplier: number;
+        max_cap?: number;
+    };
+    required_artifacts: string[];
+    notes: string;
+}
+
+const DEFAULT_RD_RULE_TIERS: DeclarativeRuleTier[] = [
+    {
+        id: 'tier1-high-assurance-production',
+        name: 'Tier 1 High-Assurance Production Route',
+        priority: 1,
+        priority_label: 'Tier 1 (High-Assurance / Mission-Critical SLA)',
+        predicates: [
+            { field: 'reliability_score', op: 'gte', value: 95, label: 'reliability_score >= 95' },
+            { field: 'uptime_months', op: 'gte', value: 12, label: 'uptime_months >= 12' },
+            { field: 'incident_count_90d', op: 'lte', value: 1, label: 'incident_count_90d <= 1' },
+            { field: 'category', op: 'not_in', value: ['unverified_sandbox', 'deprecated'], label: 'category not restricted' },
+        ],
+        capacity_formula: {
+            base_field: 'baseline_throughput',
+            multiplier: 1.5,
+            max_cap: 500000,
+        },
+        required_artifacts: [
+            'Deterministic regression & verification receipt',
+            'Architecture & separation-of-duties review sign-off',
+            'Rollback snapshot & operational runbook',
+        ],
+        notes: 'Highest-assurance execution tier with maximum throughput budget and lowest operational risk.',
+    },
+    {
+        id: 'tier2-standard-production',
+        name: 'Tier 2 Standard Managed Route',
+        priority: 2,
+        priority_label: 'Tier 2 (Standard Production / Growth SLA)',
+        predicates: [
+            { field: 'reliability_score', op: 'gte', value: 80, label: 'reliability_score >= 80' },
+            { field: 'uptime_months', op: 'gte', value: 6, label: 'uptime_months >= 6' },
+            { field: 'incident_count_90d', op: 'lte', value: 4, label: 'incident_count_90d <= 4' },
+        ],
+        capacity_formula: {
+            base_field: 'baseline_throughput',
+            multiplier: 1.25,
+            max_cap: 250000,
+        },
+        required_artifacts: [
+            'Automated compile & unit test verification receipt',
+            'Service health & rate-limit configuration check',
+        ],
+        notes: 'Balanced production route optimized for steady operational throughput and rapid iteration.',
+    },
+    {
+        id: 'tier3-guarded-staging',
+        name: 'Tier 3 Guarded Staging / Evaluation Route',
+        priority: 3,
+        priority_label: 'Tier 3 (Guarded Evaluation / Bridge SLA)',
+        predicates: [
+            { field: 'reliability_score', op: 'gte', value: 60, label: 'reliability_score >= 60' },
+            { field: 'incident_count_90d', op: 'lte', value: 10, label: 'incident_count_90d <= 10' },
+        ],
+        capacity_formula: {
+            base_field: 'baseline_throughput',
+            multiplier: 1.0,
+            max_cap: 100000,
+        },
+        required_artifacts: [
+            'Canary telemetry & bounded quota guard',
+            'Explicit human checkpoint approval',
+        ],
+        notes: 'Designed for emerging or recovering workloads that require tighter guardrails while building operational history.',
+    },
+];
+
+/** Fallback policy file used only when the profile-specific matrix file is absent. */
+const GENERIC_POLICY_PATH = '.harmony/policies/matrix.json';
+
+/** Operators the evaluator actually implements. Anything else is a policy defect, not a knockout. */
+const SUPPORTED_PREDICATE_OPS = new Set<string>([
+    'gte', 'lte', 'gt', 'lt', 'eq', 'neq', 'in', 'not_in', 'contains', 'not_contains',
+]);
+
+function evaluatePredicate(entity: Record<string, unknown>, pred: RulePredicate): { passed: boolean; reason: string } {
+    const actual = entity[pred.field];
+    const label = pred.label || `${pred.field} ${pred.op} ${JSON.stringify(pred.value)}`;
+    switch (pred.op) {
+        case 'gte': {
+            const ok = typeof actual === 'number' && typeof pred.value === 'number' && actual >= pred.value;
+            return { passed: ok, reason: `${label} (actual: ${actual ?? 'undefined'})` };
+        }
+        case 'lte': {
+            const ok = typeof actual === 'number' && typeof pred.value === 'number' && actual <= pred.value;
+            return { passed: ok, reason: `${label} (actual: ${actual ?? 'undefined'})` };
+        }
+        case 'gt': {
+            const ok = typeof actual === 'number' && typeof pred.value === 'number' && actual > pred.value;
+            return { passed: ok, reason: `${label} (actual: ${actual ?? 'undefined'})` };
+        }
+        case 'lt': {
+            const ok = typeof actual === 'number' && typeof pred.value === 'number' && actual < pred.value;
+            return { passed: ok, reason: `${label} (actual: ${actual ?? 'undefined'})` };
+        }
+        case 'eq': {
+            const ok = actual === pred.value;
+            return { passed: ok, reason: `${label} (actual: ${JSON.stringify(actual)})` };
+        }
+        case 'neq': {
+            const ok = actual !== pred.value;
+            return { passed: ok, reason: `${label} (actual: ${JSON.stringify(actual)})` };
+        }
+        case 'in': {
+            const list = Array.isArray(pred.value) ? pred.value.map(v => String(v).toLowerCase()) : [];
+            const ok = actual !== undefined && list.includes(String(actual).toLowerCase());
+            return { passed: ok, reason: `${label} (actual: ${JSON.stringify(actual)})` };
+        }
+        case 'not_in': {
+            const list = Array.isArray(pred.value) ? pred.value.map(v => String(v).toLowerCase()) : [];
+            const ok = actual === undefined || !list.includes(String(actual).toLowerCase());
+            return { passed: ok, reason: `${label} (actual: ${JSON.stringify(actual)})` };
+        }
+        case 'contains': {
+            // Accept a single value or an array so `contains` and `not_contains` stay complementary.
+            const list = (Array.isArray(pred.value) ? pred.value : [pred.value])
+                .map(entry => String(entry ?? '').toLowerCase())
+                .filter(entry => entry.length > 0);
+            const actualStr = String(actual ?? '').toLowerCase();
+            const ok = list.length > 0 && list.some(entry => actualStr.includes(entry));
+            return { passed: ok, reason: `${label} (actual: ${JSON.stringify(actual)})` };
+        }
+        case 'not_contains': {
+            const target = String(pred.value ?? '').toLowerCase();
+            const list = Array.isArray(pred.value) ? pred.value.map(v => String(v).toLowerCase()) : [target];
+            const actualStr = String(actual ?? '').toLowerCase();
+            const ok = !list.some(item => item && actualStr.includes(item));
+            return { passed: ok, reason: `${label} (actual: ${JSON.stringify(actual)})` };
+        }
+        default:
+            return { passed: false, reason: `Unsupported operator: ${pred.op}` };
+    }
+}
+
+interface RuleMatrixEvalInput {
+    action?: 'evaluate' | 'init_template';
+    entity_name?: string;
+    profile?: string;
+    policy_path?: string;
+    entity?: Record<string, unknown>;
+    tiers?: DeclarativeRuleTier[];
+}
+
+class RuleMatrixEvalTool implements vscode.LanguageModelTool<RuleMatrixEvalInput> {
+    async invoke(options: vscode.LanguageModelToolInvocationOptions<RuleMatrixEvalInput>) {
+        const input = options.input ?? {};
+        const profile = (input.profile || 'default').replace(/[^a-zA-Z0-9_-]/g, '');
+        const relPath = input.policy_path?.trim() || `.harmony/policies/${profile}.matrix.json`;
+
+        if (input.action === 'init_template') {
+            const templateTiers = input.tiers?.length ? input.tiers : DEFAULT_RD_RULE_TIERS;
+            await writeJson(relPath, templateTiers);
+            return textResult([
+                `# Declarative Rule Matrix Template Initialized`,
+                '',
+                `- **Profile:** \`${profile}\``,
+                `- **Workspace Policy Path:** \`${relPath}\``,
+                `- **Tiers Configured:** ${templateTiers.length}`,
+                '',
+                'Any workspace can customize this JSON file with domain-specific fields, predicates (`gte`, `lte`, `eq`, `neq`, `in`, `not_in`, `contains`, `not_contains`), capacity formulas, and required artifacts while keeping the core extension 100% domain-agnostic.',
+            ].join('\n'));
+        }
+
+        const entity = input.entity ?? {};
+
+        // Track which file actually supplied the tiers so the reported provenance is never wrong.
+        const profileTiers = await readJsonIfExists<DeclarativeRuleTier[]>(relPath, []);
+        const genericTiers = profileTiers.length ? [] : await readJsonIfExists<DeclarativeRuleTier[]>(GENERIC_POLICY_PATH, []);
+        const loadedTiers = profileTiers.length ? profileTiers : genericTiers;
+        const loadedPath = profileTiers.length ? relPath : (genericTiers.length ? GENERIC_POLICY_PATH : undefined);
+        const tiers = input.tiers?.length ? input.tiers : (loadedTiers.length ? loadedTiers : DEFAULT_RD_RULE_TIERS);
+        const sourceLabel = input.tiers?.length
+            ? 'inline `tiers` payload'
+            : (loadedPath ? `workspace policy (\`${loadedPath}\`)` : 'built-in AI R&D default tiers');
+        const explicitlyPrioritized = tiers.filter(t => Number.isFinite(t.priority)).length;
+        const orderingBasis = tiers.length > 0 && explicitlyPrioritized === tiers.length
+            ? 'explicit `priority` field (lowest number wins)'
+            : explicitlyPrioritized === 0
+                ? 'tier array order (no explicit `priority` set)'
+                : 'mixed — explicit `priority` first (lowest wins), then remaining tiers in array order';
+
+        // Policy health: surface everything that makes this rule set untrustworthy, instead of
+        // letting it degrade quietly. A policy you cannot trust has to say so out loud.
+        const policyHealth: string[] = [];
+
+        for (const candidate of [relPath, GENERIC_POLICY_PATH]) {
+            const candidateAbs = resolveWorkspacePath(candidate);
+            if (!candidateAbs) continue;
+            const rawPolicy = await readTextIfExists(candidateAbs);
+            if (rawPolicy === undefined) continue;
+            try {
+                JSON.parse(rawPolicy);
+            } catch (error) {
+                policyHealth.push(`\`${candidate}\` exists but is not valid JSON (${(error as Error).message}), so it was ignored.`);
+            }
+        }
+        if (!input.tiers?.length && !loadedPath) {
+            policyHealth.push('No readable workspace policy file was found, so the built-in default tiers are in use. Run with action "init_template" to author a workspace policy.');
+        }
+        if (tiers.length === 0) {
+            policyHealth.push('The resolved policy declares zero tiers, so no entity can ever qualify.');
+        }
+
+        const tierIdCounts = new Map<string, number>();
+        for (const tier of tiers) tierIdCounts.set(tier.id, (tierIdCounts.get(tier.id) ?? 0) + 1);
+        for (const [id, count] of tierIdCounts) {
+            if (count > 1) policyHealth.push(`Duplicate tier id \`${id}\` appears ${count} times, so results for it are ambiguous.`);
+        }
+
+        for (const tier of tiers) {
+            if (!tier.predicates || tier.predicates.length === 0) {
+                policyHealth.push(`Tier \`${tier.id}\` has no predicates, so it qualifies for every entity. Add a predicate or remove the tier.`);
+            }
+            for (const pred of tier.predicates ?? []) {
+                if (!SUPPORTED_PREDICATE_OPS.has(String(pred.op))) {
+                    policyHealth.push(`Tier \`${tier.id}\` uses unsupported operator \`${String(pred.op)}\`, which is applied as a knockout.`);
+                }
+            }
+            if (tier.capacity_formula) {
+                if (!Number.isFinite(Number(tier.capacity_formula.multiplier))) {
+                    policyHealth.push(`Tier \`${tier.id}\` has a non-numeric capacity multiplier, so its capacity limit cannot be computed.`);
+                }
+                const baseValue = entity[tier.capacity_formula.base_field];
+                if (baseValue !== undefined && !Number.isFinite(Number(baseValue))) {
+                    policyHealth.push(`Tier \`${tier.id}\` reads capacity base field \`${tier.capacity_formula.base_field}\`, whose supplied value is not numeric.`);
+                }
+            }
+        }
+        if (explicitlyPrioritized > 0 && explicitlyPrioritized < tiers.length) {
+            policyHealth.push(`Mixed priorities: ${explicitlyPrioritized} of ${tiers.length} tiers declare \`priority\` while the rest fall back to array order.`);
+        }
+
+        const evaluations = tiers.map((tier, index) => {
+            const failedReasons: string[] = [];
+            for (const pred of tier.predicates ?? []) {
+                const res = evaluatePredicate(entity, pred);
+                if (!res.passed) failedReasons.push(res.reason);
+            }
+            // Unprioritized tiers sort after every explicitly prioritized tier instead of
+            // colliding with them on the same number line.
+            return { tier, index, order: Number.isFinite(tier.priority) ? Number(tier.priority) : Number.POSITIVE_INFINITY, failedReasons };
+        });
+
+        const qualified = evaluations
+            .filter(e => e.failedReasons.length === 0)
+            .sort((a, b) => a.order - b.order || a.index - b.index);
+
+        const matches = qualified.map(({ tier }) => {
+            let capacityNote = '';
+            if (tier.capacity_formula) {
+                const baseVal = Number(entity[tier.capacity_formula.base_field]);
+                const multiplier = Number(tier.capacity_formula.multiplier);
+                if (Number.isFinite(baseVal) && Number.isFinite(multiplier)) {
+                    const rawCap = Math.max(0, Math.round(baseVal * multiplier));
+                    const finalCap = tier.capacity_formula.max_cap !== undefined ? Math.min(tier.capacity_formula.max_cap, rawCap) : rawCap;
+                    capacityNote = ` — Computed capacity limit: **${finalCap.toLocaleString()}**`;
+                } else {
+                    capacityNote = ` — Capacity not computed (base field or multiplier was missing or non-numeric).`;
+                }
+            }
+            return `**${tier.name}** (${tier.priority_label})${capacityNote}. ${tier.notes}`;
+        });
+
+        const knockouts = evaluations
+            .filter(e => e.failedReasons.length > 0)
+            .map(({ tier, failedReasons }) => `**${tier.name}**: Knocked out by → ${failedReasons.join('; ')}`);
+
+        // Artifacts must come from the genuinely highest-priority qualified tier, not merely the first one seen.
+        const topArtifacts = qualified.length > 0 ? (qualified[0].tier.required_artifacts ?? []) : [];
+
+        const entitySummary = Object.entries(entity)
+            .map(([k, v]) => `**${k}:** ${typeof v === 'number' ? v.toLocaleString() : JSON.stringify(v)}`)
+            .join(' | ');
+
+        return textResult([
+            `# Deterministic Rule Matrix Evaluation${input.entity_name ? ` — ${input.entity_name}` : ''}`,
+            '',
+            `- **Policy Source:** ${sourceLabel}`,
+            `- **Ordering Basis:** ${orderingBasis}`,
+            `- **Entity Attributes:** ${entitySummary || '(none provided)'}`,
+            '',
+            section('Qualified Tiers (Highest Priority First)', matches.length ? matches : ['No tier matched all predicates — inspect knockout diagnostics below or evaluate an exception path.']),
+            '',
+            section('Deterministic Knockout Diagnostics (Failed Predicates)', knockouts.length ? knockouts : ['All evaluated tiers matched.']),
+            '',
+            section('Policy Health', policyHealth.length ? policyHealth : ['No policy-health issues detected.']),
+            '',
+            section('Required Artifacts / Preconditions for Top Qualified Tier', topArtifacts.length ? topArtifacts : ['Standard verification receipt']),
+            '',
+            section('Workspace Policy Pack Adaptability', [
+                `To customize rules for this specific workspace without modifying extension code, run with \`action: "init_template"\` or place a declarative tier array in \`${relPath}\`.`,
+            ]),
+        ].join('\n'));
+    }
+
+    async prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<RuleMatrixEvalInput>) {
+        return { invocationMessage: `Evaluating declarative rule matrix${options.input.entity_name ? ` for ${options.input.entity_name}` : ''}` };
+    }
+}
+
+interface ArchitectureRiskAuditInput {
+    proposal_name: string;
+    proposal_summary: string;
+    security_plane_stack?: string;
+    security_plane_terms?: string[];
+    sensitive_assets?: string[];
+    consolidates_security_and_app_plane?: boolean;
+    policy_path?: string;
+}
+
+// Security-plane vocabulary, verb lists and scoring now live in ./securityPlane (decision-grade).
+
+// Security-plane detection moved to ./securityPlane — see analyzeSecurityPlaneMerge for the decision-grade scoring.
+
+class ArchitectureRiskAuditTool implements vscode.LanguageModelTool<ArchitectureRiskAuditInput> {
+    async invoke(options: vscode.LanguageModelToolInvocationOptions<ArchitectureRiskAuditInput>) {
+        const input = options.input;
+        if (!input.proposal_name || !input.proposal_summary) return textResult('error: proposal_name and proposal_summary are required');
+        const summaryLower = input.proposal_summary.toLowerCase();
+        const securityStack = input.security_plane_stack || 'Independent EDR / MDR / SIEM Security Plane';
+        const customPolicy = await readJsonIfExists<{ invariants?: string[]; questions?: string[]; security_plane_terms?: string[] }>(
+            input.policy_path?.trim() || '.harmony/policies/architecture.json',
+            {}
+        );
+        const extraPlaneTerms = (input.security_plane_terms ?? customPolicy.security_plane_terms ?? []).filter(Boolean);
+        const declaredConsolidation = input.consolidates_security_and_app_plane === true;
+        const planeSignal = analyzeSecurityPlaneMerge(summaryLower, extraPlaneTerms);
+        const mergesSecurityPlane = declaredConsolidation || planeSignal.level === 'confirmed';
+        const planeNeedsVerification = !declaredConsolidation && planeSignal.level === 'likely';
+
+        const assets = input.sensitive_assets?.length ? input.sensitive_assets : [
+            'Core proprietary datasets, records, and customer/project documents',
+            'Identity, authentication credentials, and access telemetry',
+            'Workflow history, operational analytics, and routing metadata',
+            'Endpoint / infrastructure security telemetry',
+        ];
+
+        const structuralRisks = [
+            mergesSecurityPlane
+                ? `🚨 **SEPARATION-OF-DUTIES VIOLATION (NIST SP 800-53 AC-5 / CIS / SOC 2)**: Proposal suggests replacing or merging the independent security/observability plane (${securityStack}) into an application/workflow vendor. Security monitoring and endpoint defense must remain strictly independent of business-application vendors.`
+                : planeNeedsVerification
+                    ? `⚠️ **NEEDS VERIFICATION — possible separation-of-duties concern (confidence ${planeSignal.score}/100)**: the proposal puts removal language near ambiguous security vocabulary. That is a lead to confirm, not a finding to act on.`
+                    : `Verify that ${securityStack} remains 100% independent of ${input.proposal_name} with zero shared administrative blast radius.`,
+            `🚨 **DATA SOVEREIGNTY & ECOSYSTEM CONFLICT OF INTEREST**: Centralizing proprietary records and operational pipelines inside an external vendor creates severe exfiltration and lock-in risk if that vendor (or its sub-processors/affiliates) operates adjacent or competing services.`,
+            `🚨 **SINGLE-POINT-OF-FAILURE & VENDOR LOCK-IN**: Consolidating application workflows, communications, document storage, and security monitoring into a single proprietary platform means any outage, billing dispute, or breach impacts 100% of operations simultaneously.`,
+            ...(customPolicy.invariants ?? []),
+        ];
+
+        const recommendedArchitecture = [
+            `**Keep ${securityStack} Strictly Independent**: Security monitoring, endpoint protection, and infrastructure governance must stay under dedicated security tooling (${securityStack}) and internal stewardship — never inside a workflow/application vendor.`,
+            `**Sovereign Data Layer**: Store core records, documents, and historical outcomes in organization-controlled encrypted storage with strict role-based access control (RBAC) and zero unauthorized bulk export.`,
+            `**Deterministic Pre-Execution Policy Gate**: Enforce automated time-window, rate-limit, and opt-out/suppression invariants via \`harmony_policy_gate_check\` before any external dispatch leaves the system.`,
+            `**Modular API Boundaries**: Connect external communication or processing providers through revocable API adapters so any vendor can be swapped in minutes without losing historical state.`,
+        ];
+
+        const dueDiligenceQuestions = customPolicy.questions?.length ? customPolicy.questions : [
+            `1. "If we terminate our agreement with ${input.proposal_name} tomorrow, do we receive 100% of our raw SQL/JSON records, logs, and attachments within 24 hours with zero exit/ransom fees?"`,
+            `2. "Does ${input.proposal_name}, its parent, or any affiliate operate competing services or monetize aggregated customer/workflow metadata?"`,
+            `3. "Can ${input.proposal_name} provide a current SOC 2 Type II report and written security indemnification — and why would an application vendor ever recommend disabling independent security controls (${securityStack})?"`,
+        ];
+
+        return textResult([
+            `# Enterprise Architecture, Separation-of-Duties & Data-Sovereignty Audit: ${input.proposal_name}`,
+            '',
+            `- **Proposal Summary:** ${input.proposal_summary}`,
+            `- **Independent Security Plane:** ${securityStack}`,
+            '',
+            section('Sensitive Assets & Planes in Scope', assets),
+            '',
+            section('Structural Risks & Governance Findings (NIST AC-5 / SOC 2)', structuralRisks),
+            '',
+            section('Separation-of-Duties Evidence Trail (Decision-Grade)', [
+                `Signal level: **${declaredConsolidation ? 'confirmed (explicitly declared)' : planeSignal.level}**` + (declaredConsolidation ? '' : ` — confidence ${planeSignal.score}/100`),
+                ...planeSignal.reasons,
+                'Scoring: strong security vocabulary scores 70, ambiguous vocabulary 40; +15 for an explicit removal verb, +10 when two or more distinct terms match, +5 when strong and ambiguous corroborate. A negation or non-commitment cue suppresses the signal to none.',
+            ]),
+            '',
+            section('Recommended Sovereign Architecture', recommendedArchitecture),
+            '',
+            section('Executive Due-Diligence Questions', dueDiligenceQuestions),
+        ].join('\n'));
+    }
+
+    async prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<ArchitectureRiskAuditInput>) {
+        return { invocationMessage: `Auditing architecture & separation-of-duties for ${options.input.proposal_name}` };
+    }
+}
+
+interface PolicyGateConfig {
+    quiet_hours_start?: number;
+    quiet_hours_end?: number;
+    max_frequency_per_window?: number;
+    blocked_patterns?: string[];
+    restricted_regions?: string[];
+    require_full_evidence?: boolean;
+}
+
+interface PolicyGateCheckInput {
+    action_label?: string;
+    channel?: string;
+    region_or_timezone?: string;
+    local_hour_24?: number;
+    suppressed_or_opted_out?: boolean;
+    recent_dispatch_count?: number;
+    max_frequency_per_window?: number;
+    quiet_hours_start?: number;
+    quiet_hours_end?: number;
+    payload_text?: string;
+    blocked_patterns?: string[];
+    policy_path?: string;
+    require_full_evidence?: boolean;
+}
+
+type InvariantStatus = 'passed' | 'failed' | 'unevaluated';
+
+/**
+ * One record per gate invariant. The verdict, the reasoning paragraph and the remedy list are
+ * ALL derived from these records, so they can never contradict each other. Previously the
+ * gate kept three separate arrays and then hand-wrote a resolution path per verdict branch,
+ * which meant the explanation could drift from the decision.
+ */
+interface InvariantRecord {
+    label: string;
+    status: InvariantStatus;
+    /** Why this status was reached, in plain language. */
+    detail: string;
+    /** The concrete action that would change this record's status. */
+    remedy: string;
+    /** True when no input can fix this — a human decision owner must resolve it. */
+    humanDecision: boolean;
+}
+
+class PolicyGateCheckTool implements vscode.LanguageModelTool<PolicyGateCheckInput> {
+    async invoke(options: vscode.LanguageModelToolInvocationOptions<PolicyGateCheckInput>) {
+        const input = options.input ?? {};
+        const filePolicy = await readJsonIfExists<PolicyGateConfig>(
+            input.policy_path?.trim() || '.harmony/policies/gate.json',
+            {}
+        );
+
+        const quietStart = input.quiet_hours_start ?? filePolicy.quiet_hours_start ?? 20; // 8 PM (20:00)
+        const quietEnd = input.quiet_hours_end ?? filePolicy.quiet_hours_end ?? 8;       // 8 AM (08:00)
+        const maxFreq = input.max_frequency_per_window ?? filePolicy.max_frequency_per_window ?? 3;
+        const blockedPatterns = input.blocked_patterns?.length
+            ? input.blocked_patterns
+            : (filePolicy.blocked_patterns?.length ? filePolicy.blocked_patterns : ['guaranteed approval', 'act now', 'free money', '100% guaranteed']);
+        const restrictedRegions = (filePolicy.restricted_regions ?? []).map(r => r.toUpperCase());
+        const requireFullEvidence = input.require_full_evidence ?? filePolicy.require_full_evidence ?? false;
+
+        const invariants: InvariantRecord[] = [];
+
+        if (input.suppressed_or_opted_out === true) {
+            invariants.push({
+                label: 'Suppression / opt-out',
+                status: 'failed',
+                detail: 'Target is marked suppressed or opted out.',
+                remedy: 'Remove this target from the dispatch. Cross-channel suppression is not overridable by a policy exception.',
+                humanDecision: false,
+            });
+        } else if (input.suppressed_or_opted_out === false) {
+            invariants.push({
+                label: 'Suppression / opt-out',
+                status: 'passed',
+                detail: 'Target is not suppressed or opted out.',
+                remedy: 'Nothing — supplying `true` here would flip this verdict to BLOCK.',
+                humanDecision: false,
+            });
+        } else {
+            invariants.push({
+                label: 'Suppression / opt-out',
+                status: 'unevaluated',
+                detail: '`suppressed_or_opted_out` was not supplied.',
+                remedy: 'Supply `suppressed_or_opted_out: true|false` for this target.',
+                humanDecision: false,
+            });
+        }
+
+        if (typeof input.local_hour_24 === 'number') {
+            const hr = input.local_hour_24;
+            const inQuietWindow = quietStart > quietEnd
+                ? (hr >= quietStart || hr < quietEnd)
+                : (hr >= quietStart && hr < quietEnd);
+            invariants.push(inQuietWindow
+                ? {
+                    label: 'Quiet hours',
+                    status: 'failed',
+                    detail: `Local hour ${hr}:00 is inside the quiet window ${quietStart}:00–${quietEnd}:00${input.region_or_timezone ? ` (${input.region_or_timezone})` : ''}.`,
+                    remedy: `Schedule the dispatch outside ${quietStart}:00–${quietEnd}:00 local time, or record a documented exception with a human owner.`,
+                    humanDecision: false,
+                }
+                : {
+                    label: 'Quiet hours',
+                    status: 'passed',
+                    detail: `Local hour ${hr}:00 is outside the quiet window ${quietStart}:00–${quietEnd}:00.`,
+                    remedy: 'Nothing — moving the time into the quiet window would flip this verdict to BLOCK.',
+                    humanDecision: false,
+                });
+        } else {
+            invariants.push({
+                label: 'Quiet hours',
+                status: 'unevaluated',
+                detail: '`local_hour_24` was not supplied.',
+                remedy: 'Supply `local_hour_24` (0–23) in the real local time of the target.',
+                humanDecision: false,
+            });
+        }
+
+        if (typeof input.recent_dispatch_count === 'number') {
+            invariants.push(input.recent_dispatch_count >= maxFreq
+                ? {
+                    label: 'Frequency cap',
+                    status: 'failed',
+                    detail: `${input.recent_dispatch_count} dispatch(es) already sent this window against a cap of ${maxFreq}.`,
+                    remedy: 'Wait for the rate-limit window to roll over before dispatching again.',
+                    humanDecision: false,
+                }
+                : {
+                    label: 'Frequency cap',
+                    status: 'passed',
+                    detail: `${input.recent_dispatch_count} of ${maxFreq} allowed dispatch(es) used this window.`,
+                    remedy: 'Nothing — reaching the cap would flip this verdict to BLOCK.',
+                    humanDecision: false,
+                });
+        } else {
+            invariants.push({
+                label: 'Frequency cap',
+                status: 'unevaluated',
+                detail: '`recent_dispatch_count` was not supplied.',
+                remedy: 'Supply `recent_dispatch_count` so it can be compared against `max_frequency_per_window`.',
+                humanDecision: false,
+            });
+        }
+
+        if (!input.region_or_timezone) {
+            invariants.push({
+                label: 'Restricted regions',
+                status: 'unevaluated',
+                detail: '`region_or_timezone` was not supplied.',
+                remedy: 'Supply `region_or_timezone` so it can be compared against the workspace `restricted_regions` list.',
+                humanDecision: false,
+            });
+        } else if (restrictedRegions.includes(input.region_or_timezone.trim().toUpperCase())) {
+            invariants.push({
+                label: 'Restricted regions',
+                status: 'failed',
+                detail: `'${input.region_or_timezone}' is on the workspace restricted_regions list.`,
+                remedy: 'Do not dispatch to this region. Changing the workspace restricted list is a human policy decision, not a runtime one.',
+                humanDecision: true,
+            });
+        } else if (restrictedRegions.length === 0) {
+            invariants.push({
+                label: 'Restricted regions',
+                status: 'unevaluated',
+                detail: `'${input.region_or_timezone}' supplied, but the workspace declares no restricted_regions list.`,
+                remedy: 'Declare `restricted_regions` in `.harmony/policies/gate.json` if this workspace excludes any regions.',
+                humanDecision: false,
+            });
+        } else {
+            invariants.push({
+                label: 'Restricted regions',
+                status: 'passed',
+                detail: `'${input.region_or_timezone}' is not on the workspace restricted_regions list.`,
+                remedy: 'Nothing — adding this region to `restricted_regions` would flip this verdict to BLOCK.',
+                humanDecision: false,
+            });
+        }
+
+        if (input.payload_text) {
+            const lower = input.payload_text.toLowerCase();
+            const matched = blockedPatterns.filter(p => p && lower.includes(p.toLowerCase()));
+            invariants.push(matched.length > 0
+                ? {
+                    label: 'Payload hygiene',
+                    status: 'failed',
+                    detail: `Payload matched blocked pattern(s): ${matched.map(m => `'${m}'`).join(', ')}.`,
+                    remedy: 'Rewrite the payload to remove the prohibited claims. Do not reword only to evade the matcher — that defeats the gate.',
+                    humanDecision: false,
+                }
+                : {
+                    label: 'Payload hygiene',
+                    status: 'passed',
+                    detail: 'Payload matched zero blocked patterns.',
+                    remedy: 'Nothing — introducing a blocked phrase would flip this verdict to BLOCK.',
+                    humanDecision: false,
+                });
+        } else {
+            invariants.push({
+                label: 'Payload hygiene',
+                status: 'unevaluated',
+                detail: '`payload_text` was not supplied.',
+                remedy: 'Supply `payload_text` so the outbound message body can be scanned.',
+                humanDecision: false,
+            });
+        }
+
+        const failedInvariants = invariants.filter(i => i.status === 'failed');
+        const unevaluatedInvariants = invariants.filter(i => i.status === 'unevaluated');
+        const passedInvariants = invariants.filter(i => i.status === 'passed');
+        const verdict = failedInvariants.length > 0
+            ? 'BLOCK'
+            : (passedInvariants.length === 0 || (requireFullEvidence && unevaluatedInvariants.length > 0)
+                ? 'INCONCLUSIVE'
+                : 'ALLOW');
+
+        const verdictBasis = verdict === 'BLOCK'
+            ? `${failedInvariants.length} invariant(s) failed, which is decisive and cannot be averaged away by the ones that passed.`
+            : verdict === 'INCONCLUSIVE'
+                ? (passedInvariants.length === 0
+                    ? 'No invariant could be evaluated at all, and an unevaluated gate is not approval.'
+                    : `${unevaluatedInvariants.length} invariant(s) remain unevaluated while require_full_evidence is set, so approval is withheld.`)
+                : `All ${passedInvariants.length} evaluated invariant(s) passed; ${unevaluatedInvariants.length} were never evaluated.`;
+
+        // Remedies are read straight off the records, so the advice can never contradict the verdict.
+        const whatWouldMoveIt = failedInvariants.length > 0
+            ? [
+                ...failedInvariants.map(i => `**${i.label}** — ${i.remedy}`),
+                ...(failedInvariants.some(i => i.humanDecision)
+                    ? ['At least one failure needs a human decision owner. Escalate it rather than re-running the gate with adjusted inputs.']
+                    : []),
+            ]
+            : [
+                ...unevaluatedInvariants.map(i => `**${i.label}** — ${i.remedy}`),
+                ...passedInvariants.map(i => `**${i.label}** — ${i.remedy}`),
+                'Supplying a failing value for any invariant above would flip this verdict to BLOCK. That is the purpose of the gate, so supply real evidence rather than whichever value happens to pass.',
+            ];
+
+        const statusGlyph = (status: InvariantStatus) => status === 'passed' ? '✅' : status === 'failed' ? '❌' : '⬜';
+
+        return textResult([
+            `# Deterministic Pre-Execution Policy Gate: **${verdict}**${input.action_label ? ` — ${input.action_label}` : ''}`,
+            '',
+            `- **Verdict:** **${verdict}**`,
+            `- **Why:** ${verdictBasis}`,
+            `- **Channel:** ${input.channel || 'general'} | **Region/TZ:** ${input.region_or_timezone || 'unspecified'}`,
+            `- **Evidence Mode:** ${requireFullEvidence ? 'fail-closed — every invariant required' : 'fail-closed on zero evidence'}`,
+            '',
+            section('Verdict Reasoning (one record per invariant)', invariants.map(i => `${statusGlyph(i.status)} **${i.label}** — ${i.status.toUpperCase()}: ${i.detail}`)),
+            '',
+            section('What Would Move This Verdict', whatWouldMoveIt),
+            '',
+            section('Workspace Customization', [
+                'Place custom quiet-hour bounds, frequency caps, restricted regions, blocked payload patterns, or `require_full_evidence: true` in `.harmony/policies/gate.json` to adapt this gate per workspace.',
+            ]),
+        ].join('\n'));
+    }
+
+    async prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<PolicyGateCheckInput>) {
+        return { invocationMessage: `Checking pre-execution policy gate${options.input.action_label ? ` for ${options.input.action_label}` : ''}` };
+    }
+}
+
 export function registerCompanyTools(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.lm.registerTool('harmony_client_brief', new ClientBriefTool()),
@@ -855,5 +1530,8 @@ export function registerCompanyTools(context: vscode.ExtensionContext) {
         vscode.lm.registerTool('harmony_patch_preflight', new PatchPreflightTool()),
         vscode.lm.registerTool('harmony_code_surgery_plan', new CodeSurgeryPlanTool()),
         vscode.lm.registerTool('harmony_repo_health_scan', new RepoHealthScanTool()),
+        vscode.lm.registerTool('harmony_rule_matrix_eval', new RuleMatrixEvalTool()),
+        vscode.lm.registerTool('harmony_architecture_risk_audit', new ArchitectureRiskAuditTool()),
+        vscode.lm.registerTool('harmony_policy_gate_check', new PolicyGateCheckTool()),
     );
 }

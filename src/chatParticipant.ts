@@ -6,16 +6,40 @@ import * as cp from 'child_process';
 import * as os from 'os';
 import { appendChatHistory, appendChatResponse } from './chatHistory';
 import { appendMemory, recallMemory, formatRecallForPrompt, memoryStats } from './memory';
-import { saveSession, loadSession, listSessions, formatSessionPreamble, SessionTurn } from './sessions';
-import { recordUsage, summarize as summarizeUsage, totalTokens } from './costTracker';
-import { COMPACTION_KEEP_NEWEST_MESSAGES, isContextLengthError, planInTurnCompaction } from './inTurnCompaction';
+import {
+    saveSession, loadSession, listSessions, formatSessionPreamble,
+    SessionTurn, SessionSource,
+    SESSION_PREAMBLE_TARGET_CHARS, SESSION_PREAMBLE_CEILING_CHARS
+} from './sessions';
+import { backoffDelayMs, circuitStatus, classifyTransient, delay, describeTransientPhase, formatWaitMs, isCircuitOpen, recordFailure, recordSuccess } from './resilience';
+import { classifyToolCallReferences, formatScopeNote, isReadOnlyTool } from './auditScope';
+import { formatTripleCheckDetails, formatTripleCheckToast } from './auditToast';
+import { writeStudioSetting } from './host/studioSettings';
+
+/**
+ * How many times a transient transport failure is retried before the turn gives
+ * up. Three spaced attempts is the difference between "survives a provider edge
+ * shedding load" and "one reset ends the turn".
+ */
+const MAX_TRANSIENT_ATTEMPTS = 3;
+import { estimateCalibratedPromptTokens, recordFallbackEvent, recordRouteGuardEvent, recordUsage, summarize as summarizeUsage, totalTokens, type UsageProviderId } from './costTracker';
+import { COMPACTION_KEEP_NEWEST_MESSAGES, deduplicateSupersededToolResults, isContextLengthError, planInTurnCompaction } from './inTurnCompaction';
 import { consumeComposePayload, ComposeImage } from './composeQueue';
 import { describeImages, formatComposeContext } from './visionRouter';
 import { formatHarmonyToolLedger } from './opsTools';
 import { showHarmonyAsk } from './askView';
 import { appendContinuityEntry, compactContinuity, createContinuityHandoff, forkContinuity, formatContinuityEntry, formatContinuityForPrompt, getContinuityStatus, importContinuityFromText, listContinuityEntries } from './continuity';
 import { formatRulesDetails, formatRulesStatus, loadRulesContext } from './rules';
-import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, invalidateKeyCache, listAvailableProviders, modelFor, primaryEnvNameFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, resolveProviderKey, resolveProviderKeyDetailed, secretKeyFor, Tier, tencentSignV3, TENCENT_NATIVE_HOST, TENCENT_NATIVE_SERVICE, TENCENT_NATIVE_REGION, TENCENT_NATIVE_VERSION, sha256Hex, hmacSha256, CollabDirectProvider } from './providers';
+import { collabTierForPreset, getCollabDirectProvider, getCollabModelPreset, getVscodeHttpProxyOptions, invalidateKeyCache, isGeminiVertexProfile, listAvailableProviders, modelFor, primaryEnvNameFor, providerBaseUrlForCall, providerDisplayName, PROVIDER_IDS, ProviderId, resolveCollabModel, resolveGeminiOpenAiCompatRequestAsync, resolveProviderKey, resolveProviderKeyDetailed, secretKeyFor, Tier, tencentSignV3, TENCENT_NATIVE_HOST, TENCENT_NATIVE_SERVICE, TENCENT_NATIVE_REGION, TENCENT_NATIVE_VERSION, sha256Hex, hmacSha256, CollabDirectProvider } from './providers';
+import {
+    VERTEX_AUTH_SENTINEL,
+    VertexAuthConfigurationError,
+    VertexDedicatedVmBlockedError,
+    invalidateVertexTokenCache,
+    isVertexInvalidRaptError,
+    redactUrlCredentials,
+} from './vertexAuth';
+import { vpnResilientFetch } from './vpnResilientTransport';
 import { formatMcpStatus, mcpStatusSummary } from './mcp';
 import { readUnread, markAllRead, formatWhispersForPrompt, onWhisperChange, getUnreadCount, startMidSessionTracking, getPendingMidSessionWhispers, markMidSessionWhispersDelivered } from './whisperInbox';
 import {
@@ -33,11 +57,26 @@ import { hubFetch } from './hubClient';
 import { tendGarden, scanUnresolvedSprouts, scanResolvedSprouts } from './careBloom';
 import { buildAliasMap, getDeepSeekModel, PROVIDER_REGISTRY, setDeepSeekModel } from './providerModels';
 import { callGeminiNativeStreaming, shouldUseGeminiNative, classifyGeminiThinking, type OpenAICompatMessage } from './geminiNativeStreaming';
+import { harmonyDebugChannel, createCoalescedMarkdownStreamer, setRendererGuardListener, compactUsageCallRecord } from './rendererShield';
+import {
+    extractTextualToolCalls,
+    formatDegradedHistoricalToolSummary,
+    hasTextualToolCallSyntax,
+    stripTextualToolCallsFromHistory,
+} from './textualToolCallGuard';
 
 /**
- * Global output channel for raw Harmony Agent logs.
+ * Global bounded output channel for raw Harmony Agent logs (lazy singleton,
+ * 512 KB ring-rotated to protect VS Code's 4 GB Renderer V8 heap).
  */
-export const harmonyDebugChannel = vscode.window.createOutputChannel('Harmony Debug');
+export { harmonyDebugChannel };
+
+setRendererGuardListener((event) => {
+    const reason = event.kind === 'debug_channel_rotated'
+        ? `Harmony Debug channel rotated (#${event.rotationCount}; cleared ${event.clearedChars} chars at ${event.maxChars} limit)`
+        : `Harmony Debug single write capped (${event.originalChars} -> ${event.maxWriteChars} chars)`;
+    recordRouteGuardEvent('vscode-lm', 'native', 'harmony-debug-channel', reason);
+});
 
 /**
  * Harmony Chat Participant — registers `@harmony` in VS Code's native Chat panel.
@@ -201,6 +240,12 @@ const HARMONY_TOOL_NAMES = [
     'harmony_intent_model',
     'harmony_output_preview',
     'harmony_context_triage',
+    'harmony_dual_lens',
+    'harmony_audhd_lens',
+    'harmony_web_search',
+    'harmony_rule_matrix_eval',
+    'harmony_architecture_risk_audit',
+    'harmony_policy_gate_check',
     'harmony_dns_ssl_probe',
     'harmony_net_path_audit',
     'harmony_wp_site_diagnostic',
@@ -289,6 +334,12 @@ const HARMONY_READONLY_TOOL_NAMES = [
     'harmony_net_path_audit',
     'harmony_wp_site_diagnostic',
     'harmony_cloud_connector',
+    'harmony_dual_lens',
+    'harmony_audhd_lens',
+    'harmony_web_search',
+    'harmony_rule_matrix_eval',
+    'harmony_architecture_risk_audit',
+    'harmony_policy_gate_check',
 ];
 
 const CRITICAL_TOOL_NAMES = [
@@ -366,13 +417,16 @@ function describeNetworkError(error: any): string {
     const parts: string[] = [];
     let cur = error;
     let depth = 0;
-    while (cur && depth < 4) {
-        const label = cur.code ?? cur.message ?? String(cur);
-        if (label && !parts.includes(label)) parts.push(String(label));
+    while (cur && depth < 5) {
+        const phase = typeof cur?.phase === 'string' ? `[${cur.phase}]` : '';
+        const code = typeof cur?.code === 'string' ? cur.code : '';
+        const msg = typeof cur?.message === 'string' ? cur.message : (depth === 0 ? String(cur) : '');
+        const label = [phase, code, msg].filter(Boolean).join(': ');
+        if (label && !parts.includes(label)) parts.push(label);
         cur = cur.cause;
         depth++;
     }
-    return parts.join(' <- cause: ');
+    return redactUrlCredentials(parts.join(' <- cause: '));
 }
 
 function streamIdleTimeoutMs(): number {
@@ -463,6 +517,14 @@ async function modeAddendum(): Promise<string> {
             `\\n  - Mutating tools still require normal confirmation, exactly as outside this mode.` +
             `\\n  - If a task requires writing files or running commands, call the appropriate tool directly WITH confirmation.` +
             `\\n  - Budget: ${budget}. Audit trail active. Session timeout enforced.`);
+        if (cfg.get<boolean>('orchestrateMode.fleetEnabled')) {
+            const offloadRoute = cfg.get<string>('costShield.workerRoute') ?? 'agentsProfile';
+            lines.push(`🚀 FLEET MODE IS ON (Sub-option under Orchestrate Mode):` +
+                `\\n  - Seat 1 — Conductor (Primary Chat): You hold architecture, final synthesis, harmony_ask_question checkpoints, and all file/terminal write authority.` +
+                `\\n  - Seat 2 — Orchestrator (harmony_orchestrate_codebase): Use for long-context read-only repo impact packs.` +
+                `\\n  - Seat 3 — Collaborator Fleet (harmony_parallel / harmony_spawn_worker): Proactively fan out parallel read-only sub-tasks (scout, researcher, critic, verifier, cost_sentinel) to save frontier context tokens and triple-check non-trivial changes.` +
+                `\\n  - Collaborator Priority Order: explicit tool/profile override → Context Shield Offload Route (${offloadRoute}) → Agents Profile → role-aware tier default.`);
+        }
     }
     if (cfg.get<boolean>('planOnlyMode')) {
         lines.push('PLAN-ONLY MODE IS ON: You cannot write, edit, patch files, or run terminal commands. You may only read, search, fetch, plan, consult, and ask. Tell the user this if they ask you to make changes.');
@@ -622,15 +684,16 @@ You are acting as a code reviewer. Please read the relevant files, then return a
 };
 
 function sanitizeAssistantHistoryText(text: string): string {
-    return text
+    const cleaned = text
         .replace(/<details(?:\s+open)?><summary>Thinking(?:…|\.\.\.)<\/summary>[\s\S]*?<\/details>/gi, '')
         .replace(/<details><summary>Diagnostic details[\s\S]*?<\/details>/gi, '')
-    .replace(/^\s*File:\s*$/gmi, '')
-    .replace(/^\s*(?:Now\s+)?Let me (?:try|start by|do|read|check|verify|apply|run|ask)[^\n]*(?:tool|file|fix|disk|server)[^\n]*$/gmi, '')
+        .replace(/^\s*File:\s*$/gmi, '')
+        .replace(/^\s*(?:Now\s+)?Let me (?:try|start by|do|read|check|verify|apply|run|ask)[^\n]*(?:tool|file|fix|disk|server)[^\n]*$/gmi, '')
         .replace(/(?:^|\n)> \*\*Thinking\.\.\.\*\*\n(?:>.*(?:\n|$))*/g, '\n')
         .replace(/^_Thinking through the request(?:…|\.\.\.)_\s*/gm, '')
         .replace(/^> 🤖 .*\n\n/m, '')
         .trim();
+    return stripTextualToolCallsFromHistory(cleaned);
 }
 
 function formatThinkingBlock(reasoning: string): string {
@@ -718,58 +781,109 @@ function stripReasoningFromDeepSeekMessages(messages: DeepSeekMessage[]): DeepSe
  * thought_signature. All other providers and signed tool calls pass through
  * untouched.
  */
-function geminiSanitizeMessages(messages: DeepSeekMessage[]): DeepSeekMessage[] {
-    // Quick scan: are there any unsigned assistant tool_calls?
-    // Every individual tool_call MUST carry thought_signature — if even one
-    // parallel tool_call lacks a signature, Gemini 3+/4.x rejects that element
-    // with HTTP 400 ("Function call is missing a thought_signature").
-    const hasUnsignedCalls = messages.some(
-        m => m.role === 'assistant'
-            && Array.isArray(m.tool_calls)
-            && m.tool_calls!.length > 0
-            && m.tool_calls!.some((tc: any) => !tc.thought_signature)
-    );
-    if (!hasUnsignedCalls) return messages; // All good — no sanitization needed
+function stripGeminiThoughtSignaturesInPlace(messages: DeepSeekMessage[]): number {
+    let stripped = 0;
+    for (const msg of messages) {
+        if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+            for (const tc of msg.tool_calls as any[]) {
+                if (tc && (tc.thought_signature || tc.thoughtSignature || tc.extra_content?.google?.thought_signature)) {
+                    delete tc.thought_signature;
+                    delete tc.thoughtSignature;
+                    if (tc.extra_content?.google) {
+                        delete tc.extra_content.google.thought_signature;
+                        delete tc.extra_content.google.thoughtSignature;
+                    }
+                    stripped++;
+                }
+            }
+        }
+    }
+    return stripped;
+}
 
-    debugLog('[Gemini Sanitize] found unsigned assistant tool_calls — converting unsigned calls to text format to prevent HTTP 400');
+function geminiSanitizeMessages(messages: DeepSeekMessage[], degradeAllToolCalls: boolean = false): DeepSeekMessage[] {
+    const hasAnyToolCalls = messages.some(
+        m => m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls!.length > 0
+    );
+    if (!hasAnyToolCalls) return messages;
+
+    // Quick scan: are there any unsigned assistant tool_calls, or are we forcing
+    // full degradation (e.g. when falling back from Gemini Native to OpenAI-compat)?
+    // Also note: Google's OpenAI-compat endpoint (/v1beta/openai/chat/completions)
+    // requires thought_signature inside `extra_content.google.thought_signature` on
+    // each signed tool_call — top-level `tc.thought_signature` alone is ignored by
+    // the OpenAI-compat parser and causes HTTP 400 ("Function call is missing a thought_signature").
     const result: DeepSeekMessage[] = [];
-    // Track tool_call_ids we've absorbed so we can convert their tool result messages
     const absorbedToolCallIds = new Set<string>();
+    let formattedSignedCount = 0;
 
     for (const msg of messages) {
         if (msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-            const signedCalls = msg.tool_calls.filter((tc: any) => Boolean(tc.thought_signature));
-            const unsignedCalls = msg.tool_calls.filter((tc: any) => !tc.thought_signature);
-            if (unsignedCalls.length === 0) {
-                // Keep as-is — all signatures present
-                result.push(msg);
+            const turnSig = !degradeAllToolCalls
+                ? (msg.tool_calls as any[]).find(tc => Boolean(tc?.thought_signature || tc?.extra_content?.google?.thought_signature))
+                : undefined;
+            const resolvedTurnSig: string | undefined = turnSig?.thought_signature ?? turnSig?.extra_content?.google?.thought_signature;
+
+            if (resolvedTurnSig && !degradeAllToolCalls) {
+                // Keep tool_calls for this turn, ensuring the first tool_call (and any
+                // individually signed tool_call) has BOTH top-level `thought_signature`
+                // AND OpenAI-compat `extra_content.google.thought_signature`.
+                let attachedFirst = false;
+                const formattedCalls = msg.tool_calls.map((tc: any) => {
+                    const sig = tc.thought_signature
+                        ?? tc.extra_content?.google?.thought_signature
+                        ?? (!attachedFirst ? resolvedTurnSig : undefined);
+                    if (sig) {
+                        attachedFirst = true;
+                        formattedSignedCount++;
+                        return {
+                            ...tc,
+                            thought_signature: sig,
+                            extra_content: {
+                                ...(tc.extra_content ?? {}),
+                                google: {
+                                    ...(tc.extra_content?.google ?? {}),
+                                    thought_signature: sig,
+                                },
+                            },
+                        };
+                    }
+                    return tc;
+                });
+                result.push({
+                    ...msg,
+                    tool_calls: formattedCalls,
+                });
                 continue;
             }
 
-            // Convert unsigned tool_calls to a text description
-            const callDescriptions = unsignedCalls.map((tc: any) => {
-                const name = tc.function?.name ?? '(unknown)';
-                let args = '';
-                try { args = tc.function?.arguments ? JSON.stringify(JSON.parse(tc.function.arguments)) : '{}'; } catch { args = tc.function?.arguments ?? '{}'; }
-                absorbedToolCallIds.add(tc.id);
-                return `[Tool call: ${name}(${args})]`;
-            });
-            const textContent = [deepSeekContentToText(msg.content), ...callDescriptions].filter(Boolean).join('\n');
+            // Convert unsigned (or fallback-degraded) tool_calls in this turn into a
+            // non-imitable past-tense summary on the assistant message (never `[Tool call: fn({...})]`
+            // inside `assistant` turns, which conditions models to emit plain-text tool calls).
+            const degradedNames: string[] = [];
+            for (const tc of msg.tool_calls as any[]) {
+                degradedNames.push(tc.function?.name ?? '(unknown)');
+                if (tc.id) absorbedToolCallIds.add(tc.id);
+            }
+            const summaryLine = formatDegradedHistoricalToolSummary(degradedNames);
+            const textContent = [deepSeekContentToText(msg.content), summaryLine].filter(Boolean).join('\n');
             result.push({
                 ...msg,
-                content: textContent || '[tool calls converted to text]',
-                tool_calls: signedCalls.length > 0 ? signedCalls : undefined
+                content: textContent || summaryLine,
+                tool_calls: undefined
             });
         } else if (msg.role === 'tool' && msg.tool_call_id && absorbedToolCallIds.has(msg.tool_call_id)) {
-            // Merge this tool result into the previous message as a user message
-            const mergedResult = `[Tool result for ${msg.tool_call_id}]: ${deepSeekContentToText(msg.content) || '(empty)'}`;
+            // Convert this tool result into a user message matching the degraded historical tool step
+            const mergedResult = `[Historical tool output from earlier turn (${msg.tool_call_id})]: ${deepSeekContentToText(msg.content) || '(empty)'}`;
             result.push({ role: 'user', content: mergedResult });
         } else {
             result.push(msg);
         }
     }
 
-    debugLog(`[Gemini Sanitize] converted ${absorbedToolCallIds.size} unsigned tool call(s) to text format`);
+    if (absorbedToolCallIds.size > 0 || formattedSignedCount > 0) {
+        debugLog(`[Gemini Sanitize] degraded=${absorbedToolCallIds.size} tool call(s) to text, formatted=${formattedSignedCount} signed call(s) with extra_content.google.thought_signature (degradeAll=${degradeAllToolCalls})`);
+    }
     return result;
 }
 
@@ -860,16 +974,16 @@ function directPrimaryRoute(provider: DirectPrimaryProvider): DirectPrimaryRoute
         };
     }
     if (provider === 'gemini') {
-        // Gemini via OpenAI-compatible endpoint.
+        // Gemini via OpenAI-compatible endpoint (AI Studio, Vertex AI OpenAPI, or custom).
         // Respect user's configured Gemini model (they may have overridden
-        // the coding tier to use gemini-3.1-pro-preview for heavier work).
+        // the coding tier to use gemini-3.1-pro-preview, gemini-4-hydrogen, or gemini-4-carbon).
         const geminiModel = cfg.get<string>('providers.gemini.coding')?.trim()
             || modelFor('gemini', 'coding');
         return {
             provider,
             label: 'Gemini',
             model: geminiModel,
-            baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+            baseUrl: providerBaseUrlForCall('gemini'),
             secretKey: secretKeyFor('gemini'),
             tier: 'coding',
             supportsReasoningContent: false,
@@ -1100,23 +1214,23 @@ function diagnosticBlock(args: {
 }
 
 function isTransientProviderInterruption(error: any): boolean {
-    const raw = error?.message ?? String(error);
+    const detailed = describeNetworkError(error);
     const name = typeof error?.name === 'string' ? error.name : '';
-    const text = `${name} ${raw}`.toLowerCase();
-    return /terminated|socket hang up|econnreset|und_err|fetch failed|networkerror/.test(text);
+    const text = `${name} ${detailed}`.toLowerCase();
+    return /terminated|socket hang ?up|other side closed|premature close|econnreset|etimedout|etimeout|epipe|enetunreach|ehostunreach|eaddrnotavail|econnrefused|eai_again|und_err|fetch failed|network ?error|timed out before the first response bytes|stream idle timeout|connect\/tls handshake timed out|request upload stalled|http 500\b|http 502\b|http 503\b|http 504\b|"internal_error"|"server_error"|overloaded|\bunavailable\b/.test(text);
 }
 
 function classifyParticipantError(error: any, token: vscode.CancellationToken): { message: string; diagnosticError: string; showDiagnostics: boolean } {
-    const raw = error?.message ?? String(error);
+    const raw = redactUrlCredentials(error?.message ?? String(error));
     const name = typeof error?.name === 'string' ? error.name : '';
     const text = `${name} ${raw}`.toLowerCase();
 
     // Timeouts must be classified BEFORE cancellation: an aborted-by-guard request
     // surfaces with AbortError and would otherwise read as a silent user cancel.
-    if (!token.isCancellationRequested && /timed out|idle timeout|first response bytes/.test(text)) {
+    if (!token.isCancellationRequested && /timed out|idle timeout|first response bytes|request upload stalled/.test(text)) {
         return {
             message: 'Harmony provider request timed out — the connection stalled or the model took too long. The request was aborted to protect the turn; please retry.',
-            diagnosticError: raw,
+            diagnosticError: describeNetworkError(error),
             showDiagnostics: true
         };
     }
@@ -1130,8 +1244,11 @@ function classifyParticipantError(error: any, token: vscode.CancellationToken): 
     }
 
     if (isTransientProviderInterruption(error)) {
+        const isServer5xx = /http 500\b|http 502\b|http 503\b|http 504\b|"internal_error"|"server_error"|overloaded/.test(text);
         return {
-            message: 'Harmony provider connection was interrupted before it finished. Please retry; if this repeats, switch to a lighter model or wait for the provider to settle.',
+            message: isServer5xx
+                ? 'Harmony provider returned a transient server error (HTTP 5xx) after an automatic retry. Please retry in a moment or switch to another model while the provider recovers.'
+                : 'Harmony provider connection was interrupted before it finished. Please retry; if this repeats, switch to a lighter model or wait for the provider to settle.',
             diagnosticError: describeNetworkError(error),
             showDiagnostics: true
         };
@@ -1224,17 +1341,58 @@ async function buildMessages(
     }
     messages.push(vscode.LanguageModelChatMessage.User(leadingInstructions));
 
-    // Replay prior conversation turns.
+    // Replay prior conversation turns (bounded by head+tail history window to protect VS Code Renderer memory).
+    const rawHistoryTurns: Array<{ role: 'user' | 'assistant'; text: string }> = [];
     for (const turn of chatContext.history) {
         if (turn instanceof vscode.ChatRequestTurn) {
-            messages.push(vscode.LanguageModelChatMessage.User(turn.prompt));
+            if (turn.prompt) rawHistoryTurns.push({ role: 'user', text: turn.prompt });
         } else if (turn instanceof vscode.ChatResponseTurn) {
             const text = turn.response
                 .map(part => part instanceof vscode.ChatResponseMarkdownPart ? part.value.value : '')
                 .join('');
             const clean = sanitizeAssistantHistoryText(text);
-            if (clean) messages.push(vscode.LanguageModelChatMessage.Assistant(clean));
+            if (clean) rawHistoryTurns.push({ role: 'assistant', text: clean });
         }
+    }
+    const historyLimits = deepSeekHistoryLimits();
+    let keptHistoryTurns = rawHistoryTurns;
+    if (historyLimits.maxMessages <= 0 || historyLimits.maxChars <= 0) {
+        keptHistoryTurns = [];
+    } else if (rawHistoryTurns.length > 0) {
+        const headCount = Math.min(DEEPSEEK_HEAD_MESSAGES, rawHistoryTurns.length, historyLimits.maxMessages);
+        const head = rawHistoryTurns.slice(0, headCount);
+        let headChars = 0;
+        for (const item of head) headChars += item.text.length;
+        const tailSource = rawHistoryTurns.slice(headCount);
+        const tailMsgBudget = Math.max(0, historyLimits.maxMessages - headCount);
+        const tailCharBudget = Math.max(0, historyLimits.maxChars - headChars);
+        const tail: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+        let tailChars = 0;
+        for (let idx = tailSource.length - 1; idx >= 0; idx--) {
+            const item = tailSource[idx];
+            if (tail.length >= tailMsgBudget) break;
+            if (tail.length > 0 && tailChars + item.text.length > tailCharBudget) break;
+            tail.unshift(item);
+            tailChars += item.text.length;
+        }
+        keptHistoryTurns = [...head, ...tail];
+        if (keptHistoryTurns.length < rawHistoryTurns.length) {
+            const droppedCount = rawHistoryTurns.length - keptHistoryTurns.length;
+            debugLog(`[vscode-lm History] replayed=${keptHistoryTurns.length}/${rawHistoryTurns.length} (dropped ${droppedCount} middle turn(s)) chars=${headChars + tailChars}`);
+            recordRouteGuardEvent(
+                'vscode-lm',
+                'native',
+                'chat-history-trim',
+                `vscode_lm_history_trimmed: Trimmed ${droppedCount} middle history turn(s) (kept ${keptHistoryTurns.length}/${rawHistoryTurns.length}) to protect Renderer memory`
+            );
+        }
+    }
+    for (const item of keptHistoryTurns) {
+        messages.push(
+            item.role === 'user'
+                ? vscode.LanguageModelChatMessage.User(item.text)
+                : vscode.LanguageModelChatMessage.Assistant(item.text)
+        );
     }
 
     messages.push(vscode.LanguageModelChatMessage.User(request.prompt));
@@ -1551,12 +1709,14 @@ async function buildDeepSeekMessages(
 ): Promise<DeepSeekMessage[]> {
     let system = profile.systemPrompt + await modeAddendum();
     system += '\n' + LanguageManager.getInstance().getLanguageInstruction();
-    if (references.length > 0) {
+    const costShieldMode = (vscode.workspace.getConfiguration('harmony').get<string>('costShield.mode') ?? 'auto') as 'auto' | 'manual' | 'off';
+    const prefixLockEnabled = costShieldMode !== 'off';
+    if (!prefixLockEnabled && references.length > 0) {
         system += `\n\nThe user attached the following for context (some inlined, some by path). Use harmony_read_file when you need a file not fully shown:\n` + references.join('\n');
     }
     if (rulesText) system += rulesText;
     if (continuityText) system += continuityText;
-    if (recallText) system += recallText;
+    if (!prefixLockEnabled && recallText) system += recallText;
     if (resumedSessionText) system += resumedSessionText;
     // Total budget guard: prevent JSON encoding failures from oversized system messages
     const MAX_SYSTEM_CHARS = 80000;
@@ -1601,7 +1761,21 @@ async function buildDeepSeekMessages(
     }
 
     messages.push(...trimDeepSeekHistoryMessages(historyMessages));
-    messages.push({ role: 'user', content: sanitizeForJson(request.prompt) });
+    let currentUserPrompt = request.prompt;
+    if (prefixLockEnabled && (references.length > 0 || recallText)) {
+        const turnContextBlocks: string[] = [];
+        if (references.length > 0) {
+            turnContextBlocks.push(
+                `The user attached the following for context (some inlined, some by path). Use harmony_read_file when you need a file not fully shown:\n` +
+                references.join('\n')
+            );
+        }
+        if (recallText) {
+            turnContextBlocks.push(recallText.trim());
+        }
+        currentUserPrompt = `<turn_context>\n${turnContextBlocks.join('\n\n')}\n</turn_context>\n\n${request.prompt}`;
+    }
+    messages.push({ role: 'user', content: sanitizeForJson(currentUserPrompt) });
     return messages;
 }
 
@@ -1617,7 +1791,8 @@ async function deepSeekTools(forceReadOnly = false) {
                 description: t.description,
                 parameters: t.inputSchema ?? { type: 'object', properties: {} }
             }
-        }));
+        }))
+        .sort((a, b) => (a.function.name < b.function.name ? -1 : a.function.name > b.function.name ? 1 : 0));
     const missing = missingToolNames(allowed, registeredTools);
     debugLog(`[Tool Registry] requested=${allowed.length} registered=${toolNames(registeredTools).length} advertised=${advertised.length} missing=${missing.length > 0 ? missing.join(', ') : '(none)'}`);
     return advertised;
@@ -1701,23 +1876,44 @@ function toolSchemaNames(tools: readonly any[]): string[] {
     return tools.map(tool => tool?.function?.name).filter((name): name is string => typeof name === 'string').sort();
 }
 
+function hasCurrentTurnAskInvocation(text: string): boolean {
+    const prose = text.replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g, ' ');
+    const askIntentRe = /\b(?:i(?:['’]ll| will)|i(?:['’]m| am)\s+going\s+to|let\s+me|let['’]s)\s+(?:now\s+|just\s+|go\s+ahead\s+and\s+)?(?:call|use|invoke|run)\s+(?:the\s+)?`?(?:harmony_ask_question|ask_question)\b`?(?:\s+tool\b)?/gi;
+    for (const match of prose.matchAll(askIntentRe)) {
+        const offset = match.index ?? 0;
+        const lineStart = prose.lastIndexOf('\n', offset - 1) + 1;
+        const before = prose.slice(lineStart, offset);
+        const inInlineCode = (before.split('`').length - 1) % 2 === 1;
+        if (!inInlineCode) return true;
+    }
+    return false;
+}
+
 function toolRoutingFailureLikely(content: string, prompt: string): boolean {
     const promptText = prompt.toLowerCase();
     const contentText = content.toLowerCase();
-    const joined = `${promptText}\n${contentText}`;
     // A bare "file:" placeholder is a stub — nothing was delivered.
     if (/^\s*file:\s*$/im.test(content)) return true;
-    // Explicit promise to call the ask-question tool without calling it.
-    if (/\b(?:use|try|test|call|run|invoke)\b[\s\S]{0,100}\b(?:harmony_ask_question|ask_question)\b/.test(joined)) return true;
-    if (/\b(?:harmony_ask_question|ask_question)\b[\s\S]{0,100}\b(?:tool|call|invoke)\b/.test(contentText)) return true;
-    // Conversational action phrases ("let me check...") only count as a routing
-    // failure when the RESPONSE is a short promise with no delivered answer.
-    // Long answers that mention tool work are real prose. The prompt is
-    // excluded on purpose: instructions containing "let me read X" must not
-    // trigger a retry against a complete response.
-    if (/\b(?:let me|i(?:'ll| will)|now i(?:'ll| will)|first i(?:'ll| will))\b[\s\S]{0,180}\b(?:read|check|inspect|open|edit|apply|write|patch|run|execute|ask|try|verify|search|grep)\b/.test(contentText)) {
+    // Literal `[Tool call: name(...)]` emitted in prose (outside code spans) is always
+    // an unexecuted tool-call misfire when structured `toolCalls` is empty.
+    if (hasTextualToolCallSyntax(content)) return true;
+    // User explicitly requested invoking harmony_ask_question in the prompt, or
+    // assistant promised in first-person to invoke it in the current turn.
+    if (/\b(?:use|try|test|call|run|invoke)\b[\s\S]{0,100}\b(?:harmony_ask_question|ask_question)\b/.test(promptText)) return true;
+    if (hasCurrentTurnAskInvocation(content)) return true;
+    // Conversational action phrases ("let me check...") count as a routing
+    // failure when the response is a short promise with no delivered answer OR
+    // when the final paragraph/tail of a longer response ends with an unfulfilled
+    // action promise (such as "Let me ask how you'd like to proceed:").
+    const actionPromiseRe = /\b(?:let me|i(?:'ll| will)|now i(?:'ll| will)|first i(?:'ll| will))\b[\s\S]{0,180}\b(?:read|check|inspect|open|edit|apply|write|patch|run|execute|ask|try|verify|search|grep)\b/i;
+    if (actionPromiseRe.test(contentText)) {
         const substantive = content.replace(/```[\s\S]*?```/g, '').trim();
-        return substantive.length < 120;
+        if (substantive.length < 120) return true;
+        const paragraphs = substantive.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+        const lastParagraph = paragraphs[paragraphs.length - 1] ?? '';
+        if (lastParagraph.length <= 260 && actionPromiseRe.test(lastParagraph) && /(?:[:…]\s*$|\bask\b[\s\S]{0,120}$)/i.test(lastParagraph)) {
+            return true;
+        }
     }
     return false;
 }
@@ -1933,13 +2129,12 @@ const routesWithoutEstimateNotified = new Set<string>();
 
 /**
  * Pre-send token estimate for the context guard (versioned in ./stepCapture's
- * PROMPT_ESTIMATOR_VERSION). Formula: nonCJK/3 + CJK×1.5, seeded from
- * documented character-to-token ratios (~0.30 token/char non-CJK, ~0.60
- * token/char CJK with an upward safety margin).
+ * PROMPT_ESTIMATOR_VERSION). Uses the self-calibrating CJK-aware OLS fitter
+ * from ./costTracker when >= 5 real usage observations exist in the session,
+ * falling back to the conservative seed formula (nonCJK/3 + CJK×1.5).
  */
-function estimatePromptTokens(promptChars: number, promptCjkChars: number): number {
-    const nonCjkChars = Math.max(0, promptChars - promptCjkChars);
-    return Math.ceil(nonCjkChars / 3) + Math.ceil(promptCjkChars * 1.5);
+function estimatePromptTokens(promptChars: number, promptCjkChars: number, provider?: UsageProviderId): number {
+    return estimateCalibratedPromptTokens(promptChars, promptCjkChars, provider);
 }
 
 // Stable-prefix anchor: the first N history turns are always kept, so the
@@ -1999,7 +2194,7 @@ function sanitizeHttpError(status: number, body: string, label: string): string 
         return `${label} HTTP ${status}: ${title || 'Server returned an HTML error page (likely a gateway/proxy issue). Retry in a moment.'}`;
     }
     // For JSON or plain-text errors, keep the existing behavior but cap at 500 chars
-    return `${label} HTTP ${status}: ${trimmed.slice(0, 500)}`;
+    return `${label} HTTP ${status}: ${redactUrlCredentials(trimmed).slice(0, 500)}`;
 }
 
 async function callDeepSeek(apiKey: string, body: unknown, token: vscode.CancellationToken): Promise<any> {
@@ -2064,16 +2259,32 @@ async function callDeepSeekStreaming(
     let reader: any = undefined;
 
     try {
-        const response = await fetch(`${baseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-                'Accept': 'text/event-stream'
-            },
-            body: JSON.stringify({ ...body, stream: true }),
-            signal: controller.signal as any
-        });
+        const serializedCompatBody = JSON.stringify({ ...body, stream: true });
+        const reqHeaders: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'Accept': 'text/event-stream'
+        };
+        const response = route.provider === 'gemini'
+            ? await vpnResilientFetch(`${baseUrl}/chat/completions`, {
+                method: 'POST',
+                headers: reqHeaders,
+                body: serializedCompatBody,
+                signal: controller.signal,
+                label: `${route.label} Compat (${route.model})`,
+                ttfbTimeoutMs: ttfMs,
+                ...getVscodeHttpProxyOptions(),
+                onGuardEvent: (reason) => {
+                    debugLog(`[${route.label} Self-Heal] ${reason}`);
+                    try { recordRouteGuardEvent('gemini', route.tier, route.model, reason); } catch { /* best-effort */ }
+                },
+            })
+            : await fetch(`${baseUrl}/chat/completions`, {
+                method: 'POST',
+                headers: reqHeaders,
+                body: serializedCompatBody,
+                signal: controller.signal as any
+            });
         clearTimeout(ttfGuard); // headers arrived — hand the budget to the per-chunk idle guard
         if (!response.ok) {
             const text = await response.text();
@@ -2147,9 +2358,16 @@ async function callDeepSeekStreaming(
                 if (route.provider === 'gemini') {
                     const choiceSig = (choice as any)?.thought_signature
                         ?? (choice as any)?.thoughtSignature
+                        ?? (choice as any)?.extra_content?.google?.thought_signature
+                        ?? (choice as any)?.extra_content?.google?.thoughtSignature
                         ?? (choice?.message as any)?.thought_signature
-                        ?? (choice?.message as any)?.thoughtSignature;
-                    const deltaSig = delta?.thought_signature ?? delta?.thoughtSignature;
+                        ?? (choice?.message as any)?.thoughtSignature
+                        ?? (choice?.message as any)?.extra_content?.google?.thought_signature
+                        ?? (choice?.message as any)?.extra_content?.google?.thoughtSignature;
+                    const deltaSig = delta?.thought_signature
+                        ?? delta?.thoughtSignature
+                        ?? delta?.extra_content?.google?.thought_signature
+                        ?? delta?.extra_content?.google?.thoughtSignature;
 
                     // If a signature arrives at the choice/delta/message level
                     // (not inside a specific tool_call), attach it to any
@@ -2193,10 +2411,13 @@ async function callDeepSeekStreaming(
                         // Gemini thinking models attach thought_signature to
                         // functionCall parts; preserve it so the assistant
                         // tool_calls echo-back includes it (missing → HTTP 400).
-                        // Check all known field name variants.
+                        // Check all known field name variants (including Google's
+                        // OpenAI-compat extra_content.google.thought_signature).
                         const thoughtSig = tc.thought_signature
                             ?? tc.thoughtSignature
-                            ?? tc.signature;
+                            ?? tc.signature
+                            ?? tc.extra_content?.google?.thought_signature
+                            ?? tc.extra_content?.google?.thoughtSignature;
                         if (thoughtSig) {
                             existing.thought_signature = thoughtSig;
                             debugLog(`[Gemini Stream] captured thought_signature inside tool_call[${idx}]`);
@@ -2797,7 +3018,25 @@ async function resumedSessionText(context: vscode.ExtensionContext): Promise<str
         await context.workspaceState.update('harmony.activeSession', undefined);
         return '';
     }
-    return `\n\nACTIVE RESUMED HARMONY SESSION:\n${formatSessionPreamble(session)}\nUse this as explicit prior conversation context until the user resets or resumes a different session.`;
+    return `\n\nACTIVE RESUMED HARMONY SESSION:\n${formatSessionPreamble(session, preambleBudgetFromSettings())}\nUse this as explicit prior conversation context until the user resets or resumes a different session.`;
+}
+
+/**
+ * Preamble budget from settings. The ceiling is user-tunable because it is a
+ * judgement about signal dilution, not a hardware limit, and it is expected to
+ * DROP once a digest layer exists to carry what the ceiling would otherwise cut.
+ */
+function preambleBudgetFromSettings(): { targetChars: number; ceilingChars: number } {
+    const cfg = vscode.workspace.getConfiguration('harmony.sessions');
+    const target = cfg.get<number>('preambleTargetChars');
+    const ceiling = cfg.get<number>('preambleCeilingChars');
+    const targetChars = typeof target === 'number' && target > 0 ? target : SESSION_PREAMBLE_TARGET_CHARS;
+    // A ceiling below the target is meaningless; clamp to the target rather than
+    // silently falling back, so an explicit setting is still respected.
+    const ceilingChars = typeof ceiling === 'number' && ceiling > 0
+        ? Math.max(ceiling, targetChars)
+        : Math.max(SESSION_PREAMBLE_CEILING_CHARS, targetChars);
+    return { targetChars, ceilingChars };
 }
 
 interface AgentRunOutcome {
@@ -2827,9 +3066,21 @@ async function invokeHarmonyToolWithTurnKeepAlive(
             try { stream.progress(progress); } catch (e) { console.warn('[Harmony] tool progress heartbeat failed', e); }
         }, 10000);
 
+        // Renderer OOM Shield v3: Pure read-only tools (including harmony_parallel Fleet swarms,
+        // harmony_read_file, harmony_grep, harmony_orchestrate_codebase) never show confirmation
+        // dialogs and already emit lightweight stream.progress(...) + clickable file pills.
+        // Omitting toolInvocationToken keeps 80 KB–160 KB read-only payloads inside the Node.js
+        // Extension Host instead of cloning them into VS Code's <4 GB Renderer Chat ViewModel.
+        const shieldReadOnlyTokens = vscode.workspace
+            .getConfiguration('harmony')
+            .get<boolean>('rendererShield.omitReadOnlyInvocationToken', true);
+        const effectiveInvocationToken = (shieldReadOnlyTokens && isReadOnlyTool(toolName))
+            ? undefined
+            : toolInvocationToken;
+
         return await vscode.lm.invokeTool(
             toolName,
-            { input, toolInvocationToken },
+            { input, toolInvocationToken: effectiveInvocationToken },
             token
         );
     } finally {
@@ -2915,11 +3166,29 @@ async function runDeepSeekAgent(
     let suppressThinkingForTurn = false;
     let toolRoutingRetryUsed = false;
     let flowStateRetries = 0;
+    let lastStepWasMechanical = false;
     const usageCalls: any[] = [];
+    const MECHANICAL_STEP_TOOLS = new Set<string>([
+        'harmony_todo',
+        'harmony_read_file',
+        'harmony_list_dir',
+        'harmony_grep',
+        'harmony_check_whispers',
+        'harmony_git_status',
+        'harmony_git_diff',
+        'harmony_git_log',
+    ]);
 
     for (let step = 0; step < limit.maxSteps; step++) {
         if (token.isCancellationRequested) break;
         warnedStepLimit = maybeWarnStepLimit(stream, limit, step, warnedStepLimit);
+        const costShieldMode = (vscode.workspace.getConfiguration('harmony').get<string>('costShield.mode') ?? 'auto') as 'auto' | 'manual' | 'off';
+        if (costShieldMode === 'auto' && step > 0) {
+            const dedup = deduplicateSupersededToolResults(messages);
+            if (dedup.stubbed > 0) {
+                debugLog(`[${route.label} Context Shield] deduplicated ${dedup.stubbed} superseded read result(s) (~${dedup.charsSaved} chars saved) at step=${step + 1}`);
+            }
+        }
 
         // Moonshot/Kimi k2.7+ requires temperature=1.0 or omitting it entirely;
         // Claude 5 generation removed sampling params (temperature/top_p/top_k);
@@ -2976,18 +3245,20 @@ async function runDeepSeekAgent(
         // window (1M); compact `messages` in-place so both `sanitizedMessages` and
         // the Gemini native path (`messages`) stay below the 1,048,576-token limit.
         if (route.provider === 'deepseek' || route.provider === 'gemini') {
-            let estPromptTokens = estimatePromptTokens(promptMetrics.promptChars, promptMetrics.promptCjkChars);
+            let estPromptTokens = estimatePromptTokens(promptMetrics.promptChars, promptMetrics.promptCjkChars, route.provider);
             if (estPromptTokens > DEEPSEEK_CONTEXT_GUARD_TOKENS) {
                 const targetTokens = Math.floor(DEEPSEEK_CONTEXT_GUARD_TOKENS * 0.75);
                 // Inverse of the conservative estimator (worst case: ~3 chars per token).
                 const charsToShed = Math.max(0, Math.ceil((estPromptTokens - targetTokens) * 3));
-                const outcome = planInTurnCompaction(messages, charsToShed, COMPACTION_KEEP_NEWEST_MESSAGES);
+                const spillRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                const spillDir = spillRoot ? path.join(spillRoot, '.harmony', 'turn-spill', turnId) : undefined;
+                const outcome = planInTurnCompaction(messages, charsToShed, COMPACTION_KEEP_NEWEST_MESSAGES, { holographic: true, spillDir });
                 if (outcome.stubbed > 0) {
                     if (route.provider === 'gemini' && sanitizedMessages !== messages) {
-                        planInTurnCompaction(sanitizedMessages, charsToShed, COMPACTION_KEEP_NEWEST_MESSAGES);
+                        planInTurnCompaction(sanitizedMessages, charsToShed, COMPACTION_KEEP_NEWEST_MESSAGES, { holographic: true });
                     }
                     promptMetrics = measurePromptMetrics(sanitizedMessages);
-                    estPromptTokens = estimatePromptTokens(promptMetrics.promptChars, promptMetrics.promptCjkChars);
+                    estPromptTokens = estimatePromptTokens(promptMetrics.promptChars, promptMetrics.promptCjkChars, route.provider);
                     debugLog(`[${route.label} Guard] compacted ${outcome.stubbed} tool result(s) (~${outcome.charsSaved} chars saved); new estimate ≈${estPromptTokens} tokens (target ≈${targetTokens}).`);
                     stream.markdown('\n\n> _(older tool results compacted to keep this turn within the context limit)_\n\n');
                 }
@@ -3019,8 +3290,14 @@ async function runDeepSeekAgent(
         };
         // Structural type: all five streaming paths (DeepSeek, Gemini native/compat,
         // Tencent, Anthropic) satisfy it; only callDeepSeekStreaming sets truncated.
-        let result: { content: string; reasoning: string; toolCalls: DeepSeekToolCall[]; usage?: { promptTokens?: number; completionTokens?: number; cachedPromptTokens?: number }; servedModel?: string; durationMs: number; truncated?: boolean };
+        let result: { content: string; reasoning: string; toolCalls: DeepSeekToolCall[]; usage?: { promptTokens?: number; completionTokens?: number; cachedPromptTokens?: number; thoughtsTokens?: number }; servedModel?: string; durationMs: number; truncated?: boolean };
         let networkRetried = false;
+    // Budget for transient transport retries. This replaced a turn-wide boolean:
+    // previously the FIRST reset spent the entire turn's budget, so a drop at
+    // step 17 discarded work that 16 completed steps had already banked. The
+    // budget is still bounded per turn, but each failure spends one unit instead
+    // of all of them.
+    let transientAttempts = 0;
         // Allow at most one context-length compact→retry per step.
         let contextRetryUsed = false;
         const stepTextBefore = assistantTextSoFar;
@@ -3056,6 +3333,9 @@ async function runDeepSeekAgent(
                 });
             } catch { /* never mask the original error */ }
         };
+        const coalescedMarkdown = createCoalescedMarkdownStreamer((chunk) => {
+            stream.markdown(chunk);
+        });
         const handleDelta = (delta: { content?: string; reasoning?: string; toolCalls?: any[] }) => {
             if (delta.reasoning) {
                 bufferedReasoning += delta.reasoning;
@@ -3079,162 +3359,373 @@ async function runDeepSeekAgent(
             if (delta.content) {
                 clearThinkHeartbeat();
                 if (showThinking && !emittedThinking && bufferedReasoning.trim()) {
-                    stream.markdown(formatThinkingBlock(bufferedReasoning));
+                    coalescedMarkdown.emitImmediate(formatThinkingBlock(bufferedReasoning));
                     emittedThinking = true;
                 }
-                stream.markdown(delta.content);
+                coalescedMarkdown.push(delta.content);
             }
         };
         try {
         // Dispatch to provider-specific streaming function
         const isTencentNative = !!(route.tencentNativeCreds);
         const callStream = route.provider === 'claude' ? callAnthropicStreaming : callDeepSeekStreaming;
+        const callProviderStream = async (bodyToSend: any, deltaHandler: typeof handleDelta = handleDelta) => {
+            if (route.provider !== 'gemini') {
+                return callStream(route, apiKey, bodyToSend, token, deltaHandler);
+            }
+            const compatReq = await resolveGeminiOpenAiCompatRequestAsync(model, apiKey);
+            if (!compatReq) {
+                const guardReason = 'Vertex AI OpenAI-compatible mode (/endpoints/openapi/chat/completions) requires both a GCP Project ID (harmony.gemini.vertexProjectId or GOOGLE_CLOUD_PROJECT) and Google Cloud OAuth 2.0 credentials (gcloud ADC or GOOGLE_APPLICATION_CREDENTIALS). Switch harmony.gemini.api to "auto" or "generateContent" for Vertex Express API keys, or configure GCP OAuth + Project ID.';
+                recordRouteGuardEvent('gemini', route.tier, model, guardReason);
+                throw new VertexAuthConfigurationError(guardReason);
+            }
+            const compatRoute: DirectPrimaryRoute = {
+                ...route,
+                baseUrl: compatReq.baseUrl,
+                model: compatReq.model,
+            };
+            try {
+                return await callStream(compatRoute, compatReq.bearerToken, { ...bodyToSend, model: compatReq.model }, token, deltaHandler);
+            } catch (compatAuthErr: any) {
+                if (compatReq.backend === 'vertex' && !token.isCancellationRequested && /\bHTTP 401\b/i.test(compatAuthErr?.message ?? String(compatAuthErr))) {
+                    invalidateVertexTokenCache();
+                    const refreshedCompat = await resolveGeminiOpenAiCompatRequestAsync(model, apiKey, { bypassVertexCache: true });
+                    if (refreshedCompat) {
+                        recordRouteGuardEvent('gemini', route.tier, model, `Gemini Compat (${model}) Vertex OAuth token expired (HTTP 401); refreshing token automatically`);
+                        return await callStream(
+                            { ...route, baseUrl: refreshedCompat.baseUrl, model: refreshedCompat.model },
+                            refreshedCompat.bearerToken,
+                            { ...bodyToSend, model: refreshedCompat.model },
+                            token,
+                            deltaHandler
+                        );
+                    }
+                }
+                throw compatAuthErr;
+            }
+        };
         // Gemini native generateContent path: handles thought_signatures
         // as first-class metadata, eliminating the HTTP 400 errors that plagued
         // the OpenAI-compat endpoint. Falls back to compat on failure.
         const geminiNativePref = vscode.workspace.getConfiguration('harmony').get<string>('gemini.api') ?? 'auto';
         const useGeminiNative = route.provider === 'gemini'
             && shouldUseGeminiNative(model, geminiNativePref);
-        try {
-            if (useGeminiNative) {
-                // ── Gemini native generateContent path ──
-                // Pass the UNSANITIZED messages — native handles thought_signatures natively.
-                // The sanitizer is only needed for the OpenAI-compat fallback.
-                result = await callGeminiNativeStreaming(
-                    model,
-                    apiKey,
-                    messages as OpenAICompatMessage[],
-                    tools,
-                    token,
-                    handleDelta
-                );
-            } else if (isTencentNative) {
-                result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, requestBody, token, handleDelta);
-            } else {
-                result = await callStream(route, apiKey, requestBody, token, handleDelta);
-            }
-        } catch (e: any) {
-            const message = e?.message ?? String(e);
-            // ── Gemini native → compat fallback ──
-            // If the native path fails (network, model not found, etc.), fall back
-            // to the OpenAI-compat endpoint with the sanitizer safety net.
-            // Skip compat fallback if the failure is a terminal context-length 400
-            // so the context-length compaction retry below can handle it instead!
-            if (useGeminiNative && !token.isCancellationRequested && !networkRetried && !isContextLengthError(message)) {
-                debugLog(`[Gemini Native → Compat Fallback] native path failed: ${message}. Falling back to OpenAI-compat with sanitizer.`);
-                stream.markdown('\n\n> _([Gemini native path unavailable — using compat fallback](debug:gemini-native-fallback))_\n\n');
-                networkRetried = true;
-                assistantTextSoFar = stepTextBefore;
-                reasoningTextSoFar = stepReasoningBefore;
-                bufferedReasoning = '';
-                emittedThinking = false;
-                result = await callStream(route, apiKey, requestBody, token, handleDelta);
-            } else if (route.supportsReasoningContent && thinkingEnabled && message.includes('reasoning_content')) {
-                suppressThinkingForTurn = true;
-                stream.markdown(`\n\n> ${route.label} asked for prior thinking metadata that was not available in this chat history. Retrying this turn with thinking disabled.\n\n`);
-                bufferedReasoning = '';
-                emittedThinking = false;
-                const retryMessages = route.provider === 'gemini'
-                    ? geminiSanitizeMessages(messages)
-                    : stripReasoningFromDeepSeekMessages(messages);
-                const retryBody = {
-                    ...requestBody,
-                    messages: retryMessages,
-                    thinking: { type: 'disabled' }
-                };
-                if (isTencentNative) {
-                    result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, retryBody, token, (delta) => {
-                        if (delta.content) { stream.markdown(delta.content); }
-                    });
+        let activeRequestBody: any = requestBody;
+        let activeDeltaHandler: typeof handleDelta = handleDelta;
+        let compatFallbackUsed = false;
+        let compatThoughtSigRetryUsed = false;
+        let reasoningHistoryRetryUsed = false;
+        let deepseekParamRetryUsed = false;
+        const buildNativeCallOptions = () => ({
+            stepIndex: step,
+            isMechanicalStep: lastStepWasMechanical,
+            costShieldMode,
+            ...(transientAttempts > 0 ? { streamIdleTimeoutMs: Math.min(600_000, 300_000 + transientAttempts * 120_000) } : {}),
+            onGuardEvent: (reason: string) => {
+                recordRouteGuardEvent('gemini', route.tier, model, reason);
+                try { stream.progress(reason); } catch { /* best-effort */ }
+            },
+            onProgressPulse: (status: string) => {
+                try { stream.progress(status); } catch { /* best-effort */ }
+            },
+        });
+
+        while (true) {
+            try {
+                if (useGeminiNative && !compatFallbackUsed) {
+                    // ── Gemini native generateContent path ──
+                    // Pass the UNSANITIZED messages — native handles thought_signatures natively.
+                    result = await callGeminiNativeStreaming(
+                        model,
+                        apiKey,
+                        messages as OpenAICompatMessage[],
+                        tools,
+                        token,
+                        activeDeltaHandler,
+                        buildNativeCallOptions()
+                    );
+                } else if (isTencentNative) {
+                    result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, activeRequestBody, token, activeDeltaHandler);
                 } else {
-                    result = await callStream(route, apiKey, retryBody, token, (delta) => {
-                        if (delta.content) { stream.markdown(delta.content); }
-                    });
+                    result = await callProviderStream(activeRequestBody, activeDeltaHandler);
                 }
-            } else if (route.provider === 'deepseek' && !token.isCancellationRequested && /reasoning_effort|thinking/i.test(message) && /HTTP 4\d\d/.test(message)) {
-                // Distinct from the reasoning_content history-replay retry above: a 400
-                // whose body names reasoning_effort/thinking means the model rejected our
-                // control params. Retry once with both stripped, then fail loud.
-                suppressThinkingForTurn = true;
-                debugLog(`[${route.label} Agent] DeepSeek rejected reasoning_effort/thinking params at step=${step + 1}; retrying once with both stripped: ${message.slice(0, 300)}`);
-                stream.markdown('\n\n> _(DeepSeek rejected the reasoning params — retrying once without them...)_\n\n');
-                bufferedReasoning = '';
-                emittedThinking = false;
-                const strippedBody = { ...requestBody };
-                delete strippedBody.reasoning_effort;
-                delete strippedBody.thinking;
-                if (isTencentNative) {
-                    result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, strippedBody, token, handleDelta);
-                } else {
-                    result = await callStream(route, apiKey, strippedBody, token, handleDelta);
-                }
-            } else if ((route.provider === 'deepseek' || route.provider === 'gemini') && !token.isCancellationRequested && !contextRetryUsed && isContextLengthError(message)) {
-                // Context-length 400 fallback: if the server rejects the request for
-                // exceeding the context window, compact older tool results (targeting
-                // ~50% of the guard, or at least 20% of current prompt chars) and retry once.
-                contextRetryUsed = true;
-                const estNow = estimatePromptTokens(promptMetrics.promptChars, promptMetrics.promptCjkChars);
-                const hardTargetTokens = Math.floor(DEEPSEEK_CONTEXT_GUARD_TOKENS * 0.5);
-                const charsToShed = Math.max(
-                    Math.ceil(Math.max(0, estNow - hardTargetTokens) * 3),
-                    Math.ceil(promptMetrics.promptChars * 0.2)
-                );
-                const outcome = planInTurnCompaction(messages, charsToShed, COMPACTION_KEEP_NEWEST_MESSAGES);
-                promptMetrics = measurePromptMetrics(messages);
-                if (outcome.stubbed > 0) {
-                    debugLog(`[${route.label} Guard] context-length 400 at step=${step + 1} — compacted ${outcome.stubbed} tool result(s) (~${outcome.charsSaved} chars saved); retrying once: ${message.slice(0, 200)}`);
-                    stream.markdown('\n\n> _(the model refused the request for length — older tool results compacted, retrying once...)_\n\n');
+                break;
+            } catch (e: any) {
+                const message = e?.message ?? String(e);
+                const isThoughtSigError = /thought_signature|thoughtsignature/i.test(message);
+                const isNonCompatRecoverableNativeError =
+                    e instanceof VertexAuthConfigurationError
+                    || e?.name === 'VertexAuthConfigurationError'
+                    || e instanceof VertexDedicatedVmBlockedError
+                    || e?.name === 'VertexDedicatedVmBlockedError'
+                    || /\bHTTP (401|403|404|429)\b/i.test(message);
+
+                // 1. Transient transport / timeout / 5xx interruptions ALWAYS retry on the
+                //    ACTIVE native path first (up to MAX_TRANSIENT_ATTEMPTS with equal-jitter
+                //    backoff), so a stale socket after `harmony_ask_question` or a transient
+                //    Vertex 503 never shunts Gemini Native onto OpenAI-compat!
+                if (!token.isCancellationRequested && isTransientProviderInterruption(e) && transientAttempts < MAX_TRANSIENT_ATTEMPTS) {
+                    const verdict = classifyTransient(e);
+                    const isServer5xx = verdict.kind === 'server-5xx';
+                    const transportPhaseLabel = describeTransientPhase(e);
+                    const autoRetry = vscode.workspace.getConfiguration('harmony').get<boolean>('autoRetry') ?? true;
+                    if (!autoRetry) {
+                        coalescedMarkdown.emitImmediate(`\n\n> _(${isServer5xx ? `${route.label} returned a transient 5xx server error` : transportPhaseLabel} - auto-retry is off; retry manually or switch providers)_\n\n`);
+                        recordFailedStep();
+                        throw e;
+                    }
+                    // Provider health: record the failure BEFORE deciding to retry, so the
+                    // attempt that trips the breaker is not also allowed to hammer again.
+                    recordFailure(route.provider, e);
+                    if (isCircuitOpen(route.provider)) {
+                        const status = circuitStatus(route.provider);
+                        debugLog(`[${route.label} Agent] circuit open — ${status}; not retrying.`);
+                        coalescedMarkdown.emitImmediate(`\n\n> _(${route.label} is ${status}. Not retrying — switch providers or wait for the cooldown. Everything completed so far is on disk.)_\n\n`);
+                        recordFailedStep();
+                        throw e;
+                    }
+                    transientAttempts += 1;
+                    networkRetried = true;
+                    assistantTextSoFar = stepTextBefore;
+                    reasoningTextSoFar = stepReasoningBefore;
                     bufferedReasoning = '';
                     emittedThinking = false;
-                    if (useGeminiNative) {
-                        result = await callGeminiNativeStreaming(model, apiKey, messages as OpenAICompatMessage[], tools, token, handleDelta);
-                    } else if (isTencentNative) {
-                        result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, requestBody, token, handleDelta);
-                    } else {
-                        const retryCompatBody = route.provider === 'gemini'
-                            ? { ...requestBody, messages: geminiSanitizeMessages(messages) }
-                            : requestBody;
-                        result = await callStream(route, apiKey, retryCompatBody, token, handleDelta);
+                    const waitMs = backoffDelayMs(transientAttempts, {
+                        baseMs: 2000,
+                        capMs: 15000,
+                        retryAfterMs: verdict.retryAfterMs
+                    });
+                    const diagDetail = describeNetworkError(e);
+                    debugLog(`[${route.label} Agent] transient ${verdict.kind} (${transportPhaseLabel}) at step=${step + 1}; attempt ${transientAttempts}/${MAX_TRANSIENT_ATTEMPTS} in ${formatWaitMs(waitMs)}: ${diagDetail}`);
+                    try {
+                        recordRouteGuardEvent(
+                            route.provider as UsageProviderId,
+                            route.tier,
+                            model,
+                            `transient ${verdict.kind} retry ${transientAttempts}/${MAX_TRANSIENT_ATTEMPTS} (${transportPhaseLabel}): ${diagDetail.slice(0, 180)}`
+                        );
+                    } catch { /* best-effort */ }
+                    coalescedMarkdown.emitImmediate(`\n\n> _(${isServer5xx ? `${route.label} returned a transient server error (HTTP 5xx)` : transportPhaseLabel} - retrying (${transientAttempts}/${MAX_TRANSIENT_ATTEMPTS}) in ${formatWaitMs(waitMs)}...)_\n\n`);
+                    await delay(waitMs, token);
+                    if (token.isCancellationRequested) {
+                        throw e;
                     }
-                } else {
-                    // Nothing left to compact — stop safely and visibly instead of another 400.
-                    const limitText = '**Context limit reached.** The model refused this request for length and no compactable tool results remain. The turn stopped safely; start a new chat to continue (all work so far is on disk).';
-                    debugLog(`[${route.label} Guard] context-length 400 with nothing left to compact — visible pause.`);
-                    stream.markdown(`\n\n${limitText}\n\n`);
-                    if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
-                    return {
-                        result: { metadata: { functionCalls: usageCalls } },
-                        finalText: `${assistantTextSoFar}\n\n${limitText}`
+                    if (isServer5xx && route.provider === 'deepseek' && activeRequestBody.reasoning_effort) {
+                        const copy = { ...activeRequestBody };
+                        delete copy.reasoning_effort;
+                        activeRequestBody = copy;
+                    }
+                    continue;
+                } else if ((route.provider === 'deepseek' || route.provider === 'gemini') && !token.isCancellationRequested && !contextRetryUsed && isContextLengthError(message)) {
+                    // 2. Context-length 400 fallback: compact older tool results and retry once on the same route.
+                    contextRetryUsed = true;
+                    const estNow = estimatePromptTokens(promptMetrics.promptChars, promptMetrics.promptCjkChars, route.provider);
+                    const hardTargetTokens = Math.floor(DEEPSEEK_CONTEXT_GUARD_TOKENS * 0.5);
+                    const charsToShed = Math.max(
+                        Math.ceil(Math.max(0, estNow - hardTargetTokens) * 3),
+                        Math.ceil(promptMetrics.promptChars * 0.2)
+                    );
+                    const spillRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                    const spillDir = spillRoot ? path.join(spillRoot, '.harmony', 'turn-spill', turnId) : undefined;
+                    const outcome = planInTurnCompaction(messages, charsToShed, COMPACTION_KEEP_NEWEST_MESSAGES, { holographic: true, spillDir });
+                    promptMetrics = measurePromptMetrics(messages);
+                    if (outcome.stubbed > 0) {
+                        debugLog(`[${route.label} Guard] context-length 400 at step=${step + 1} — compacted ${outcome.stubbed} tool result(s) (~${outcome.charsSaved} chars saved); retrying once: ${message.slice(0, 200)}`);
+                        coalescedMarkdown.emitImmediate('\n\n> _(the model refused the request for length — older tool results compacted, retrying once...)_\n\n');
+                        bufferedReasoning = '';
+                        emittedThinking = false;
+                        if (!useGeminiNative || compatFallbackUsed) {
+                            activeRequestBody = route.provider === 'gemini'
+                                ? { ...activeRequestBody, messages: geminiSanitizeMessages(messages) }
+                                : activeRequestBody;
+                        }
+                        continue;
+                    } else {
+                        const limitText = '**Context limit reached.** The model refused this request for length and no compactable tool results remain. The turn stopped safely; start a new chat to continue (all work so far is on disk).';
+                        debugLog(`[${route.label} Guard] context-length 400 with nothing left to compact — visible pause.`);
+                        coalescedMarkdown.emitImmediate(`\n\n${limitText}\n\n`);
+                        if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
+                        return {
+                            result: { metadata: { functionCalls: usageCalls } },
+                            finalText: `${assistantTextSoFar}\n\n${limitText}`
+                        };
+                    }
+                } else if (useGeminiNative && !compatFallbackUsed && !token.isCancellationRequested && isNonCompatRecoverableNativeError) {
+                    // 3. Do NOT fall back to OpenAI-compat on 401/403/404/429 or VertexAuthConfigurationError.
+                    recordRouteGuardEvent('gemini', route.tier, model, `Preserved primary Gemini Native error without OpenAI-compat fallback: ${redactUrlCredentials(message).slice(0, 200)}`);
+                    recordFailedStep();
+                    throw e;
+                } else if (useGeminiNative && !compatFallbackUsed && !token.isCancellationRequested && !isTransientProviderInterruption(e)) {
+                    // 4. Non-transient Gemini Native incompatibility (e.g. cross-model thought_signature 400
+                    //    or unsupported native schema): self-heal on native first for thought_signature,
+                    //    otherwise try OpenAI-compat preserving signed structured tool_calls first!
+                    compatFallbackUsed = true;
+                    networkRetried = true;
+                    assistantTextSoFar = stepTextBefore;
+                    reasoningTextSoFar = stepReasoningBefore;
+                    bufferedReasoning = '';
+                    emittedThinking = false;
+                    const tryCompatFallbackOrRethrow = async (primaryErr: any, degradeAll: boolean) => {
+                        const compatReq = await resolveGeminiOpenAiCompatRequestAsync(model, apiKey);
+                        if (!compatReq) {
+                            const guardNote = `Skipped Gemini Native → OpenAI-compat fallback because current Vertex configuration has no OpenAI-compat OAuth+Project endpoint; surfacing native error directly.`;
+                            debugLog(`[Gemini Native Guard] ${guardNote}`);
+                            recordRouteGuardEvent('gemini', route.tier, model, guardNote);
+                            coalescedMarkdown.emitImmediate('\n\n> _(Vertex AI Express mode does not expose an OpenAI-compat fallback endpoint — surfacing primary Gemini Native error directly.)_\n\n');
+                            throw primaryErr;
+                        }
+                        const compactNativeErr = redactUrlCredentials(message).replace(/\s+/g, ' ').trim().slice(0, 220);
+                        recordFallbackEvent(
+                            'gemini',
+                            model,
+                            `${compatReq.model} (openai-compat)`,
+                            compactNativeErr ? `gemini-native-to-compat: ${compactNativeErr}` : 'gemini-native-to-compat'
+                        );
+                        coalescedMarkdown.emitImmediate('\n\n> _([Gemini native path unavailable — using compat fallback](debug:gemini-native-fallback))_\n\n');
+                        const compatRoute: DirectPrimaryRoute = {
+                            ...route,
+                            baseUrl: compatReq.baseUrl,
+                            model: compatReq.model,
+                        };
+                        const compatBody = {
+                            ...activeRequestBody,
+                            messages: geminiSanitizeMessages(messages, degradeAll),
+                            model: compatReq.model,
+                        };
+                        try {
+                            return await callStream(compatRoute, compatReq.bearerToken, compatBody, token, activeDeltaHandler);
+                        } catch (compatErr: any) {
+                            const compatMsg = compatErr?.message ?? String(compatErr);
+                            if (!degradeAll && !token.isCancellationRequested && /thought_signature|thoughtsignature/i.test(compatMsg)) {
+                                debugLog(`[Gemini Compat Self-Heal] compat fallback rejected signed tool call; retrying once with non-imitable historical tool summaries.`);
+                                assistantTextSoFar = stepTextBefore;
+                                reasoningTextSoFar = stepReasoningBefore;
+                                bufferedReasoning = '';
+                                emittedThinking = false;
+                                return await callStream(
+                                    compatRoute,
+                                    compatReq.bearerToken,
+                                    { ...activeRequestBody, messages: geminiSanitizeMessages(messages, true), model: compatReq.model },
+                                    token,
+                                    activeDeltaHandler
+                                );
+                            }
+                            throw compatErr;
+                        }
                     };
-                }
-            } else if (!networkRetried && !token.isCancellationRequested && isTransientProviderInterruption(e)) {
-                const autoRetry = vscode.workspace.getConfiguration('harmony').get<boolean>('autoRetry') ?? true;
-                if (!autoRetry) {
-                    stream.markdown('\n\n> _(connection interrupted - auto-retry is off; retry manually or switch providers)_\n\n');
+
+                    if (isThoughtSigError) {
+                        const strippedCount = stripGeminiThoughtSignaturesInPlace(messages);
+                        const selfHealReason = `Gemini Native thought_signature self-heal at step=${step + 1} (stripped=${strippedCount})`;
+                        debugLog(`[Gemini Native Self-Heal] ${selfHealReason}: ${message.slice(0, 300)}`);
+                        recordRouteGuardEvent('gemini', route.tier, model, selfHealReason);
+                        coalescedMarkdown.emitImmediate('\n\n> _(Gemini rejected a prior tool signature — sanitizing historical tool calls and retrying native stream...)_\n\n');
+                        try {
+                            result = await callGeminiNativeStreaming(
+                                model,
+                                apiKey,
+                                messages as OpenAICompatMessage[],
+                                tools,
+                                token,
+                                activeDeltaHandler,
+                                buildNativeCallOptions()
+                            );
+                            break;
+                        } catch (nativeRetryErr: any) {
+                            const retryMsg = nativeRetryErr?.message ?? String(nativeRetryErr);
+                            if (
+                                nativeRetryErr instanceof VertexAuthConfigurationError
+                                || nativeRetryErr?.name === 'VertexAuthConfigurationError'
+                                || nativeRetryErr instanceof VertexDedicatedVmBlockedError
+                                || nativeRetryErr?.name === 'VertexDedicatedVmBlockedError'
+                                || /\bHTTP (401|403|404|429)\b/i.test(retryMsg)
+                                || isTransientProviderInterruption(nativeRetryErr)
+                            ) {
+                                recordRouteGuardEvent('gemini', route.tier, model, `Preserved Gemini Native retry error without OpenAI-compat fallback: ${redactUrlCredentials(retryMsg).slice(0, 200)}`);
+                                recordFailedStep();
+                                throw nativeRetryErr;
+                            }
+                            debugLog(`[Gemini Native → Compat Fallback] native self-heal retry failed (${retryMsg}). Attempting OpenAI-compat.`);
+                            assistantTextSoFar = stepTextBefore;
+                            reasoningTextSoFar = stepReasoningBefore;
+                            bufferedReasoning = '';
+                            emittedThinking = false;
+                            result = await tryCompatFallbackOrRethrow(nativeRetryErr, true);
+                            break;
+                        }
+                    } else {
+                        debugLog(`[Gemini Native → Compat Fallback] non-transient native failure (${message}). Attempting OpenAI-compat preserving signed tool_calls.`);
+                        result = await tryCompatFallbackOrRethrow(e, false);
+                        break;
+                    }
+                } else if (route.provider === 'gemini' && !token.isCancellationRequested && !compatThoughtSigRetryUsed && isThoughtSigError) {
+                    compatThoughtSigRetryUsed = true;
+                    networkRetried = true;
+                    assistantTextSoFar = stepTextBefore;
+                    reasoningTextSoFar = stepReasoningBefore;
+                    bufferedReasoning = '';
+                    emittedThinking = false;
+                    const strippedCompatCount = stripGeminiThoughtSignaturesInPlace(messages);
+                    const compatHealReason = `Gemini Compat thought_signature self-heal at step=${step + 1} (stripped=${strippedCompatCount})`;
+                    debugLog(`[Gemini Compat Self-Heal] ${compatHealReason}; retrying with non-imitable historical tool summaries.`);
+                    recordRouteGuardEvent('gemini', route.tier, model, compatHealReason);
+                    coalescedMarkdown.emitImmediate('\n\n> _(Gemini rejected a prior tool signature — sanitizing historical tool calls and retrying...)_\n\n');
+                    activeRequestBody = {
+                        ...activeRequestBody,
+                        messages: geminiSanitizeMessages(messages, true),
+                    };
+                    continue;
+                } else if (route.supportsReasoningContent && thinkingEnabled && !reasoningHistoryRetryUsed && message.includes('reasoning_content')) {
+                    reasoningHistoryRetryUsed = true;
+                    suppressThinkingForTurn = true;
+                    coalescedMarkdown.emitImmediate(`\n\n> ${route.label} asked for prior thinking metadata that was not available in this chat history. Retrying this turn with thinking disabled.\n\n`);
+                    bufferedReasoning = '';
+                    emittedThinking = false;
+                    const retryMessages = route.provider === 'gemini'
+                        ? geminiSanitizeMessages(messages)
+                        : stripReasoningFromDeepSeekMessages(messages);
+                    activeRequestBody = {
+                        ...activeRequestBody,
+                        messages: retryMessages,
+                        thinking: { type: 'disabled' }
+                    };
+                    activeDeltaHandler = (delta: { content?: string }) => {
+                        if (delta.content) { coalescedMarkdown.push(delta.content); }
+                    };
+                    continue;
+                } else if (route.provider === 'deepseek' && !token.isCancellationRequested && !deepseekParamRetryUsed && /reasoning_effort|thinking/i.test(message) && /HTTP 4\d\d/.test(message)) {
+                    deepseekParamRetryUsed = true;
+                    suppressThinkingForTurn = true;
+                    debugLog(`[${route.label} Agent] DeepSeek rejected reasoning_effort/thinking params at step=${step + 1}; retrying once with both stripped: ${message.slice(0, 300)}`);
+                    coalescedMarkdown.emitImmediate('\n\n> _(DeepSeek rejected the reasoning params — retrying once without them...)_\n\n');
+                    bufferedReasoning = '';
+                    emittedThinking = false;
+                    const strippedBody = { ...activeRequestBody };
+                    delete strippedBody.reasoning_effort;
+                    delete strippedBody.thinking;
+                    activeRequestBody = strippedBody;
+                    continue;
+                } else {
+                    // A transient error that ran out of attempts still counts against provider
+                    // health; a request-shaped error (e.g. HTTP 400) must not, or the breaker
+                    // would pause a perfectly healthy provider over a bad payload.
+                    if (classifyTransient(e).transient) {
+                        recordFailure(route.provider, e);
+                    }
                     recordFailedStep();
                     throw e;
                 }
-                networkRetried = true;
-                assistantTextSoFar = stepTextBefore;
-                reasoningTextSoFar = stepReasoningBefore;
-                bufferedReasoning = '';
-                emittedThinking = false;
-                debugLog(`[${route.label} Agent] transient connection interruption at step=${step + 1}; retrying once: ${describeNetworkError(e)}`);
-                stream.markdown('\n\n> _(connection interrupted - retrying once...)_\n\n');
-                await sleep(2000);
-                if (isTencentNative) {
-                    result = await callTencentNativeStreaming(route, route.tencentNativeCreds!, requestBody, token, handleDelta);
-                } else {
-                    result = await callStream(route, apiKey, requestBody, token, handleDelta);
-                }
-            } else {
-                recordFailedStep();
-                throw e;
             }
         }
         } finally {
             clearThinkHeartbeat();
+            coalescedMarkdown.dispose();
         }
+        // Reaching this point means the step completed without throwing, so the provider
+        // is healthy. Without this reset, circuitStatus() would report a paused provider
+        // forever after five failures — a silent lie, and exactly what AGENTS.md rule #6
+        // forbids. Failure accounting and its reset ship together or not at all.
+        recordSuccess(route.provider);
 
         if (showThinking && !emittedThinking && bufferedReasoning.trim()) {
             stream.markdown(formatThinkingBlock(bufferedReasoning));
@@ -3263,13 +3754,31 @@ async function runDeepSeekAgent(
             promptTokens: result.usage?.promptTokens ?? 0,
             completionTokens: result.usage?.completionTokens ?? 0,
             cachedPromptTokens: result.usage?.cachedPromptTokens,
+            thoughtsTokens: result.usage?.thoughtsTokens,
             usageReported: typeof result.usage?.promptTokens === 'number',
             servedModel: result.servedModel,
             durationMs: result.durationMs
         });
 
-        const content = result.content.trim();
+        const rawModelContent = result.content.trim();
+        let content = rawModelContent;
         const toolCalls = result.toolCalls;
+        if (toolCalls.length === 0 && hasTextualToolCallSyntax(rawModelContent)) {
+            const extracted = extractTextualToolCalls(rawModelContent, advertisedToolNames, `recovered-${step}`);
+            if (extracted.recoveredCalls.length > 0 && extracted.unrecoverableMatches.length === 0) {
+                toolCalls.push(...extracted.recoveredCalls);
+                content = extracted.cleanedContent;
+                const recReason = `Auto-recovered ${extracted.recoveredCalls.length} textual [Tool call: ...] invocation(s) (${extracted.recoveredCalls.map(c => c.function.name).join(', ')}) into structured tool_calls`;
+                debugLog(`[Tool Routing Self-Heal] ${recReason}`);
+                recordRouteGuardEvent(route.provider, route.tier, model, recReason);
+                stream.markdown(`\n\n> _(Harmony auto-recovered ${extracted.recoveredCalls.length} text-formatted tool call(s) into structured execution.)_\n\n`);
+            } else if (extracted.hasAnyTextualToolCallSyntax) {
+                content = extracted.cleanedContent;
+                const blockReason = `Blocked unrecoverable textual [Tool call: ...] output (${extracted.unrecoverableMatches.map(m => `${m.name}:${m.reason}`).join(', ') || 'malformed'}); triggering tool-routing guard`;
+                debugLog(`[Tool Routing Guard] ${blockReason}`);
+                recordRouteGuardEvent(route.provider, route.tier, model, blockReason);
+            }
+        }
         assistantTextSoFar += content;
         reasoningTextSoFar += result.reasoning;
         debugLog(`[${route.label} Agent] step=${step + 1} returned contentChars=${content.length} reasoningChars=${result.reasoning.length} toolCalls=${toolCalls.length}`);
@@ -3279,13 +3788,13 @@ async function runDeepSeekAgent(
 
         messages.push({
             role: 'assistant',
-            content: content || null,
+            content: content || (toolCalls.length > 0 ? null : '[unexecuted textual tool call omitted]'),
             reasoning_content: route.supportsReasoningContent && thinkingEnabled && result.reasoning ? result.reasoning : undefined,
             tool_calls: toolCalls.length > 0 ? toolCalls : undefined
         });
 
         if (toolCalls.length === 0) {
-            if (toolRoutingFailureLikely(content, request.prompt)) {
+            if (toolRoutingFailureLikely(rawModelContent, request.prompt)) {
                 if (!toolRoutingRetryUsed) {
                     const guardEnabled = vscode.workspace.getConfiguration('harmony').get<boolean>('toolRoutingGuard') ?? true;
                     if (!guardEnabled) {
@@ -3297,18 +3806,17 @@ async function runDeepSeekAgent(
                         stream.markdown(`\n\n> ${retryNote}\n\n`);
                         messages.push({
                             role: 'user',
-                            content: 'Harmony orchestration check: your previous response described using tools, but emitted zero tool_calls. If the task requires reading, searching, editing, running, or asking the user, emit the matching Harmony tool call now. If asking the user, call harmony_ask_question with a concrete question and options. Do not describe tool use in prose.'
+                            content: 'Harmony orchestration check: your previous response described using tools (or printed bracketed `[Tool call: ...]` text), but emitted zero structured tool_calls. If the task requires reading, searching, editing, running, or asking the user, emit the matching structured Harmony tool call now. Never write `[Tool call: ...]` in prose.'
                         });
                         continue;
                     }
                 }
 
                 // Retry exhausted. If the model produced a substantive prose
-                // answer (not a bare stub), accept it instead of hard-failing
-                // the turn — the user gets their answer, and the recurring
-                // "tool routing failed" noise disappears.
+                // answer (not a bare stub and not unexecuted `[Tool call: ...]` syntax),
+                // accept it instead of hard-failing the turn.
                 const substantiveProse = content.replace(/```[\s\S]*?```/g, '').trim();
-                if (substantiveProse.length >= 40 && !/^\s*file:\s*$/im.test(content)) {
+                if (!hasTextualToolCallSyntax(rawModelContent) && substantiveProse.length >= 40 && !/^\s*file:\s*$/im.test(content)) {
                     debugLog(`[Tool Routing] retry produced substantive prose (${substantiveProse.length} chars) — accepting as text-only response`);
                     if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
                     return {
@@ -3390,11 +3898,22 @@ async function runDeepSeekAgent(
         await flushParallel();
 
         // Push results in original tool-call order (deterministic routing).
+        let stepHadToolError = false;
+        let askWasCancelledOrDisposed = false;
         for (const r of resolved) {
             if (r.errorText !== undefined) {
-                usageCalls.push({ name: r.call.function.name, input: r.input, error: r.errorText });
+                stepHadToolError = true;
+                usageCalls.push(compactUsageCallRecord(r.call.function.name, r.input, { error: r.errorText }));
             } else {
-                usageCalls.push({ name: r.call.function.name, input: r.input, result: r.resultText });
+                if (typeof r.resultText === 'string' && /^(tool error:|error:)/i.test(r.resultText.trim())) {
+                    stepHadToolError = true;
+                }
+                if (r.call.function.name === 'harmony_ask_question' && String(r.resultText ?? '').trim() === 'user cancelled') {
+                    askWasCancelledOrDisposed = true;
+                }
+                usageCalls.push(compactUsageCallRecord(r.call.function.name, r.input, {
+                    resultChars: typeof r.resultText === 'string' ? r.resultText.length : 0,
+                }));
                 maybeStreamToolReference(stream, r.call.function.name, r.input);
             }
             messages.push({
@@ -3403,6 +3922,19 @@ async function runDeepSeekAgent(
                 content: r.errorText !== undefined ? r.errorText : (r.resultText ?? null)
             });
         }
+        // If the user dismissed Harmony Ask or triggered Developer: Reload Window while
+        // Harmony Ask was open (disposing the webview), return immediately without starting
+        // another LLM network round-trip so VS Code commits the already-streamed turn.
+        if ((askWasCancelledOrDisposed || token.isCancellationRequested) && assistantTextSoFar.trim().length > 0) {
+            if (route.supportsReasoningContent) rememberDeepSeekAssistantTrace(assistantTextSoFar, reasoningTextSoFar);
+            return {
+                result: { metadata: { functionCalls: usageCalls } },
+                finalText: assistantTextSoFar
+            };
+        }
+        lastStepWasMechanical = !stepHadToolError
+            && resolved.length > 0
+            && resolved.every(r => MECHANICAL_STEP_TOOLS.has(String(r.call?.function?.name ?? '')));
         // ── Inject mid-session whispers after tool results ──
         try {
             const pending = await getPendingMidSessionWhispers();
@@ -3420,12 +3952,16 @@ async function runDeepSeekAgent(
         // does not compete with the tool-routing retry.
         const flowStateOn = vscode.workspace.getConfiguration('harmony').get<boolean>('flowState') ?? false;
         if (flowStateOn && flowStateRetries < 3) {
-            // Use post-tool check if tool calls were made (skips tool-prose detection
-            // since mentioning tools after calling them is normal). Use the main check
-            // for text-only responses (includes tool-prose detection).
-            const violation = toolCalls.length > 0
-                ? getFlowStateViolationPostTool(content)
-                : getFlowStateViolation(content);
+            // Skip post-tool Flow-State scolding when this step ALREADY invoked harmony_ask_question
+            // (ask_question IS the interactive Flow-State handoff; nudging again wastes a step).
+            const alreadyCalledAskQuestion = toolCalls.some(
+                tc => tc?.function?.name === 'harmony_ask_question' || tc?.function?.name === 'ask_question'
+            );
+            const violation = alreadyCalledAskQuestion
+                ? null
+                : (toolCalls.length > 0
+                    ? getFlowStateViolationPostTool(content)
+                    : getFlowStateViolation(content));
             if (violation) {
                 flowStateRetries++;
                 const lm = LanguageManager.getInstance();
@@ -3520,24 +4056,31 @@ async function runAgent(
         // Collect this turn's parts.
         let stepText = '';
         const toolCalls: vscode.LanguageModelToolCallPart[] = [];
+        const logLmDebug = vscode.workspace.getConfiguration('harmony').get<boolean>('enableDebugLogging') !== false;
+        const coalescedLmStream = createCoalescedMarkdownStreamer((chunk) => {
+            stream.markdown(chunk);
+        });
 
-        for await (const part of response.stream) {
-            if (token.isCancellationRequested) break;
-            if (part instanceof vscode.LanguageModelTextPart) {
-                stream.markdown(part.value);
-                stepText += part.value;
-                if (vscode.workspace.getConfiguration('harmony').get<boolean>('enableDebugLogging') !== false) {
-                     harmonyDebugChannel.append(part.value);
+        try {
+            for await (const part of response.stream) {
+                if (token.isCancellationRequested) break;
+                if (part instanceof vscode.LanguageModelTextPart) {
+                    coalescedLmStream.push(part.value);
+                    stepText += part.value;
+                } else if (part instanceof vscode.LanguageModelToolCallPart) {
+                    toolCalls.push(part);
                 }
-            } else if (part instanceof vscode.LanguageModelToolCallPart) {
-                toolCalls.push(part);
             }
+        } finally {
+            coalescedLmStream.dispose();
         }
-        
-        if (vscode.workspace.getConfiguration('harmony').get<boolean>('enableDebugLogging') !== false) {
-            harmonyDebugChannel.appendLine(''); // newline after text
+
+        if (logLmDebug) {
+            if (stepText) {
+                harmonyDebugChannel.appendLine(stepText);
+            }
             if (toolCalls.length > 0) {
-                 harmonyDebugChannel.appendLine(`[Copilot Agent] Tool calls requested: ${JSON.stringify(toolCalls, null, 2)}`);
+                harmonyDebugChannel.appendLine(`[Copilot Agent] Tool calls requested: ${JSON.stringify(toolCalls, null, 2)}`);
             }
         }
 
@@ -3571,6 +4114,7 @@ async function runAgent(
 
         // Invoke each tool and append its result as a User-role tool result.
         const resultParts: vscode.LanguageModelToolResultPart[] = [];
+        let lmAskWasCancelledOrDisposed = false;
         for (const call of toolCalls) {
             if (token.isCancellationRequested) break;
             
@@ -3583,11 +4127,14 @@ async function runAgent(
                     token
                 );
                 
-                usageCalls.push({
-                    name: call.name,
-                    input: call.input,
-                    result: result.content
-                });
+                const resultTextForMeta = toolResultToText(result);
+                if (call.name === 'harmony_ask_question' && resultTextForMeta.trim() === 'user cancelled') {
+                    lmAskWasCancelledOrDisposed = true;
+                }
+
+                usageCalls.push(compactUsageCallRecord(call.name, call.input, {
+                    resultChars: resultTextForMeta.length,
+                }));
                 
                 maybeStreamToolReference(stream, call.name, call.input);
                 resultParts.push(new vscode.LanguageModelToolResultPart(call.callId, result.content));
@@ -3598,16 +4145,20 @@ async function runAgent(
                 const errorContent = declinedAnswer !== undefined
                     ? declinedToolGuidance(call.name, e, declinedAnswer)
                     : `tool error: ${e?.message ?? String(e)}`;
-                usageCalls.push({
-                    name: call.name,
-                    input: call.input,
-                    error: errorContent
-                });
+                usageCalls.push(compactUsageCallRecord(call.name, call.input, {
+                    error: errorContent,
+                }));
                 resultParts.push(new vscode.LanguageModelToolResultPart(
                     call.callId,
                     [new vscode.LanguageModelTextPart(errorContent)]
                 ));
             }
+        }
+        if ((lmAskWasCancelledOrDisposed || token.isCancellationRequested) && assistantTextSoFar.trim().length > 0) {
+            return {
+                result: { metadata: { functionCalls: usageCalls } },
+                finalText: assistantTextSoFar
+            };
         }
         // Tool results must be pushed FIRST. OpenAI-compatible servers (DeepSeek
         // included) require every role:'tool' message to immediately follow the
@@ -3636,6 +4187,7 @@ async function runAgent(
 /** Slash-command handlers. Return true if handled (skip the agent loop). */
 async function handleSlashCommand(
     request: vscode.ChatRequest,
+    chatContext: vscode.ChatContext,
     stream: vscode.ChatResponseStream,
     context: vscode.ExtensionContext,
     token: vscode.CancellationToken
@@ -3992,6 +4544,12 @@ async function handleSlashCommand(
                 return `${i + 1}. **${date}** — ${e.prompt.split('\n')[0].slice(0, 100)}`;
             }).join('\n');
             stream.markdown(`**Recent memory** (last ${recent.length}):\n\n${lines}\n\n_${statLine} Stored in \`.harmony/memory.jsonl\`; older compacted details remain under \`.harmony/memory-preserved/\`. Use the sidebar **Hide memory from panel** button for screenshots; it does not delete memory._`);
+            try {
+                stream.button({
+                    command: 'harmony.viewConversation',
+                    title: '📖 Open Full Verbatim Transcript'
+                });
+            } catch { /* best-effort */ }
         }
         return true;
     }
@@ -4005,16 +4563,43 @@ async function handleSlashCommand(
         const name = request.prompt.trim();
         if (!name) { stream.markdown('Usage: `@harmony /save <name>` \u2014 saves the recent turns to `.harmony/sessions/<name>.json`.'); return true; }
         try {
-            // We don't have direct access to chat history here without the chatContext;
-            // /save called via slash flows through a different path. Save just memory snapshot for now.
-            const recent = await recallMemory(20);
+            // Prefer the real chat transcript. VS Code owns it and exposes it on
+            // chatContext.history; the memory store is a derived, possibly already
+            // compacted reconstruction and must never pose as a transcript.
             const turns: SessionTurn[] = [];
-            for (const e of recent.reverse()) {
-                turns.push({ role: 'user', text: e.prompt, ts: e.ts });
-                turns.push({ role: 'assistant', text: e.response, ts: e.ts });
+            for (const turn of chatContext.history) {
+                if (turn instanceof vscode.ChatRequestTurn) {
+                    if (turn.prompt && turn.prompt.trim()) {
+                        turns.push({ role: 'user', text: turn.prompt, ts: new Date().toISOString() });
+                    }
+                } else if (turn instanceof vscode.ChatResponseTurn) {
+                    const text = turn.response
+                        .map(part => part instanceof vscode.ChatResponseMarkdownPart ? part.value.value : '')
+                        .join('');
+                    const clean = sanitizeAssistantHistoryText(text);
+                    if (clean) turns.push({ role: 'assistant', text: clean, ts: new Date().toISOString() });
+                }
             }
-            const saved = await saveSession(name, turns);
-            stream.markdown(`Saved as **${saved}**. Resume with \`@harmony /resume ${saved}\`.`);
+
+            // Fallback only, and it is declared as such in the saved file.
+            const source: SessionSource = turns.length > 0 ? 'chat-history' : 'memory-reconstruction';
+            if (turns.length === 0) {
+                const recent = await recallMemory(20);
+                for (const e of recent.reverse()) {
+                    turns.push({ role: 'user', text: e.prompt, ts: e.ts });
+                    turns.push({ role: 'assistant', text: e.response, ts: e.ts });
+                }
+            }
+            if (turns.length === 0) {
+                stream.markdown('Nothing to save yet \u2014 no chat history and nothing remembered in this workspace.');
+                return true;
+            }
+
+            const saved = await saveSession(name, turns, undefined, { source });
+            const provenance = source === 'chat-history'
+                ? `${turns.length} turns from this chat transcript`
+                : `${turns.length} turns **reconstructed from memory** \u2014 boundaries and timestamps are approximate`;
+            stream.markdown(`Saved as **${saved}** (${provenance}). Resume with \`@harmony /resume ${saved}\`.`);
         } catch (e: any) {
             stream.markdown(`Save failed: ${e?.message ?? e}`);
         }
@@ -4101,6 +4686,41 @@ async function handleSlashCommand(
         return true;
     }
 
+    if (request.command === 'fleet') {
+        const cfg = vscode.workspace.getConfiguration('harmony');
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+        const arg = (request.prompt ?? '').trim();
+        const lower = arg.toLowerCase();
+        if (!arg || lower === 'status') {
+            const orch = !!cfg.get<boolean>('orchestrateMode.enabled');
+            const fleet = orch && !!cfg.get<boolean>('orchestrateMode.fleetEnabled');
+            const shield = cfg.get<string>('costShield.mode') ?? 'auto';
+            const route = cfg.get<string>('costShield.workerRoute') ?? 'agentsProfile';
+            stream.markdown(
+                `### 🚀 Fleet Mode Status\n` +
+                `- **Fleet Mode (Conductor + Collaborator Offload):** **${fleet ? 'ON' : 'OFF'}**\n` +
+                `- **Orchestrate Pre-Approval (parent):** **${orch ? 'ON' : 'OFF'}**\n` +
+                `- **Context Shield:** \`${shield}\`\n` +
+                `- **Collaborator Offload Route:** \`${route}\`\n\n` +
+                `**Commands:** \`@harmony /fleet on\` · \`@harmony /fleet off\` · \`@harmony /fleet <task or triple-check target>\``
+            );
+            return true;
+        }
+        if (lower === 'on' || lower === 'enable') {
+            await writeStudioSetting(wsRoot, 'orchestrateMode.fleetEnabled', true);
+            const route = vscode.workspace.getConfiguration('harmony').get<string>('costShield.workerRoute') ?? 'agentsProfile';
+            stream.markdown(`🚀 **Fleet Mode is now ON** (parent Orchestrate read-only pre-approval auto-enabled; Collaborator offload route: \`${route}\`). File writes and terminal commands still require confirmation.`);
+            return true;
+        }
+        if (lower === 'off' || lower === 'disable') {
+            await writeStudioSetting(wsRoot, 'orchestrateMode.fleetEnabled', false);
+            stream.markdown(`🚀 **Fleet Mode is now OFF** (parent Orchestrate pre-approval left unchanged).`);
+            return true;
+        }
+        // Non-empty task: fall through so decoratePromptForCommand runs a live Fleet multi-collaborator turn!
+        return false;
+    }
+
     return false;
 }
 
@@ -4124,6 +4744,8 @@ function decoratePromptForCommand(request: vscode.ChatRequest): vscode.ChatReque
         prefix = 'Please run `git status --short` and `git diff --cached` via harmony_run_terminal, then propose a clear, conventional-style commit message (subject + body). Do not run git commit yourself.\n\n';
     } else if (request.command === 'research') {
         prefix = 'You are running a deep research investigation. Use harmony_research_dossier for source-backed dossiers (provide source URLs), harmony_literature_scan for academic sources via Semantic Scholar/Crossref, and harmony_evidence_matrix to map claims to evidence. If the user provided URLs, use harmony_claim_check or harmony_current_research to fetch and analyze them. Produce a thorough, well-cited report with clear findings, source attributions, and stated limitations. Read-only: no edits, patches, writes, or terminal commands.\n\n';
+    } else if (request.command === 'fleet') {
+        prefix = '🚀 FLEET MODE DISPATCH: Act from the Conductor seat and immediately dispatch parallel read-only Collaborators via harmony_parallel (e.g. critic, verifier, and cost_sentinel or task-appropriate specialist roles, omitting explicit provider/tier so they honor the Context Shield Collaborator Offload Route). Synthesize their independent findings clearly with actionable recommendations.\n\n';
     }
     if (!prefix) return request;
     return { ...request, prompt: prefix + request.prompt } as vscode.ChatRequest;
@@ -4352,7 +4974,7 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
         setActiveModelMaxInputTokens(request.model?.maxInputTokens);
         pendingRawImages = [];
 
-        if (await handleSlashCommand(request, stream, context, token)) {
+        if (await handleSlashCommand(request, chatContext, stream, context, token)) {
             return;
         }
 
@@ -4622,7 +5244,7 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
                 const selfHealFromEnv = vscode.workspace.getConfiguration('harmony').get<boolean>('providers.selfHealFromEnv') === true;
                 const shouldHeal = resolvedKey.source === 'slot'
                     || (selfHealFromEnv && (resolvedKey.source === 'dotenv' || resolvedKey.source === 'process-env'));
-                if (apiKey && shouldHeal) {
+                if (apiKey && apiKey !== VERTEX_AUTH_SENTINEL && shouldHeal) {
                     const healProvider = directRoute.provider;
                     const healKey = directRoute.secretKey;
                     void (async () => {
@@ -4651,12 +5273,16 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
                 
                 if (!apiKey) {
                     const envName = primaryEnvNameFor(directRoute.provider as ProviderId);
+                    const vertexHint = directRoute.provider === 'gemini' && isGeminiVertexProfile()
+                        ? `\n\n**Vertex AI Authentication Options:** Because \`harmony.gemini.endpointProfile\` is set to \`vertex\`, Harmony also auto-detects Google Cloud credentials with zero manual key pasting: run \`gcloud auth application-default login\`, set \`GOOGLE_APPLICATION_CREDENTIALS\` (Service Account JSON path), set \`GOOGLE_OAUTH_ACCESS_TOKEN\`, or set \`VERTEX_API_KEY\` (\`AQ...\`) in \`.env\` — or switch \`harmony.gemini.endpointProfile\` back to \`ai-studio\` to use a standard Google AI Studio key.`
+                        : '';
                     stream.markdown(
                         `**${directRoute.label} is selected for primary Harmony turns, but no usable API key was found.**\n\n` +
                         `Harmony checked, in order: the \`${directRoute.provider}\` key slots, the secret \`${directRoute.secretKey}\`, \`process.env.${envName}\`, and \`${envName}\` in each workspace \`.env\`.\n\n` +
                         `Keys saved for terminal/native provider routes live in a separate Windows DPAPI store and never unlock this VS Code primary route.\n\n` +
                         `If you know this key **was** saved, suspect VS Code Secret Storage rather than the key itself. Since VS Code 1.136, a stored secret whose ciphertext no longer decrypts is deleted and reported as unset, and when OS-level encryption is unavailable the entire store is silently replaced by an in-memory one that reads empty every session. A VS Code update can trigger either.\n\n` +
-                        `To recover: run **Harmony: Set ${directRoute.label} API Key**, or **Harmony: Import Provider Keys From .env**. Setting \`${envName}\` in your workspace \`.env\` also works on its own — Harmony reads that directly, so the route survives an empty Secret Storage.`
+                        `To recover: run **Harmony: Set ${directRoute.label} API Key**, or **Harmony: Import Provider Keys From .env**. Setting \`${envName}\` in your workspace \`.env\` also works on its own — Harmony reads that directly, so the route survives an empty Secret Storage.` +
+                        vertexHint
                     );
                     return;
                 }
@@ -4743,25 +5369,28 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
                 response: turnOutcome.finalText
             });
 
-            // Full-turn chat ledger: record the assistant response beside the prompt
-            // so .harmony/history/chat_ledger.jsonl is a complete verbatim transcript.
+            // Full-turn chat ledger: record both prompt and assistant response
+            // so .harmony/history/chat_ledger-YYYY-MM.jsonl is always a complete verbatim transcript.
+            if (!draftUri && effectiveRequest.prompt.trim().length > 0) {
+                draftUri = await appendChatHistory(effectiveRequest.prompt);
+            }
             const draftId = draftUri ? (draftUri.path.match(/\/(\d+)\.md$/)?.[1]) : undefined;
-            appendChatResponse(draftId, turnOutcome.finalText).catch(() => {});
+            await appendChatResponse(draftId, turnOutcome.finalText).catch(() => {});
 
             // Auto-continuity: silently capture what Harmony did after every real agent turn.
             // Only fires for non-trivial responses and non-slash-command turns.
             // No model call, no network — local disk only, $0.00.
             if (!request.command && turnOutcome.finalText.length > 50) {
-                const touchedFiles = (turnOutcome.result?.metadata?.functionCalls as any[] | undefined ?? [])
-                    .filter((call: any) => call?.name && typeof call.name === 'string')
-                    .flatMap((call: any) => {
-                        const input = call.input ?? {};
-                        return [input.path, input.file_path, input.filePath].filter((p: any) => typeof p === 'string' && p.length > 0);
-                    })
-                    .filter((p: string, i: number, arr: string[]) => arr.indexOf(p) === i)
-                    .slice(0, 30);
+                // Scope honesty: a path in a tool call only counts as "touched" if the
+                // owning tool can write. Reads used to be folded in here, so the
+                // Triple-Check audit reported on files the turn never changed, and
+                // continuity recorded reads as edits. Exclusions are COUNTED and
+                // disclosed below — never applied silently. See src/auditScope.ts.
+                const scope = classifyToolCallReferences(turnOutcome.result?.metadata?.functionCalls);
+                const touchedFiles = scope.paths;
+                const scopeNote = formatScopeNote(scope);
                 const summary = turnOutcome.finalText.replace(/\s+/g, ' ').slice(0, 400);
-                appendContinuityEntry({
+                await appendContinuityEntry({
                     kind: 'note',
                     source: `harmony/${provider ?? 'vscode-lm'}`,
                     summary,
@@ -4785,15 +5414,33 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
                             );
                             if (!result) return;
 
-                            const icon = result.verdict === 'GO' ? '✅' : result.verdict === 'NO-GO' ? '🚨' : '⚠️';
-                            const actions = result.verdict !== 'GO'
-                                ? ['Run Full Audit', 'Dismiss']
-                                : ['Dismiss'];
-
-                            const choice = await vscode.window.showInformationMessage(
-                                `${icon} Triple-Check: ${result.summary}${result.urgentIssues.length ? ` (${result.urgentIssues.length} urgent)` : ''}`,
-                                ...actions
-                            );
+                            // Rule #6: a verdict that names findings but never shows them is a
+                            // silent failure - and so is a narrowed audit that renders as a clean
+                            // one. The whole human surface now lives in src/auditToast.ts so that
+                            // check:audit-toast can assert the RENDERED string instead of the shape
+                            // of this source block. Deleting the scope suffix used to leave every
+                            // gate green; it now fails the build.
+                            const toast = formatTripleCheckToast({
+                                verdict: result.verdict,
+                                summary: result.summary,
+                                scopeNote,
+                                urgentIssues: result.urgentIssues,
+                                findings: result.findings,
+                            });
+                            const choice = await vscode.window.showInformationMessage(toast.message, ...toast.actions);
+                            if (choice === 'Show Details' && toast.findings.length) {
+                                for (const line of formatTripleCheckDetails({
+                                    verdict: result.verdict,
+                                    summary: result.summary,
+                                    scopeNote,
+                                    pathCount: touchedFiles.length,
+                                    urgentIssues: result.urgentIssues,
+                                    findings: result.findings,
+                                })) {
+                                    harmonyDebugChannel.appendLine(line);
+                                }
+                                harmonyDebugChannel.show(true);
+                            }
                             if (choice === 'Run Full Audit') {
                                 // Save audit summary so the pipeline runner can pre-fill the focus input
                                 context.workspaceState.update('harmony.lastAuditSummary', result.summary).then(undefined, () => {});
@@ -4829,6 +5476,21 @@ export function registerHarmonyParticipant(context: vscode.ExtensionContext) {
                 command: request.command,
                 error: classified.diagnosticError
             }) : ''));
+            if (
+                isVertexInvalidRaptError(e)
+                || e instanceof VertexAuthConfigurationError
+                || e?.name === 'VertexAuthConfigurationError'
+            ) {
+                stream.markdown('\n\n');
+                stream.button({
+                    command: 'harmony.configureVertexCredentials',
+                    title: '🛡️ Configure Vertex Credentials (Service Account)'
+                });
+                stream.button({
+                    command: 'harmony.reauthGcloudAdc',
+                    title: '🔑 Re-authenticate Google Cloud (ADC)'
+                });
+            }
             console.error('[Harmony] participant error', e);
         }
     };

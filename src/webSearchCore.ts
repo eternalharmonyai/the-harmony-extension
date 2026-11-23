@@ -30,6 +30,7 @@ export interface SearchHost {
 // ─── Public types ───────────────────────────────────────────────────────────
 
 export type EngineId =
+    | 'deepseek'
     | 'google-cse'
     | 'gemini'
     | 'ddg'
@@ -97,6 +98,8 @@ interface EngineFailure {
 
 const DDG_HTML = 'https://html.duckduckgo.com/html/';
 const CSE_API = 'https://www.googleapis.com/customsearch/v1';
+const DEEPSEEK_SEARCH_API = 'https://api.deepseek.com/v1/tools/search';
+const DEEPSEEK_FETCH_API = 'https://api.deepseek.com/v1/tools/fetch';
 const UA = 'Harmony-Search/0.1';
 
 const HALF_LIFE_MS = 5 * 60 * 1000;
@@ -308,7 +311,76 @@ async function cseSearch(query: string, opts: { maxResults: number; site?: strin
     }));
 }
 
+async function deepseekSearch(query: string, opts: { maxResults: number; site?: string; depth?: string }, host: SearchHost): Promise<SearchCitation[]> {
+    const key = (await host.getSecret('harmony.deepseekApiKey'))?.trim();
+    if (!key) throw failure('auth', 'missing harmony.deepseekApiKey');
+    const qRaw = opts.site ? `site:${opts.site} ${query}` : query;
+    // DeepSeek /v1/tools/search requires 1..128 Unicode characters
+    const q = Array.from(qRaw.trim()).slice(0, 128).join('');
+    const count = Math.min(50, Math.max(1, opts.maxResults));
+    const needContent = opts.depth === 'advanced';
+    const body = {
+        query: q,
+        count,
+        ori_question: Array.from(query.trim()).slice(0, 128).join('') || null,
+        need_content: needContent,
+    };
+    const res = await fetch(DEEPSEEK_SEARCH_API, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${key}`,
+            'User-Agent': UA,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw failure(classify(res.status), `DeepSeek Search HTTP ${res.status}`, res.status);
+    const data = (await res.json()) as any;
+    const items: any[] = Array.isArray(data?.results) ? data.results : [];
+    return items.slice(0, opts.maxResults).map((it, i) => {
+        const hasOperativeContent = needContent && typeof it.content === 'string' && it.content.trim().length > 0;
+        const verbatim = (hasOperativeContent ? it.content : (it.summary || it.snippet || '')).trim();
+        return {
+            verbatim,
+            source: String(it.url ?? ''),
+            retrieved: nowDate(),
+            engine: 'deepseek',
+            jurisdiction: (opts.site ? 'institutional' : 'CN') as Jurisdiction,
+            rank: i + 1,
+            evidence_tier: (hasOperativeContent ? 'content' : 'snippet') as EvidenceTier,
+            title: typeof it.title === 'string' ? it.title : undefined,
+        };
+    }).filter(c => Boolean(c.source));
+}
+
+export async function deepseekFetchUrl(url: string, host: SearchHost): Promise<{ title: string; content: string }> {
+    const key = (await host.getSecret('harmony.deepseekApiKey'))?.trim();
+    if (!key) throw failure('auth', 'missing harmony.deepseekApiKey');
+    const res = await fetch(DEEPSEEK_FETCH_API, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${key}`,
+            'User-Agent': UA,
+        },
+        body: JSON.stringify({ url: url.slice(0, 8192) }),
+        signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw failure(classify(res.status), `DeepSeek Fetch HTTP ${res.status}`, res.status);
+    const data = (await res.json()) as any;
+    return {
+        title: typeof data?.title === 'string' ? data.title : '',
+        content: typeof data?.content === 'string' ? data.content : '',
+    };
+}
+
 const adapters: Record<EngineId, EngineAdapter> = {
+    'deepseek': {
+        id: 'deepseek', label: 'DeepSeek Search (in-house crawler)', jurisdiction: 'CN',
+        available: async (host) => Boolean((await host.getSecret('harmony.deepseekApiKey'))?.trim()),
+        search: (q, o, h) => deepseekSearch(q, o, h),
+    },
     'google-cse': {
         id: 'google-cse', label: 'Google CSE', jurisdiction: 'US',
         available: async (host) => Boolean(await host.getSecret('harmony.googleCse.apiKey') && await host.getSecret('harmony.googleCse.cx')),
@@ -349,7 +421,7 @@ const adapters: Record<EngineId, EngineAdapter> = {
 // ─── Resolve (default) ──────────────────────────────────────────────────────
 
 async function resolve(query: string, opts: SearchInput, host: SearchHost): Promise<SearchOutcome> {
-    const order: EngineId[] = opts.engines?.length ? (opts.engines as EngineId[]) : ['google-cse', 'gemini', 'ddg'];
+    const order: EngineId[] = opts.engines?.length ? (opts.engines as EngineId[]) : ['deepseek', 'google-cse', 'gemini', 'ddg'];
     const citations: SearchCitation[] = [];
     const used: string[] = [];
     const skipped: { engine: string; reason: string }[] = [];
@@ -426,7 +498,7 @@ function comparisonKey(url: string): string {
 // ─── Corroborate (fan-out, preserve attribution) ────────────────────────────
 
 async function corroborate(query: string, opts: SearchInput, host: SearchHost): Promise<SearchOutcome> {
-    const order: EngineId[] = opts.engines?.length ? (opts.engines as EngineId[]) : ['google-cse', 'gemini', 'ddg', 'brave', 'yandex', 'baidu', 'mojeek'];
+    const order: EngineId[] = opts.engines?.length ? (opts.engines as EngineId[]) : ['deepseek', 'google-cse', 'gemini', 'ddg', 'brave', 'yandex', 'baidu', 'mojeek'];
     const candidates: EngineId[] = [];
     const skipped: { engine: string; reason: string }[] = [];
     const maxResults = opts.max_results ?? 10;

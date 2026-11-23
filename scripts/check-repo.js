@@ -56,8 +56,9 @@ const ENTRY_PRESETS = {
  * Queue the newest local artifact and the bundled daemon for scanning.
  */
 function addDefaultArtifacts(args) {
-    const bin = 'bin/harmonyhub.exe';
-    if (fs.existsSync(path.join(root, bin)) && !args.binaries.includes(bin)) args.binaries.push(bin);
+    for (const bin of ['bin/harmonyhub.exe', 'bin/harmony-native-control.exe']) {
+        if (fs.existsSync(path.join(root, bin)) && !args.binaries.includes(bin)) args.binaries.push(bin);
+    }
     const v = newestVsix();
     if (v && !args.vsixes.includes(v)) args.vsixes.push(v);
 }

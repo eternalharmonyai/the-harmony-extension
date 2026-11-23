@@ -115,16 +115,18 @@ export function storageEstimate(): { count: number; estimatedKB: number } {
     return { count: 0, estimatedKB: 0 };
 }
 
-/** Summarize text into a Motive File using Gemini Flash. Chain-links to previous motive. */
+/** Summarize text into a Motive File using the configured Agents Profile (or DeepSeek light). Chain-links to previous motive. */
 export async function summarizeToMotive(text: string, secrets: vscode.SecretStorage, source = 'auto-summarizer'): Promise<string | null> {
     if (!text || text.length < 100) return null;
     try {
-        const { consult } = await import('./providers');
+        const { consult, resolveCollabModel } = await import('./providers');
+        const selected = await resolveCollabModel(secrets);
+        const provider = selected?.provider ?? 'deepseek';
         const prev = await latestMotive();
         const prompt = `Summarize this conversation fragment into a SINGLE paragraph (max 300 words). Focus on key decisions, technical insights, and action items. Strip pleasantries. Keep only what matters for future context:\n\n${text.slice(0, 8000)}`;
         // Use a no-op cancellation token — creating a new CancellationTokenSource here
         // would leak without proper disposal. The summarizer runs fast and doesn't need cancellation.
-        const r = await consult(secrets, { provider: 'gemini', tier: 'light', question: prompt, system: 'You compress conversation context into dense Motive Files for an Eternal Concert Hall. Be ruthlessly concise. Output only the summary paragraph.', maxTokens: 512 }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) });
+        const r = await consult(secrets, { provider, tier: 'light', question: prompt, system: 'You compress conversation context into dense Motive Files for an Eternal Concert Hall. Be ruthlessly concise. Output only the summary paragraph.', maxTokens: 512 }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) });
         const id = await storeMotive(r.text.trim(), source, Math.ceil(text.length / 4), prev?.id);
         return id;
     } catch {

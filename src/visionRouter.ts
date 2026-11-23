@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import { ComposeImage } from './composeQueue';
-import { recordUsage } from './costTracker';
-import { confirmPremiumModel, resolveProviderKey } from './providers';
+import { recordRouteGuardEvent, recordUsage } from './costTracker';
+import { confirmPremiumModel, getVscodeHttpProxyOptions, resolveGeminiGenerateContentRequestAsync, resolveProviderKey } from './providers';
+import { enrichVertexHttpError, invalidateVertexTokenCache, redactUrlCredentials } from './vertexAuth';
+import { vpnResilientFetch } from './vpnResilientTransport';
 
 /**
  * Vision routing for compose-attached images.
@@ -105,24 +107,43 @@ export async function describeImagesViaGemini(
         generationConfig: { maxOutputTokens: 4096 }
     };
 
-    const url =
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}` +
-        `:generateContent?key=${encodeURIComponent(apiKey)}`;
-
     const controller = new AbortController();
     const sub = token.onCancellationRequested(() => controller.abort());
+    const proxyOpts = getVscodeHttpProxyOptions();
+    const serializedBody = JSON.stringify(body);
     try {
-        const r = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-            signal: controller.signal as any
-        });
+        let reqInfo = await resolveGeminiGenerateContentRequestAsync(model, apiKey, 'generateContent', false);
+        const runVisionFetch = (url: string, headers: Record<string, string>) =>
+            vpnResilientFetch(url, {
+                method: 'POST',
+                headers,
+                body: serializedBody,
+                signal: controller.signal,
+                label: `Gemini Vision (${model})`,
+                ttfbTimeoutMs: 120_000,
+                ...proxyOpts,
+                onGuardEvent: (reason) => {
+                    try { recordRouteGuardEvent('gemini', tier, model, reason); } catch { /* best-effort */ }
+                },
+            });
+        let r = await runVisionFetch(reqInfo.url, reqInfo.headers);
+        if (r.status === 401 && reqInfo.backend === 'vertex' && reqInfo.vertexAuth?.cacheKey) {
+            try { await r.body?.cancel(); } catch { /* ignore */ }
+            invalidateVertexTokenCache(reqInfo.vertexAuth.cacheKey);
+            try {
+                recordRouteGuardEvent('gemini', tier, model, `Gemini Vision (${model}) Vertex OAuth token expired (HTTP 401); refreshing token automatically`);
+            } catch { /* best-effort */ }
+            reqInfo = await resolveGeminiGenerateContentRequestAsync(model, apiKey, 'generateContent', false, { bypassVertexCache: true });
+            r = await runVisionFetch(reqInfo.url, reqInfo.headers);
+        }
         const text = await r.text();
         if (!r.ok) {
             recordGeminiVisionUsage(model);
+            const detail = reqInfo.backend === 'vertex'
+                ? enrichVertexHttpError(r.status, text, model, reqInfo.vertexAuth)
+                : `HTTP ${r.status}. ${redactUrlCredentials(text).slice(0, 400)}`;
             return {
-                description: `[Gemini vision: HTTP ${r.status}. ${text.slice(0, 400)}]`,
+                description: `[Gemini vision: ${detail}]`,
                 routedTo: `gemini/${model}`,
                 partial: true
             };

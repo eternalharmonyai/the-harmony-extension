@@ -7,9 +7,52 @@ import * as vscode from 'vscode';
 // drifted) across toolExecutor.ts and lmTools.ts; keeping it here makes that
 // divergence class impossible.
 
+// Whole-segment excludes: matched at ANY depth in the path.
 export const PRE_ACTION_SNAPSHOT_EXCLUDED_PARTS = new Set([
-    '.git', '.harmony', 'node_modules', 'out', 'dist', 'build', 'target', '.venv', 'venv', '__pycache__', '.next', '.cache',
+    '.git', 'node_modules', 'out', 'dist', 'build', 'target', '.venv', 'venv', '__pycache__', '.next', '.cache',
 ]);
+
+// Root-anchored prefix excludes. `.harmony` is deliberately NOT excluded wholesale: our own notes,
+// plans and handoffs live there and must have a real undo path. Listing only the subtrees that must
+// never be copied keeps the safe failure direction — a new .harmony subdirectory is snapshotted by
+// default (an extra copy, bounded by the size cap) rather than silently losing its undo path.
+// The three reasons a subtree belongs here: recursive snapshot stores, generated media, private
+// material, and live-written machine state that AGENTS.md rule 2 says must not be touched in place.
+export const PRE_ACTION_SNAPSHOT_EXCLUDED_PREFIXES = [
+    '.harmony/snapshots',
+    '.harmony/pre_edit',
+    '.harmony/backups',
+    '.harmony/assets',
+    '.harmony/screenshots',
+    '.harmony/raster',
+    '.harmony/canvas',
+    '.harmony/private',
+    '.harmony/continuity',
+    '.harmony/processes',
+    '.harmony/locks',
+    '.harmony/supervisor',
+    '.harmony/operations',
+    '.harmony/swarm',
+    '.harmony/release',
+    '.harmony/inbox',
+    '.harmony/todo.json',
+    '.harmony/todos-archive.json',
+    '.harmony/diagnostics',
+    '.harmony/source-ledger.json',
+    '.harmony/memory.jsonl',
+    // Measured 2026-11-20: these subtrees are LARGER than the ones we deliberately include, so
+    // leaving them walkable would burn the CLI's 200-file budget on machine output instead of source.
+    '.harmony/hygiene',          // 29 MB  — bundled executables
+    '.harmony/history',          // 3.1 MB — chat ledgers
+    '.harmony/memory-preserved', // 2.1 MB
+    '.harmony/provider-usage',   // 1.7 MB — usage ledger
+    '.harmony/smoke',            // 1.5 MB — smoke receipts
+    '.harmony/staging',          // 467 KB
+    '.harmony/nls',              // 49 KB  — generated strings
+    '.harmony/consensus',        // 59 KB
+    '.harmony/tavily-archive',   // 35 KB
+    '.harmony/ask-answers',      // append-only Ask answer receipts
+];
 
 export const PRE_ACTION_SNAPSHOT_TEXT_EXTS = new Set([
     // '' covers extensionless files: dotfiles (.gitattributes, .gitignore,
@@ -41,8 +84,11 @@ export function normalizeSnapshotPath(value: string): string {
 }
 
 export function shouldSkipPreActionSnapshotPath(relativePath: string): boolean {
-    const parts = normalizeSnapshotPath(relativePath).split('/').filter(Boolean).map(part => part.toLowerCase());
-    return parts.some(part => PRE_ACTION_SNAPSHOT_EXCLUDED_PARTS.has(part) || part.includes('secret') || part.includes('credential') || part.includes('key'));
+    const normalized = normalizeSnapshotPath(relativePath).toLowerCase();
+    const parts = normalized.split('/').filter(Boolean);
+    if (parts.some(part => PRE_ACTION_SNAPSHOT_EXCLUDED_PARTS.has(part))) return true;
+    if (parts.some(part => part.includes('secret') || part.includes('credential') || part.includes('key'))) return true;
+    return PRE_ACTION_SNAPSHOT_EXCLUDED_PREFIXES.some(prefix => normalized === prefix || normalized.startsWith(`${prefix}/`));
 }
 
 export function snapshotCopyName(relativePath: string): string {
@@ -55,14 +101,19 @@ export function restoreCommandForSnapshot(root: string, id: string): string {
     return `node bin/harmony-cli.js --workspace "${root.replace(/"/g, '\\"')}" snapshot restore --id ${id} --all --confirm`;
 }
 
-export function formatSnapshotNote(snapshot?: PreActionSnapshotResult): string {
-    if (!snapshot) return '';
-    return `\npre-action snapshot: ${snapshot.manifestPath}\nrestore command: ${snapshot.restoreCommand}`;
+export function formatSnapshotNote(snapshot?: PreActionSnapshotResult, warnings?: string[]): string {
+    // A skip that nobody can see is a silent failure (AGENTS.md rule 6). When a path is
+    // deliberately not copied we still say so, every time, on the surface the caller reads.
+    const warningBlock = (warnings && warnings.length > 0)
+        ? `\n⚠️ no pre-action snapshot for ${warnings.length} path(s) — these changes have NO automatic undo:\n${warnings.map(item => `- ${item}`).join('\n')}`
+        : '';
+    if (!snapshot) return warningBlock;
+    return `${warningBlock}\npre-action snapshot: ${snapshot.manifestPath}\nrestore command: ${snapshot.restoreCommand}`;
 }
 
-export async function createRequiredPreActionSnapshot(root: string, relativePaths: string[], reason: string, source: 'chat' | 'vscode' = 'chat'): Promise<{ ok: true; snapshot?: PreActionSnapshotResult } | { ok: false; message: string }> {
+export async function createRequiredPreActionSnapshot(root: string, relativePaths: string[], reason: string, source: 'chat' | 'vscode' = 'chat'): Promise<{ ok: true; snapshot?: PreActionSnapshotResult; warnings: string[] } | { ok: false; message: string }> {
     const uniquePaths = Array.from(new Set(relativePaths.map(normalizeSnapshotPath).filter(Boolean))).sort();
-    if (uniquePaths.length === 0) return { ok: true };
+    if (uniquePaths.length === 0) return { ok: true, warnings: [] };
 
     const id = `snapshot-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}-${source}`;
     const snapshotDir = path.join(root, '.harmony', 'snapshots', id);
@@ -72,6 +123,8 @@ export async function createRequiredPreActionSnapshot(root: string, relativePath
     const maxBytes = Math.max(256 * 1024, snapshotMaxBytes);
     const records: PreActionSnapshotRecord[] = [];
     const failures: string[] = [];
+    // Non-fatal skips: the action proceeds, but the omission must be disclosed to the caller.
+    const warnings: string[] = [];
 
     for (const relativePath of uniquePaths) {
         const normalized = normalizeSnapshotPath(relativePath);
@@ -97,13 +150,20 @@ export async function createRequiredPreActionSnapshot(root: string, relativePath
             continue;
         }
         if (shouldSkipPreActionSnapshotPath(normalized)) {
-            record.reason = 'path is excluded from snapshot restore policy';
-            failures.push(`${normalized}: ${record.reason}`);
+            // A "do not COPY this" policy must not become a "you may not EDIT this" policy.
+            // This branch used to push to `failures`, which aborts the whole snapshot and makes
+            // every caller refuse the action — so an EXISTING file under .harmony/ (our own notes,
+            // plans, handoffs) was uneditable, while a NEW file in the same directory edited fine
+            // (a missing file took the 'missing before action' branch, which never failed).
+            // Skipping a copy is now a disclosed non-failure, exactly like the size-cap branch below.
+            record.reason = 'path is excluded from snapshot copy policy — action proceeds without snapshot';
+            warnings.push(`${normalized}: excluded from snapshot copy policy — no automatic undo for this path`);
             records.push(record);
             continue;
         }
         if (stat.size > maxBytes) {
             record.reason = `file exceeds ${maxBytes} byte pre-action snapshot limit — skipped (edit proceeds without snapshot)`;
+            warnings.push(`${normalized}: exceeds the ${maxBytes} byte snapshot limit (${stat.size} bytes) — no automatic undo for this path`);
             records.push(record);
             continue;
         }
@@ -133,7 +193,7 @@ export async function createRequiredPreActionSnapshot(root: string, relativePath
     }
 
     const copied = records.filter(record => record.copied).length;
-    if (copied === 0) return { ok: true };
+    if (copied === 0) return { ok: true, warnings };
 
     const manifest = {
         version: 1,
@@ -143,7 +203,7 @@ export async function createRequiredPreActionSnapshot(root: string, relativePath
         mode: 'small-text-copy',
         note: reason,
         limits: { maxFiles: uniquePaths.length, maxBytes },
-        excludes: Array.from(PRE_ACTION_SNAPSHOT_EXCLUDED_PARTS),
+        excludes: [...Array.from(PRE_ACTION_SNAPSHOT_EXCLUDED_PARTS), ...PRE_ACTION_SNAPSHOT_EXCLUDED_PREFIXES],
         files: records,
     };
     const manifestPath = path.join(snapshotDir, 'manifest.json');
@@ -158,6 +218,7 @@ export async function createRequiredPreActionSnapshot(root: string, relativePath
             copied,
             skipped: records.length - copied,
         },
+        warnings,
     };
 }
 

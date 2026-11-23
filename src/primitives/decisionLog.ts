@@ -7,12 +7,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { workspaceRoot, textResult, ensureDir, uid } from './shared';
-import { safeHarmonyDir, appendJsonl, readJsonl, readJsonlStream } from '../swarmHarden';
+import { safeHarmonyDir, appendJsonl, readJsonl, readJsonlStream, rewriteJsonl } from '../swarmHarden';
 import { concertSpeak } from '../concertHall';
 import { BasePrimitive } from './basePrimitive';
 
-interface DNode { id: string; parent_ids: string[]; timestamp: number; agent: string; decision: string; premises: string[]; alternatives: string[]; rationale: string; status: string; context?: string; }
-interface DLogInput { action: 'append' | 'query' | 'graph' | 'stats'; append?: { decision: string; premises?: string[]; alternatives?: string[]; rationale?: string; parent_ids?: string[]; agent?: string; status?: string; context?: string }; query?: { parent_id?: string; agent?: string; status?: string; since_hours?: number; keyword?: string; limit?: number }; root_id?: string; max_depth?: number; }
+interface DNode { id: string; parent_ids: string[]; timestamp: number; agent: string; decision: string; premises: string[]; alternatives: string[]; rationale: string; status: string; context?: string; watchpoints?: Array<{ file: string; symbol?: string; baseline_sha256: string }>; }
+interface DLogInput { action: 'append' | 'query' | 'graph' | 'stats' | 'check_liveness'; append?: { decision: string; premises?: string[]; alternatives?: string[]; rationale?: string; parent_ids?: string[]; agent?: string; status?: string; context?: string; watchpoints?: Array<{ file: string; symbol?: string; baseline_sha256: string }> }; query?: { parent_id?: string; agent?: string; status?: string; since_hours?: number; keyword?: string; limit?: number }; root_id?: string; max_depth?: number; }
 
 function buildTree(nodes: DNode[], nid: string, prefix = '', last = true, depth = 0, maxD = 5): string {
     if (depth >= maxD) return ''; const n = nodes.find(x => x.id === nid); if (!n) return '';
@@ -44,10 +44,35 @@ export class DecisionLogTool extends BasePrimitive<DLogInput> {
                 if (!append?.decision) return textResult(JSON.stringify({ error: 'decision required' }));
                 const nodes = await readAll(); const pids = append.parent_ids ?? [];
                 for (const p of pids) if (!nodes.some(n => n.id === p)) return textResult(JSON.stringify({ error: `parent ${p} not found` }));
-                const n: DNode = { id: uid(), parent_ids: pids, timestamp: Date.now(), agent: append.agent ?? 'unknown', decision: append.decision, premises: append.premises ?? [], alternatives: append.alternatives ?? [], rationale: append.rationale ?? '', status: append.status ?? 'proposed', context: append.context };
+                const n: DNode = { id: uid(), parent_ids: pids, timestamp: Date.now(), agent: append.agent ?? 'unknown', decision: append.decision, premises: append.premises ?? [], alternatives: append.alternatives ?? [], rationale: append.rationale ?? '', status: append.status ?? 'proposed', context: append.context, watchpoints: append.watchpoints };
                 await appendJsonl(fp, n);
                 try { await concertSpeak('decision-log', n.agent, 'Decision: ' + n.decision.slice(0, 200)); } catch {}
-                return textResult(JSON.stringify({ status: 'appended', id: n.id, decision: n.decision, timestamp: new Date(n.timestamp).toISOString() }, null, 2));
+                return textResult(JSON.stringify({ status: 'appended', id: n.id, decision: n.decision, timestamp: new Date(n.timestamp).toISOString(), watchpoints: n.watchpoints?.length ?? 0 }, null, 2));
+            }
+            case 'check_liveness': {
+                const { checkCodeWatchpointLiveness } = await import('../citationRecord');
+                const fsp = await import('fs/promises');
+                const nodes = await readAll();
+                const reports: Array<{ decision_id: string; decision: string; verdict: string; file: string }> = [];
+                let alteredCount = 0;
+                for (const n of nodes) {
+                    if (!n.watchpoints || n.watchpoints.length === 0) continue;
+                    for (const wp of n.watchpoints) {
+                        const abs = path.isAbsolute(wp.file) ? wp.file : path.join(root, wp.file);
+                        let content: string | null = null;
+                        try { content = await fsp.readFile(abs, 'utf8'); } catch { content = null; }
+                        const rep = await checkCodeWatchpointLiveness(wp, content);
+                        reports.push({ decision_id: n.id, decision: n.decision.slice(0, 120), verdict: rep.verdict, file: wp.file });
+                        if (rep.verdict !== 'live-unchanged') {
+                            n.status = 'assumption-altered';
+                            alteredCount++;
+                        }
+                    }
+                }
+                if (alteredCount > 0) {
+                    await rewriteJsonl(fp, nodes);
+                }
+                return textResult(JSON.stringify({ checked_watchpoints: reports.length, altered_decisions: alteredCount, reports }, null, 2));
             }
             case 'query': {
                 const q = query ?? {};

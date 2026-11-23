@@ -7,11 +7,12 @@ import * as cp from 'child_process';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import * as dns from 'dns';
+import { AsyncLocalStorage } from 'async_hooks';
 import { recordEffect } from './effectLedger';
 import { createRequiredPreActionSnapshot as createPreActionSnapshot, formatSnapshotNote, normalizeSnapshotPath } from './snapshotUtils';
-import { consult, confirmHeavyTier, ProviderId, resolveCollabModel, Tier, modelFor } from './providers';
-import { addTodos, checkTodo, removeTodo, clearTodos, loadTodos, formatTodos } from './todoStore';
-import { HarmonyAskOptions, showHarmonyAsk } from './askView';
+import { consult, confirmHeavyTier, ProviderId, resolveCollabModel, resolveProviderKey, Tier, modelFor } from './providers';
+import { addTodos, checkTodo, removeTodo, clearTodos, loadTodos, formatTodos, formatActiveWindowTodos } from './todoStore';
+import { formatAskQuestionText, HarmonyAskOptions, showHarmonyAsk, showHarmonyAskBatch } from './askView';
 import { LanguageManager } from './languageManager';
 import { hubMayStart } from './hubPolicy';
 import { hubFetch } from './hubClient';
@@ -21,6 +22,7 @@ import { createRepoPack, providerOrchestratorSystem } from './orchestrator';
 import { estimateCost } from './costTracker';
 import { defaultVerificationCommand, defaultVerificationTimeoutSec, runVerification } from './verification';
 import { ProfileRegistry } from './profileRegistry';
+import { CollaboratorRole, COLLABORATOR_ROLE_TIERS } from './collaboratorRoles';
 import { formatMcpStatus } from './mcp';
 import { OperationLockError, withOperationLock } from './operationLocks';
 import { fallbackPatchSafe, formatFallbackResult } from './harnessFallback';
@@ -43,16 +45,12 @@ import { tendGarden } from './careBloom';
 /**
  * Wraps a tool's invoke method with CareBloom garden tracking.
  * Every meaningful tool invocation increments the garden — success or failure.
- * Depth counter spans async call boundaries: when a tool calls another tool
- * internally (e.g. RunFailFix → RunTerminal), the inner tool runs inside the
- * outer tool's invoke() while invocationDepth is still 1, so the inner
- * wrapper sees depth===1 and skips tendGarden. Only the outermost wrapper
- * (depth===0 before increment) calls tendGarden.
- *
- * Async-safe in single-threaded JS: all synchronous increments/decrements
- * happen before/after await points with no interleaving.
+ * Uses AsyncLocalStorage so depth tracking is isolated per async execution chain:
+ * when a tool calls another tool internally (e.g. RunFailFix → RunTerminal),
+ * the inner tool runs inside the outer tool's async context and sees depth > 0,
+ * while concurrent top-level tool calls each start with their own depth === 0.
  */
-let invocationDepth = 0;
+const careBloomDepthStorage = new AsyncLocalStorage<number>();
 
 /**
  * Wraps a LanguageModelTool's invoke method to track CareBloom engagement.
@@ -64,14 +62,12 @@ function trackToolInvocation<T>(
     invoke: (options: vscode.LanguageModelToolInvocationOptions<T>) => Promise<vscode.LanguageModelToolResult>
 ): (options: vscode.LanguageModelToolInvocationOptions<T>) => Promise<vscode.LanguageModelToolResult> {
     return async (options) => {
-        // Depth guard: only the outermost tool invocation counts.
-        // Nested tools (e.g., RunFailFix → RunTerminal) are skipped.
-        const isOutermost = invocationDepth === 0;
-        invocationDepth++;
+        const currentDepth = careBloomDepthStorage.getStore() ?? 0;
+        const isOutermost = currentDepth === 0;
         let success = false;
         let outcome = '';
         try {
-            const result = await invoke(options);
+            const result = await careBloomDepthStorage.run(currentDepth + 1, () => invoke(options));
             success = true;
             outcome = 'ok';
             return result;
@@ -79,7 +75,6 @@ function trackToolInvocation<T>(
             outcome = `error: ${e?.message ?? String(e)}`.slice(0, 80);
             throw e;
         } finally {
-            invocationDepth = Math.max(0, invocationDepth - 1);
             if (isOutermost) {
                 try { await tendGarden(toolName, options?.input, { outcome, success }); }
                 catch (e) { console.error('[CareBloom] tendGarden failed:', e); }
@@ -497,7 +492,7 @@ class WriteFileTool implements vscode.LanguageModelTool<WriteFileInput> {
             const verifyError = await verifyTextOnDisk(p, resolved, content);
             if (verifyError) return textResult(verifyError);
             await recordEffect({ kind: 'file', target: p, action: 'write', inverse: snapshot.snapshot?.id, compensating: snapshot.snapshot?.restoreCommand }).catch(() => undefined);
-            return textResult(`verified write of ${String(content).length} chars to ${p}${formatSnapshotNote(snapshot.snapshot)}`);
+            return textResult(`verified write of ${String(content).length} chars to ${p}${formatSnapshotNote(snapshot.snapshot, snapshot.warnings)}`);
         } catch (e: any) {
             return textResult(`error: ${e?.message ?? String(e)}`);
         }
@@ -1482,13 +1477,13 @@ class GitStashTool implements vscode.LanguageModelTool<GitStashInput> {
                     if (!snapshot.ok) return textResult(snapshot.message);
                     const result = await runGit(args, 120000);
                     if (!result.ok) return textResult(`error: git stash push failed\n${result.error ?? ''}\n${result.stderr}\n${result.stdout}`.trim());
-                    return textResult(`${result.stdout.trim() || 'git stash push completed'}${formatSnapshotNote(snapshot.snapshot)}`);
+                    return textResult(`${result.stdout.trim() || 'git stash push completed'}${formatSnapshotNote(snapshot.snapshot, snapshot.warnings)}`);
                 }
                 const snapshot = await createRequiredPreActionSnapshot(root, snapshotPaths, `VS Code harmony_git_stash before git stash push`);
                 if (!snapshot.ok) return textResult(snapshot.message);
                 const result = await runGit(args, 120000);
                 if (!result.ok) return textResult(`error: git stash push failed\n${result.error ?? ''}\n${result.stderr}\n${result.stdout}`.trim());
-                return textResult(`${result.stdout.trim() || 'git stash push completed'}${formatSnapshotNote(snapshot.snapshot)}`);
+                return textResult(`${result.stdout.trim() || 'git stash push completed'}${formatSnapshotNote(snapshot.snapshot, snapshot.warnings)}`);
             });
         } catch (error) {
             return lockErrorResult(error) ?? textResult(`error: ${(error as Error)?.message ?? String(error)}`);
@@ -1530,7 +1525,7 @@ class GitCommitTool implements vscode.LanguageModelTool<GitCommitInput> {
                     if (!snapshot.ok) return textResult(snapshot.message);
                     const add = await runGit(['add', '-A']);
                     if (!add.ok) return textResult(`error: git add -A failed\n${add.error ?? ''}\n${add.stderr}`.trim());
-                    snapshotNote = formatSnapshotNote(snapshot.snapshot);
+                    snapshotNote = formatSnapshotNote(snapshot.snapshot, snapshot.warnings);
                 } else if (paths.length > 0) {
                     const rels: string[] = [];
                     for (const inputPath of paths) {
@@ -1547,11 +1542,11 @@ class GitCommitTool implements vscode.LanguageModelTool<GitCommitInput> {
                     if (!snapshot.ok) return textResult(snapshot.message);
                     const add = await runGit(['add', '--', ...rels]);
                     if (!add.ok) return textResult(`error: git add failed\n${add.error ?? ''}\n${add.stderr}`.trim());
-                    snapshotNote = formatSnapshotNote(snapshot.snapshot);
+                    snapshotNote = formatSnapshotNote(snapshot.snapshot, snapshot.warnings);
                 } else if (preStaged.paths.length > 0) {
                     const snapshot = await createRequiredPreActionSnapshot(root, preStaged.paths, `VS Code harmony_git_commit before committing staged paths`);
                     if (!snapshot.ok) return textResult(snapshot.message);
-                    snapshotNote = formatSnapshotNote(snapshot.snapshot);
+                    snapshotNote = formatSnapshotNote(snapshot.snapshot, snapshot.warnings);
                 }
 
                 const status = await runGit(['diff', '--staged', '--stat']);
@@ -1628,13 +1623,15 @@ class GitRestoreTool implements vscode.LanguageModelTool<GitRestoreInput> {
         args.push('--', ...rels);
         try {
             return await withOperationLock(root, 'git:restore', 'git restore', { paths: rels, source: options.input.source, mode }, async () => {
+                // staged-only restore rewrites the index, not worktree files, so there is nothing
+                // to snapshot. No path was skipped by policy — hence empty warnings, not a notice.
                 const snapshot = mode === 'staged'
-                    ? { ok: true as const, snapshot: undefined }
+                    ? { ok: true as const, snapshot: undefined, warnings: [] as string[] }
                     : await createRequiredPreActionSnapshot(root, rels, `VS Code harmony_git_restore before git restore ${rels.join(', ')}`);
                 if (!snapshot.ok) return textResult(snapshot.message);
                 const result = await runGit(args, 120000);
                 if (!result.ok) return textResult(`error: git restore failed\n${result.error ?? ''}\n${result.stderr}\n${result.stdout}`.trim());
-                return textResult(`${result.stdout.trim() || `git restore completed for ${rels.join(', ')}`}${formatSnapshotNote(snapshot.snapshot)}`);
+                return textResult(`${result.stdout.trim() || `git restore completed for ${rels.join(', ')}`}${formatSnapshotNote(snapshot.snapshot, snapshot.warnings)}`);
             });
         } catch (error) {
             return lockErrorResult(error) ?? textResult(`error: ${(error as Error)?.message ?? String(error)}`);
@@ -1677,7 +1674,7 @@ class GitRevertTool implements vscode.LanguageModelTool<GitRevertInput> {
                 if (!snapshot.ok) return textResult(snapshot.message);
                 const result = await runGit(args, 180000);
                 if (!result.ok) return textResult(`error: git revert failed\n${result.error ?? ''}\n${result.stderr}\n${result.stdout}`.trim());
-                return textResult(`${result.stdout.trim() || `git revert completed for ${commit}`}${formatSnapshotNote(snapshot.snapshot)}`);
+                return textResult(`${result.stdout.trim() || `git revert completed for ${commit}`}${formatSnapshotNote(snapshot.snapshot, snapshot.warnings)}`);
             });
         } catch (error) {
             return lockErrorResult(error) ?? textResult(`error: ${(error as Error)?.message ?? String(error)}`);
@@ -1928,7 +1925,7 @@ class EditFileTool implements vscode.LanguageModelTool<EditFileInput> {
             const previewNew = newLines.slice(0, 8).map(l => '+ ' + l).join('\n');
             const truncatedNote = (oldLines.length > 8 || newLines.length > 8) ? '\n... (preview truncated)' : '';
             return textResult(
-                `${patchResult}${formatSnapshotNote(snapshot.snapshot)}\n${count} replacement${count === 1 ? '' : 's'} validated before write.${resolvedStrings.note ? `\n${resolvedStrings.note}.` : ''}\n\n` +
+                `${patchResult}${formatSnapshotNote(snapshot.snapshot, snapshot.warnings)}\n${count} replacement${count === 1 ? '' : 's'} validated before write.${resolvedStrings.note ? `\n${resolvedStrings.note}.` : ''}\n\n` +
                 '```diff\n' + previewOld + '\n' + previewNew + truncatedNote + '\n```'
             );
         } catch (e: any) {
@@ -1999,7 +1996,7 @@ class ApplyPatchTool implements vscode.LanguageModelTool<ApplyPatchInput> {
             await recordEffect({ kind: 'file', target: p, action: 'patch', inverse: snapshot.snapshot?.id, compensating: snapshot.snapshot?.restoreCommand }).catch(() => undefined);
             const totalDelta = updated.length - original.length;
             return textResult(
-                `${patchResult}${formatSnapshotNote(snapshot.snapshot)}\nvalidated ${hunks.length} hunk${hunks.length === 1 ? '' : 's'} atomically before write (Δ ${totalDelta >= 0 ? '+' : ''}${totalDelta} chars).\n` +
+                `${patchResult}${formatSnapshotNote(snapshot.snapshot, snapshot.warnings)}\nvalidated ${hunks.length} hunk${hunks.length === 1 ? '' : 's'} atomically before write (Δ ${totalDelta >= 0 ? '+' : ''}${totalDelta} chars).\n` +
                 applied.map(a => '  - ' + a).join('\n')
             );
         } catch (e: any) {
@@ -2086,20 +2083,23 @@ class AskQuestionTool implements vscode.LanguageModelTool<AskQuestionInput> {
         if (!questions.every(q => q.question)) return textResult('error: missing argument: question');
         
         try {
-            const answers: Array<{ question: string; answer: string }> = [];
-            for (const questionInput of questions) {
-                const answer = await showHarmonyAsk({
-                    question: formatAskQuestionText(questionInput),
-                    options: normalizeAskOptions(questionInput.options),
-                    multiline: !!questionInput.multiline,
-                    allowFreeformInput: questionInput.allowFreeformInput ?? questionInput.allow_freeform,
-                    multiSelect: !!(questionInput.multiSelect ?? questionInput.multi_select),
-                    readyCheckbox: questionInput.readyCheckbox,
-                    readyLabel: questionInput.readyLabel,
-                }, token);
-                if (answer === undefined) return textResult('user cancelled');
-                answers.push({ question: questionInput.question, answer });
+            const batchInputs: HarmonyAskOptions[] = questions.map(questionInput => ({
+                question: formatAskQuestionText(questionInput),
+                options: normalizeAskOptions(questionInput.options),
+                multiline: !!questionInput.multiline,
+                allowFreeformInput: questionInput.allowFreeformInput ?? questionInput.allow_freeform,
+                multiSelect: !!(questionInput.multiSelect ?? questionInput.multi_select),
+                readyCheckbox: questionInput.readyCheckbox,
+                readyLabel: questionInput.readyLabel,
+            }));
+            const rawAnswers = await showHarmonyAskBatch(batchInputs, token);
+            if (!rawAnswers.length || rawAnswers.some(a => a === undefined)) {
+                return textResult('user cancelled');
             }
+            const answers = questions.map((q, idx) => ({
+                question: q.question,
+                answer: rawAnswers[idx] as string,
+            }));
             if (answers.length === 1) return textResult(answers[0].answer);
             return textResult(JSON.stringify({ answers }, null, 2));
         } catch (e: any) {
@@ -2127,12 +2127,13 @@ function normalizeAskOptions(options: AskQuestionInput['options']): HarmonyAskOp
     }).filter(option => typeof option === 'string' ? option.length > 0 : option.label.length > 0);
 }
 
-function formatAskQuestionText(input: Pick<AskQuestionInput, 'header' | 'message' | 'question'>): string {
-    return [input.header, input.question, input.message].filter(Boolean).join('\n\n');
-}
-
 // ─── fetch_url ──────────────────────────────────────────────────────────────
-interface FetchUrlInput { url: string; max_chars?: number; headers?: Record<string, string>; }
+interface FetchUrlInput {
+    url: string;
+    max_chars?: number;
+    headers?: Record<string, string>;
+    extractor?: 'auto' | 'direct' | 'deepseek';
+}
 
 /** True for loopback, private, link-local, and reserved IP literals (SSRF guard). */
 function isPrivateIpLiteral(ip: string): boolean {
@@ -2161,8 +2162,29 @@ function isPrivateHostname(hostname: string): boolean {
 }
 
 class FetchUrlTool implements vscode.LanguageModelTool<FetchUrlInput> {
+    constructor(private readonly secrets?: vscode.SecretStorage) {}
+
+    private async fetchViaDeepSeek(targetUrl: string, signal: AbortSignal): Promise<{ title?: string; content: string } | undefined> {
+        const key = this.secrets ? await resolveProviderKey(this.secrets, 'deepseek') : (process.env.DEEPSEEK_API_KEY?.trim() || undefined);
+        if (!key) return undefined;
+        const resp = await fetch('https://api.deepseek.com/v1/tools/fetch', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${key}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ url: targetUrl }),
+            signal: signal as any,
+        });
+        if (!resp.ok) return undefined;
+        const json = await resp.json() as { title?: string; content?: string };
+        const content = (json?.content ?? '').trim();
+        if (!content) return undefined;
+        return { title: json?.title?.trim(), content };
+    }
+
     async invoke(options: vscode.LanguageModelToolInvocationOptions<FetchUrlInput>, token: vscode.CancellationToken) {
-        const { url, max_chars, headers } = options.input;
+        const { url, max_chars, headers, extractor = 'auto' } = options.input;
         if (!url || typeof url !== 'string') return textResult('error: missing argument: url');
         let parsed: URL;
         try { parsed = new URL(url); } catch { return textResult(`error: invalid URL: ${url}`); }
@@ -2183,10 +2205,21 @@ class FetchUrlTool implements vscode.LanguageModelTool<FetchUrlInput> {
             // Unresolvable host — let fetch surface the real network error below.
         }
         const cap = Math.min(Math.max(Number(max_chars) || 8000, 500), 60000);
+        const hasCustomHeaders = Boolean(headers && typeof headers === 'object' && Object.keys(headers).length > 0);
+        const canUseDeepSeekFetch = !hasCustomHeaders && !parsed.username && !parsed.password && parsed.toString().length <= 8192;
         const controller = new AbortController();
         const sub = token.onCancellationRequested(() => controller.abort());
         const timer = setTimeout(() => controller.abort(), 15000);
         try {
+            if (extractor === 'deepseek' && canUseDeepSeekFetch) {
+                const ds = await this.fetchViaDeepSeek(parsed.toString(), controller.signal);
+                if (ds) {
+                    const body = ds.title ? `# ${ds.title}\n\n${ds.content}` : ds.content;
+                    const out = body.length > cap ? body.slice(0, cap) + `\n…[truncated, ${body.length - cap} more chars]` : body;
+                    return textResult(`URL: ${parsed.toString()}\nStatus: 200 (deepseek-fetch/markdown)\n\n${out}`);
+                }
+            }
+
             // Merge default UA with any caller-supplied headers (e.g. Authorization).
             const reqHeaders: Record<string, string> = { 'User-Agent': 'Harmony-VSCode-Extension/0.4.0' };
             if (headers && typeof headers === 'object') {
@@ -2202,11 +2235,37 @@ class FetchUrlTool implements vscode.LanguageModelTool<FetchUrlInput> {
             });
             const ctype = r.headers.get('content-type') ?? '';
             const raw = await r.text();
-            if (!r.ok) return textResult(`error: HTTP ${r.status}\n${raw.slice(0, 500)}`);
+            if (!r.ok) {
+                if (extractor === 'auto' && canUseDeepSeekFetch && (r.status === 403 || r.status === 406 || r.status === 429 || r.status >= 500)) {
+                    const ds = await this.fetchViaDeepSeek(parsed.toString(), controller.signal).catch(() => undefined);
+                    if (ds) {
+                        const body = ds.title ? `# ${ds.title}\n\n${ds.content}` : ds.content;
+                        const out = body.length > cap ? body.slice(0, cap) + `\n…[truncated, ${body.length - cap} more chars]` : body;
+                        return textResult(`URL: ${parsed.toString()}\nStatus: 200 (deepseek-fetch fallback after HTTP ${r.status})\n\n${out}`);
+                    }
+                }
+                return textResult(`error: HTTP ${r.status}\n${raw.slice(0, 500)}`);
+            }
             const stripped = ctype.includes('html') ? stripHtml(raw) : raw;
+            if (extractor === 'auto' && canUseDeepSeekFetch && ctype.includes('html') && stripped.length < 80 && raw.length > 500) {
+                const ds = await this.fetchViaDeepSeek(parsed.toString(), controller.signal).catch(() => undefined);
+                if (ds && ds.content.length > stripped.length) {
+                    const body = ds.title ? `# ${ds.title}\n\n${ds.content}` : ds.content;
+                    const out = body.length > cap ? body.slice(0, cap) + `\n…[truncated, ${body.length - cap} more chars]` : body;
+                    return textResult(`URL: ${parsed.toString()}\nStatus: 200 (deepseek-fetch fallback for JS-rendered HTML)\n\n${out}`);
+                }
+            }
             const out = stripped.length > cap ? stripped.slice(0, cap) + `\n…[truncated, ${stripped.length - cap} more chars]` : stripped;
             return textResult(`URL: ${parsed.toString()}\nStatus: ${r.status} (${ctype})\n\n${out}`);
         } catch (e: any) {
+            if (extractor === 'auto' && canUseDeepSeekFetch && !token.isCancellationRequested) {
+                const ds = await this.fetchViaDeepSeek(parsed.toString(), controller.signal).catch(() => undefined);
+                if (ds) {
+                    const body = ds.title ? `# ${ds.title}\n\n${ds.content}` : ds.content;
+                    const out = body.length > cap ? body.slice(0, cap) + `\n…[truncated, ${body.length - cap} more chars]` : body;
+                    return textResult(`URL: ${parsed.toString()}\nStatus: 200 (deepseek-fetch fallback after network error)\n\n${out}`);
+                }
+            }
             return textResult(`error: ${e?.message ?? String(e)}`);
         } finally {
             clearTimeout(timer);
@@ -2253,26 +2312,26 @@ class TodoTool implements vscode.LanguageModelTool<TodoInput> {
                     if (!Array.isArray(items) || items.length === 0)
                         return textResult('error: add requires items: string[]');
                     const all = await addTodos(items);
-                    return textResult(`Added ${items.length} item(s). Current list:\n${formatTodos(all)}`);
+                    return textResult(`Added ${items.length} item(s). Current list:\n${formatActiveWindowTodos(all)}`);
                 }
                 case 'list': {
                     const all = await loadTodos();
-                    return textResult(formatTodos(all));
+                    return textResult(formatActiveWindowTodos(all));
                 }
                 case 'check':
                 case 'uncheck': {
                     if (!options.input.id) return textResult('error: id is required');
                     const all = await checkTodo(options.input.id, action === 'check');
-                    return textResult(`Updated. Current list:\n${formatTodos(all)}`);
+                    return textResult(`Updated. Current list:\n${formatActiveWindowTodos(all)}`);
                 }
                 case 'remove': {
                     if (!options.input.id) return textResult('error: id is required');
                     const all = await removeTodo(options.input.id);
-                    return textResult(`Removed. Current list:\n${formatTodos(all)}`);
+                    return textResult(`Removed. Current list:\n${formatActiveWindowTodos(all)}`);
                 }
                 case 'clear': {
                     const all = await clearTodos(options.input.scope ?? 'all');
-                    return textResult(`Cleared. Current list:\n${formatTodos(all)}`);
+                    return textResult(`Cleared. Current list:\n${formatActiveWindowTodos(all)}`);
                 }
                 default:
                     return textResult(`error: unknown action: ${action}`);
@@ -2347,25 +2406,30 @@ interface SpawnWorkerInput {
     slot_index?: number;
 }
 
-type WorkerRole = 'scout' | 'researcher' | 'planner' | 'implementer' | 'verifier' | 'critic' | 'cost_sentinel' | 'hard_reasoner';
+/** One canonical taxonomy — see src/collaboratorRoles.ts. Aliased so call sites keep reading naturally. */
+type WorkerRole = CollaboratorRole;
 
-const WORKER_ROLE_TIERS: Record<WorkerRole, Tier> = {
-    scout: 'light',
-    researcher: 'mid',
-    planner: 'coding',
-    implementer: 'coding',
-    verifier: 'coding',
-    critic: 'mid',
-    cost_sentinel: 'light',
-    hard_reasoner: 'heavy'
-};
+const WORKER_ROLE_TIERS: Record<WorkerRole, Tier> = COLLABORATOR_ROLE_TIERS;
 
 function workerRoleTier(role: WorkerRole | undefined, fallback: Tier): Tier {
     return role ? WORKER_ROLE_TIERS[role] : fallback;
 }
 
+function parseCostShieldWorkerRouteOverride(): { provider: ProviderId; tier: Tier } | undefined {
+    const raw = vscode.workspace.getConfiguration('harmony').get<string>('costShield.workerRoute') ?? 'agentsProfile';
+    if (!raw || raw === 'agentsProfile') return undefined;
+    const parts = raw.split(':');
+    if (parts.length !== 2) return undefined;
+    const provider = parts[0].trim() as ProviderId;
+    const tier = parts[1].trim() as Tier;
+    if (!provider || !tier) return undefined;
+    return { provider, tier };
+}
+
+const PURE_TEXT_ADVISOR_GUARD = 'CRITICAL: You are a pure text-only advisor with NO tool, shell, or bash execution access — NEVER emit tool calls, DSML/XML invoke blocks, or command invocations; respond directly in Markdown prose.';
+
 function workerRoleSystem(role: WorkerRole | undefined): string {
-    const base = 'You are a focused sub-agent for a coding collaborator. Answer the task concisely and concretely. Cite specific lines or names from the provided context. Do not ask clarifying questions; make your best inference from context and state assumptions explicitly.';
+    const base = `You are a focused sub-agent for a coding collaborator. Answer the task concisely and concretely. Cite specific lines or names from the provided context. Do not ask clarifying questions; make your best inference from context and state assumptions explicitly. ${PURE_TEXT_ADVISOR_GUARD}`;
     switch (role) {
         case 'scout': return `${base} Your role is scout: quickly locate relevant files, symbols, facts, and risks without proposing broad changes.`;
         case 'researcher': return `${base} Your role is researcher: gather evidence, compare options, and separate verified facts from assumptions.`;
@@ -2377,6 +2441,13 @@ function workerRoleSystem(role: WorkerRole | undefined): string {
         case 'hard_reasoner': return `${base} Your role is hard reasoner: spend effort on genuinely difficult reasoning, architecture, or correctness questions.`;
         default: return base;
     }
+}
+
+function ensurePureTextAdvisorSystem(customSystem: string | undefined, role: WorkerRole | undefined): string {
+    const raw = customSystem?.trim();
+    if (!raw) return workerRoleSystem(role);
+    if (raw.includes('NEVER emit tool calls')) return raw;
+    return `${raw}\n\n${PURE_TEXT_ADVISOR_GUARD}`;
 }
 
 class SpawnWorkerTool implements vscode.LanguageModelTool<SpawnWorkerInput> {
@@ -2411,9 +2482,10 @@ class SpawnWorkerTool implements vscode.LanguageModelTool<SpawnWorkerInput> {
         }
 
         const role = options.input.role;
+        const routeOverride = parseCostShieldWorkerRouteOverride();
         const selected = (!options.input.provider || !options.input.tier) ? await resolveCollabModel(this.secrets) : undefined;
-        const provider: ProviderId = profileProvider ?? options.input.provider ?? selected?.provider ?? 'deepseek';
-        const tier: Tier = options.input.tier ?? workerRoleTier(role, selected?.tier ?? 'light');
+        const provider: ProviderId = profileProvider ?? options.input.provider ?? routeOverride?.provider ?? selected?.provider ?? 'deepseek';
+        const tier: Tier = options.input.tier ?? routeOverride?.tier ?? selected?.tier ?? workerRoleTier(role, 'coding');
         const ok = await confirmHeavyTier(provider, tier);
         if (!ok) return textResult('user denied heavy-tier worker');
 
@@ -2432,7 +2504,7 @@ class SpawnWorkerTool implements vscode.LanguageModelTool<SpawnWorkerInput> {
             }
         }
 
-        const system = profileSystem ?? options.input.system ?? workerRoleSystem(role);
+        const system = ensurePureTextAdvisorSystem(profileSystem ?? options.input.system, role);
 
         const fullQuestion = contextBlocks.length > 0
             ? `Context:\n\n${contextBlocks.join('\n\n')}\n\nTask:\n${task}`
@@ -2452,9 +2524,10 @@ class SpawnWorkerTool implements vscode.LanguageModelTool<SpawnWorkerInput> {
     }
     async prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<SpawnWorkerInput>) {
         const role = options.input.role;
+        const routeOverride = parseCostShieldWorkerRouteOverride();
         const selected = (!options.input.provider || !options.input.tier) ? await resolveCollabModel(this.secrets) : undefined;
-        const provider = options.input.provider ?? selected?.provider ?? 'deepseek';
-        const tier = options.input.tier ?? workerRoleTier(role, selected?.tier ?? 'light');
+        const provider = options.input.provider ?? routeOverride?.provider ?? selected?.provider ?? 'deepseek';
+        const tier = options.input.tier ?? routeOverride?.tier ?? selected?.tier ?? workerRoleTier(role, 'coding');
         const label = role ? `${role} worker` : 'worker';
         const profileLabel = options.input.profileId ? ` (profile: ${options.input.profileId})` : '';
         return { invocationMessage: `Spawning ${label}${profileLabel} on ${provider} (${tier})` };
@@ -3077,31 +3150,82 @@ class GetErrorsTool implements vscode.LanguageModelTool<GetErrorsInput> {
 }
 
 // ── symbol_locations (LSP references/definitions) ────────────────────────
-interface SymbolLocationsInput { path: string; line: number; character?: number; symbol?: string; mode?: 'references'|'definition'|'implementation'|'type_definition'; }
+interface SymbolLocationsInput {
+    path: string;
+    line?: number;
+    character?: number;
+    symbol?: string;
+    line_text?: string;
+    mode?: 'references' | 'definition' | 'implementation' | 'type_definition';
+    include_declaration?: boolean;
+    max_results?: number;
+    format?: 'markdown' | 'json';
+}
 
 class SymbolLocationsTool implements vscode.LanguageModelTool<SymbolLocationsInput> {
     async invoke(options: vscode.LanguageModelToolInvocationOptions<SymbolLocationsInput>) {
-        const { path: p, line, character, symbol, mode } = options.input;
-        if (!p || !line) return textResult('error: missing arguments: path and line required');
+        const { path: p, line, character, symbol, line_text, mode, include_declaration, max_results, format } = options.input;
+        if (!p) return textResult('error: missing argument: path is required');
         const resolved = resolveWorkspacePath(p);
         if (!resolved) return textResult(`error: path is outside workspace: ${p}`);
         const uri = vscode.Uri.file(resolved);
-        let pos: vscode.Position;
-        if (typeof character === 'number') { pos = new vscode.Position(line - 1, character); }
-        else if (symbol) {
-            const doc = await vscode.workspace.openTextDocument(uri);
-            const lineText = doc.lineAt(line - 1).text;
-            const idx = lineText.indexOf(symbol);
-            if (idx < 0) return textResult(`error: symbol "${symbol}" not found on line ${line}`);
-            pos = new vscode.Position(line - 1, idx);
-        } else { pos = new vscode.Position(line - 1, 0); }
-        const command = mode === 'definition' ? 'vscode.executeDefinitionProvider' :
-                         mode === 'implementation' ? 'vscode.executeImplementationProvider' :
-                         mode === 'type_definition' ? 'vscode.executeTypeDefinitionProvider' :
-                         'vscode.executeReferenceProvider';
-        const locations = await vscode.commands.executeCommand<vscode.Location[]>('vscode.execute' + (mode === 'definition' ? 'Definition' : mode === 'implementation' ? 'Implementation' : mode === 'type_definition' ? 'TypeDefinition' : 'Reference') + 'Provider', uri, pos);
-        if (!locations?.length) return textResult(`No ${mode ?? 'references'} found.`);
-        return textResult([`# Symbol ${(mode ?? 'references').charAt(0).toUpperCase() + (mode ?? 'references').slice(1)}`, '', ...locations.slice(0, 50).map((loc: vscode.Location, i: number) => `${i + 1}. ${path.relative(workspaceRoot() ?? '', loc.uri.fsPath)}:${loc.range.start.line + 1}:${loc.range.start.character}`)].join('\n'));
+        const doc = await vscode.workspace.openTextDocument(uri);
+
+        let lineIdx = typeof line === 'number' && Number.isFinite(line) ? line - 1 : undefined;
+        if (typeof lineIdx !== 'number' && typeof line_text === 'string' && line_text.length > 0) {
+            for (let i = 0; i < doc.lineCount; i++) {
+                if (doc.lineAt(i).text.includes(line_text)) { lineIdx = i; break; }
+            }
+            if (typeof lineIdx !== 'number') return textResult(`error: line_text not found in ${p}`);
+        }
+        if (typeof lineIdx !== 'number' && typeof symbol === 'string' && symbol.length > 0) {
+            for (let i = 0; i < doc.lineCount; i++) {
+                if (doc.lineAt(i).text.includes(symbol)) { lineIdx = i; break; }
+            }
+            if (typeof lineIdx !== 'number') return textResult(`error: symbol "${symbol}" not found in ${p}`);
+        }
+        if (typeof lineIdx !== 'number' || lineIdx < 0 || lineIdx >= doc.lineCount) {
+            return textResult('error: provide line, line_text, or symbol to locate position');
+        }
+
+        const lineStr = doc.lineAt(lineIdx).text;
+        let charIdx = typeof character === 'number' && Number.isFinite(character) ? character : undefined;
+        if (typeof charIdx !== 'number' && symbol) {
+            const idx = lineStr.indexOf(symbol);
+            if (idx >= 0) charIdx = idx;
+        }
+        if (typeof charIdx !== 'number' && line_text) {
+            const idx = lineStr.indexOf(line_text);
+            if (idx >= 0) charIdx = idx;
+        }
+        const pos = new vscode.Position(lineIdx, Math.max(0, Math.min(charIdx ?? 0, lineStr.length)));
+        const providerCmd = 'vscode.execute' + (mode === 'definition' ? 'Definition' : mode === 'implementation' ? 'Implementation' : mode === 'type_definition' ? 'TypeDefinition' : 'Reference') + 'Provider';
+        const rawLocations = mode === 'references' || !mode
+            ? await vscode.commands.executeCommand<any[]>(providerCmd, uri, pos, include_declaration ?? false)
+            : await vscode.commands.executeCommand<any[]>(providerCmd, uri, pos);
+        const locations = (rawLocations ?? []).map((loc: any) => 'targetUri' in loc
+            ? { uri: loc.targetUri as vscode.Uri, range: (loc.targetSelectionRange ?? loc.targetRange) as vscode.Range }
+            : { uri: loc.uri as vscode.Uri, range: loc.range as vscode.Range }
+        );
+        const cap = Math.max(1, Math.min(max_results ?? 80, 500));
+        if (format === 'json') {
+            return textResult(JSON.stringify({
+                mode: mode ?? 'references',
+                source: { path: path.relative(workspaceRoot() ?? '', resolved).replace(/\\/g, '/'), line: lineIdx + 1, character: pos.character },
+                count: locations.length,
+                results: locations.slice(0, cap).map(loc => ({
+                    path: path.relative(workspaceRoot() ?? '', loc.uri.fsPath).replace(/\\/g, '/'),
+                    line: loc.range.start.line + 1,
+                    character: loc.range.start.character,
+                })),
+            }, null, 2));
+        }
+        if (!locations.length) return textResult(`No ${mode ?? 'references'} found.`);
+        return textResult([
+            `# Symbol ${(mode ?? 'references').charAt(0).toUpperCase() + (mode ?? 'references').slice(1)}`,
+            '',
+            ...locations.slice(0, cap).map((loc, i) => `${i + 1}. ${path.relative(workspaceRoot() ?? '', loc.uri.fsPath).replace(/\\/g, '/')}:${loc.range.start.line + 1}:${loc.range.start.character}`),
+        ].join('\n'));
     }
     async prepareInvocation() { return { invocationMessage: 'Finding symbol locations…' }; }
 }
@@ -3555,11 +3679,11 @@ export function registerHarmonyTools(context: vscode.ExtensionContext) {
         vscode.lm.registerTool('harmony_read_file', new ReadFileTool()),
         vscode.lm.registerTool('harmony_list_dir', new ListDirTool()),
         vscode.lm.registerTool('harmony_grep', new GrepTool()),
-        (() => { const t = new WriteFileTool(); return vscode.lm.registerTool('harmony_write_file', { ...t, invoke: trackToolInvocation('harmony_write_file', (o: any) => t.invoke(o)) }); })(),
-        (() => { const t = new EditFileTool(); return vscode.lm.registerTool('harmony_edit_file', { ...t, invoke: trackToolInvocation('harmony_edit_file', (o: any) => t.invoke(o)) }); })(),
-        (() => { const t = new ApplyPatchTool(); return vscode.lm.registerTool('harmony_apply_patch', { ...t, invoke: trackToolInvocation('harmony_apply_patch', (o: any) => t.invoke(o)) }); })(),
+        (() => { const t = new WriteFileTool(); return vscode.lm.registerTool('harmony_write_file', { prepareInvocation: (o: any) => t.prepareInvocation(o), invoke: trackToolInvocation('harmony_write_file', (o: any) => t.invoke(o)) }); })(),
+        (() => { const t = new EditFileTool(); return vscode.lm.registerTool('harmony_edit_file', { prepareInvocation: (o: any) => t.prepareInvocation(o), invoke: trackToolInvocation('harmony_edit_file', (o: any) => t.invoke(o)) }); })(),
+        (() => { const t = new ApplyPatchTool(); return vscode.lm.registerTool('harmony_apply_patch', { prepareInvocation: (o: any) => t.prepareInvocation(o), invoke: trackToolInvocation('harmony_apply_patch', (o: any) => t.invoke(o)) }); })(),
         vscode.lm.registerTool('harmony_open_file', new OpenFileTool()),
-        (() => { const t = new RunTerminalTool(); return vscode.lm.registerTool('harmony_run_terminal', { ...t, invoke: trackToolInvocation('harmony_run_terminal', (o: any) => t.invoke(o)) }); })(),
+        (() => { const t = new RunTerminalTool(); return vscode.lm.registerTool('harmony_run_terminal', { prepareInvocation: (o: any) => t.prepareInvocation(o), invoke: trackToolInvocation('harmony_run_terminal', (o: any) => t.invoke(o)) }); })(),
         vscode.lm.registerTool('harmony_port_status', new PortStatusTool()),
         vscode.lm.registerTool('harmony_git_status', new GitStatusTool()),
         vscode.lm.registerTool('harmony_git_diff', new GitDiffTool()),
@@ -3580,7 +3704,7 @@ export function registerHarmonyTools(context: vscode.ExtensionContext) {
         vscode.lm.registerTool('harmony_ask_question', new AskQuestionTool()),
         vscode.lm.registerTool('harmony_ask_questions', new AskQuestionTool()),
         vscode.lm.registerTool('harmony_ask_harmony', new AskQuestionTool()),
-        vscode.lm.registerTool('harmony_fetch_url', new FetchUrlTool()),
+        vscode.lm.registerTool('harmony_fetch_url', new FetchUrlTool(context.secrets)),
         vscode.lm.registerTool('harmony_todo', new TodoTool()),
         vscode.lm.registerTool('harmony_consult_model', new ConsultModelTool(context.secrets)),
         vscode.lm.registerTool('harmony_spawn_worker', new SpawnWorkerTool(context.secrets)),
@@ -3588,7 +3712,7 @@ export function registerHarmonyTools(context: vscode.ExtensionContext) {
         vscode.lm.registerTool('harmony_search_patterns', new SearchPatternsTool(context)),
         vscode.lm.registerTool('harmony_continuity', new ContinuityTool()),
         vscode.lm.registerTool('harmony_orchestrate_codebase', new OrchestrateCodebaseTool(context.secrets)),
-        (() => { const t = new RunFailFixTool(); return vscode.lm.registerTool('harmony_run_fail_fix', { ...t, invoke: trackToolInvocation('harmony_run_fail_fix', (o: any) => t.invoke(o)) }); })(),
+        (() => { const t = new RunFailFixTool(); return vscode.lm.registerTool('harmony_run_fail_fix', { prepareInvocation: (o: any) => t.prepareInvocation(o), invoke: trackToolInvocation('harmony_run_fail_fix', (o: any) => t.invoke(o)) }); })(),
         vscode.lm.registerTool('harmony_mcp_status', new McpStatusTool()),
         vscode.lm.registerTool('harmony_creative_health', new CreativeHealthTool()),
         vscode.lm.registerTool('harmony_generate_image', new GenerateImageTool()),
@@ -3647,6 +3771,7 @@ interface ParallelTaskInput {
     system?: string;
     /** Max characters per context file (default 16000) */
     max_chars_per_file?: number;
+    slot_index?: number;
 }
 
 interface ParallelInput {
@@ -3663,63 +3788,101 @@ class ParallelTool implements vscode.LanguageModelTool<ParallelInput> {
 
     async invoke(options: vscode.LanguageModelToolInvocationOptions<ParallelInput>, token: vscode.CancellationToken) {
         const { tasks, max_cost_usd, hard_cost_usd, urgent, fail_fast, timeout_ms } = options.input;
+        void timeout_ms;
         if (!tasks || !Array.isArray(tasks) || tasks.length === 0) return textResult('error: missing or empty tasks array');
         if (tasks.length > 10) return textResult('error: maximum 10 parallel tasks');
 
-        // Resolve defaults
+        // Resolve defaults (respecting Cost Shield workerRoute and Agents Profile)
+        const routeOverride = parseCostShieldWorkerRouteOverride();
         const selected = await resolveCollabModel(this.secrets);
-        const defaultProvider: ProviderId = selected?.provider ?? 'deepseek';
-        const defaultTier: Tier = selected?.tier ?? 'light';
+        const defaultProvider: ProviderId = routeOverride?.provider ?? selected?.provider ?? 'deepseek';
+        const defaultTier: Tier = routeOverride?.tier ?? selected?.tier ?? 'coding';
 
-        // Cost guard — heuristic: ~4 chars per token, plus a per-tier rate assumption
-        const estimatedInputTokens = tasks.reduce((sum, t) => sum + Math.ceil((t.prompt?.length ?? 0) / 4), 0);
-        const estimatedOutputTokens = tasks.length * 512;
-        const roughCost = (estimatedInputTokens / 1_000_000) * 0.15 + (estimatedOutputTokens / 1_000_000) * 0.60;
+        // Pre-resolve routes, read local context_files once, and enforce heavy-tier cost guards
+        const preparedTasks = await Promise.all(tasks.map(async (t) => {
+            const role = t.role as WorkerRole | undefined;
+            const provider: ProviderId = t.provider ?? defaultProvider;
+            const tier: Tier = t.tier
+                ?? routeOverride?.tier
+                ?? (role ? workerRoleTier(role, selected?.tier ?? defaultTier) : (selected?.tier ?? defaultTier));
+            const contextBlocks: string[] = [];
+            for (const f of t.context_files ?? []) {
+                const resolved = resolveWorkspacePath(f);
+                if (!resolved) { contextBlocks.push(`[${f}: outside workspace]`); continue; }
+                try {
+                    const buf = await fs.readFile(resolved, 'utf8');
+                    const maxChars = t.max_chars_per_file ?? 16000;
+                    const trimmed = buf.length > maxChars
+                        ? `${buf.slice(0, maxChars)}\n…[truncated ${buf.length - maxChars} chars]`
+                        : buf;
+                    contextBlocks.push(`--- ${f} ---\n${trimmed}\n--- end ${f} ---`);
+                } catch (e: any) { contextBlocks.push(`[${f}: ${e?.message ?? 'read failed'}]`); }
+            }
+            const fullPrompt = contextBlocks.length > 0
+                ? `Context:\n\n${contextBlocks.join('\n\n')}\n\nTask:\n${t.prompt}`
+                : t.prompt;
+            return { raw: t, role, provider, tier, fullPrompt };
+        }));
+
+        // Deduplicated heavy-tier cost confirmation (matches SpawnWorkerTool safety invariant)
+        const confirmedPairs = new Set<string>();
+        for (const pt of preparedTasks) {
+            const pairKey = `${pt.provider}:${pt.tier}`;
+            if (confirmedPairs.has(pairKey)) continue;
+            confirmedPairs.add(pairKey);
+            const ok = await confirmHeavyTier(pt.provider, pt.tier);
+            if (!ok) return textResult(`user denied heavy-tier parallel worker (${pairKey})`);
+        }
+
+        // Tier-aware preflight cost estimate using local model pricing table (including context_files)
+        const roughCost = preparedTasks.reduce((sum, pt) => {
+            const inTok = Math.ceil((pt.fullPrompt?.length ?? 0) / 4);
+            const outTok = 768;
+            const resolvedModel = modelFor(pt.provider, pt.tier);
+            const est = estimateCost(pt.provider, resolvedModel, inTok, outTok);
+            return sum + (typeof est === 'number' && Number.isFinite(est) && est > 0 ? est : (inTok / 1_000_000) * 0.20 + (outTok / 1_000_000) * 0.80);
+        }, 0);
         const softLimit = max_cost_usd ?? 0.50;
         const hardLimit = hard_cost_usd ?? 2.00;
 
         if (!urgent && roughCost > hardLimit) {
-            return textResult(`⚠️ Estimated cost $${roughCost.toFixed(4)} exceeds hard limit $${hardLimit.toFixed(2)}. Aborted. Use urgent:true to bypass.`);
+            return textResult(`⚠️ Estimated cost ~$${roughCost.toFixed(4)} (unofficial local estimate) exceeds hard limit $${hardLimit.toFixed(2)}. Aborted. Use urgent:true to bypass.`);
         }
 
         const warnings: string[] = [];
         if (urgent && roughCost > hardLimit) {
-            warnings.push(`⚡ **URGENT MODE** — cost estimate $${roughCost.toFixed(4)} exceeds hard limit $${hardLimit.toFixed(2)} but urgency flag is set. Proceeding with safety net.`);
+            warnings.push(`⚡ **URGENT MODE** — ~est. $${roughCost.toFixed(4)} exceeds hard limit $${hardLimit.toFixed(2)} but urgency flag is set. Proceeding with safety net.`);
         } else if (roughCost > softLimit) {
-            warnings.push(`⚠️ Cost estimate $${roughCost.toFixed(4)} exceeds soft limit $${softLimit.toFixed(2)}. Proceeding — monitor usage.`);
+            warnings.push(`⚠️ Unofficial ~est. $${roughCost.toFixed(4)} exceeds soft limit $${softLimit.toFixed(2)}. Proceeding — check your provider dashboard for official billing.`);
         }
 
         // Dispatch all workers concurrently
         const results = await Promise.allSettled(
-            tasks.map(async (t, i) => {
-                const provider: ProviderId = t.provider ?? defaultProvider;
-                const tier: Tier = t.tier ?? workerRoleTier(t.role as WorkerRole | undefined, defaultTier);
-                const contextBlocks: string[] = [];
-                for (const f of t.context_files ?? []) {
-                    const resolved = resolveWorkspacePath(f);
-                    if (!resolved) { contextBlocks.push(`[${f}: outside workspace]`); continue; }
-                    try {
-                        const buf = await fs.readFile(resolved, 'utf8');
-                        const maxChars = t.max_chars_per_file ?? 16000;
-                        contextBlocks.push(`--- ${f} ---\n${buf.slice(0, maxChars)}\n--- end ${f} ---`);
-                    } catch (e: any) { contextBlocks.push(`[${f}: ${e?.message ?? 'read failed'}]`); }
-                }
-                const fullPrompt = contextBlocks.length > 0
-                    ? `Context:\n\n${contextBlocks.join('\n\n')}\n\nTask:\n${t.prompt}`
-                    : t.prompt;
+            preparedTasks.map(async (pt, i) => {
                 try {
                     const r = await consult(this.secrets, {
-                        provider, tier, question: fullPrompt,
-                        system: t.system, maxTokens: 2048
+                        provider: pt.provider,
+                        tier: pt.tier,
+                        question: pt.fullPrompt,
+                        system: ensurePureTextAdvisorSystem(pt.raw.system, pt.role),
+                        maxTokens: 2048,
+                        slotIndex: pt.raw.slot_index,
                     }, token);
                     const usage = r.usage ? ` (in:${r.usage.promptTokens ?? '?'} out:${r.usage.completionTokens ?? '?'})` : '';
+                    const fullText = r.text.slice(0, 16000);
+                    const inlineCap = 3200;
+                    const wasTrimmedInline = fullText.length > inlineCap;
                     return {
                         task_index: i,
                         status: 'success' as const,
                         provider: r.provider,
                         model: r.model,
                         usage,
-                        text: r.text.slice(0, 8000),
+                        fullText,
+                        wasTrimmedInline,
+                        text: wasTrimmedInline
+                            ? `${fullText.slice(0, inlineCap)}\n…[inline summary capped at ${inlineCap} chars; full ${fullText.length}-char worker output saved to .harmony/fleet/]`
+                            : fullText,
                     };
                 } catch (e: any) {
                     if (fail_fast) throw e;
@@ -3728,13 +3891,40 @@ class ParallelTool implements vscode.LanguageModelTool<ParallelInput> {
             })
         );
 
+        // Spill full untruncated Fleet transcript to .harmony/fleet/ when any worker exceeded inlineCap
+        let fleetArtifactNote = '';
+        const anyTrimmed = results.some(
+            r => r.status === 'fulfilled' && (r as PromiseFulfilledResult<any>).value.status === 'success' && (r as PromiseFulfilledResult<any>).value.wasTrimmedInline
+        );
+        const root = workspaceRoot();
+        if (anyTrimmed && root) {
+            try {
+                const fleetDir = path.join(root, '.harmony', 'fleet');
+                await fs.mkdir(fleetDir, { recursive: true });
+                const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const relArtifact = `.harmony/fleet/fleet-${stamp}.md`;
+                const fullLines = [
+                    `# Harmony Fleet Run (${new Date().toISOString()})`,
+                    '',
+                    ...results
+                        .filter(r => r.status === 'fulfilled' && (r as any).value.status === 'success')
+                        .map(r => {
+                            const v = (r as any).value;
+                            return `## Task ${v.task_index + 1} (${v.provider}/${v.model})${v.usage}\n\n${v.fullText}`;
+                        }),
+                ];
+                await fs.writeFile(path.join(root, relArtifact), fullLines.join('\n\n'), 'utf8');
+                fleetArtifactNote = `📄 _Full untruncated Fleet worker transcript saved to \`${relArtifact}\` (Renderer OOM Shield v3)._`;
+            } catch { /* non-fatal if workspace is read-only */ }
+        }
+
         // Format output
         const successCount = results.filter(r => r.status === 'fulfilled' && (r as PromiseFulfilledResult<any>).value.status === 'success').length;
         const lines = [
             `## Swarm Results: ${successCount}/${tasks.length} succeeded`,
             '',
             ...warnings,
-            '',
+            ...(fleetArtifactNote ? [fleetArtifactNote, ''] : []),
             '| # | Status | Provider | Model | Tokens |',
             '|---|--------|----------|-------|--------|',
             ...results.map((r, i) => {
@@ -3779,12 +3969,18 @@ class SandboxTool implements vscode.LanguageModelTool<SandboxInput> {
         await fs.writeFile(tmpFile, code, 'utf8');
 
         try {
-            const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+            const tscBin = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
+            const useLocalTsc = require('fs').existsSync(tscBin);
+            const cmd = useLocalTsc ? process.execPath : (process.platform === 'win32' ? 'npx.cmd' : 'npx');
+            const args = useLocalTsc
+                ? [tscBin, '--noEmit', '--skipLibCheck', '--target', 'ES2022', '--module', 'commonjs', tmpFile]
+                : ['tsc', '--noEmit', '--skipLibCheck', '--target', 'ES2022', '--module', 'commonjs', tmpFile];
             return await new Promise<vscode.LanguageModelToolResult>(resolve => {
-                cp.execFile(npmCmd, ['run', 'compile'], { cwd: root, timeout: 120000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 },
+                cp.execFile(cmd, args, { cwd: root, timeout: 120000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 },
                     (error, stdout, stderr) => {
-                        const ok = !error && !(stderr && /\berror\b/i.test(stderr));
-                        const verdict = ok ? '✅ PASS — code compiles cleanly' : '❌ FAIL — compilation errors found';
+                        const combined = `${stdout || ''}\n${stderr || ''}`;
+                        const ok = !error && !/\berror TS\d+\b/i.test(combined);
+                        const verdict = ok ? `✅ PASS — sandbox snippet (${check}) compiled cleanly` : `❌ FAIL — compilation errors found in sandbox snippet`;
                         const output = [
                             verdict,
                             '',
@@ -3838,13 +4034,15 @@ class ConcertCheckTool implements vscode.LanguageModelTool<ConcertCheckInput> {
         try {
             const { messages } = await concertCheck(options.input.rooms);
             if (messages.length === 0) return textResult('🎻 Concert hall is quiet. No new messages since your last check-in.');
-            // Attempt lightweight summary via Gemini Flash
+            // Attempt lightweight summary via the configured Agents Profile (or DeepSeek light)
             let summary: string | undefined;
             try {
-                const { consult } = await import('./providers');
+                const { consult, resolveCollabModel } = await import('./providers');
+                const selected = await resolveCollabModel(this.secrets);
+                const provider = selected?.provider ?? 'deepseek';
                 const text = messages.map(m => `[${m.room}] ${m.from}: ${m.body}`).join('\n');
                 const r = await consult(this.secrets, {
-                    provider: 'gemini', tier: 'light',
+                    provider, tier: 'light',
                     question: `Summarize these concert hall messages in 3-5 bullet points. Focus on key decisions, open questions, and action items:\n\n${text}`,
                     system: 'You are a concert hall summarizer. Be concise. Only report what matters.',
                     maxTokens: 512,

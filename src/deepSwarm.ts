@@ -3,21 +3,48 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
-import { consult, ProviderId, Tier, providerDisplayName, modelFor, secretKeyFor, PROVIDER_IDS } from './providers';
+import { consult, ProviderId, Tier, providerDisplayName, modelFor, secretKeyFor, PROVIDER_IDS, resolveCollabModel } from './providers';
 import { estimateCost } from './costTracker';
+import { classifyAuditFindings, isSecurityFinding, SECURITY_FINDING_PATTERN, AUDIT_SURFACE_LABEL } from './auditClassify';
 
-// Lazy-loaded PDF parser — avoids startup overhead for non-PDF workflows
+// Lazy-loaded PDF parser — avoids startup overhead for non-PDF workflows.
+// Supports both pdf-parse v2.x (class PDFParse with getText() + destroy()) and v1.x (function default export).
 let _pdfParse: ((buf: Buffer) => Promise<{ text: string; numpages: number }>) | null = null;
 async function pdfParse(buf: Buffer): Promise<{ text: string; numpages: number }> {
     if (!_pdfParse) {
         try {
-            // pdf-parse v1.x: import the module, then call it as a function
             const pdfModule: any = await import('pdf-parse');
-            _pdfParse = (typeof pdfModule.default === 'function')
-                ? pdfModule.default
-                : pdfModule.PDFParse
-                    ? (b: Buffer) => new pdfModule.PDFParse({ data: b }).then((r: any) => ({ text: r.text || '', numpages: r.numpages || 1 }))
-                    : pdfModule;
+            const PDFParseCtor = pdfModule?.PDFParse ?? pdfModule?.default?.PDFParse;
+            if (typeof PDFParseCtor === 'function') {
+                _pdfParse = async (b: Buffer) => {
+                    const parser = new PDFParseCtor({ data: new Uint8Array(b) });
+                    try {
+                        const r: any = await parser.getText();
+                        const numpages = typeof r?.total === 'number'
+                            ? r.total
+                            : (Array.isArray(r?.pages) ? r.pages.length : (typeof r?.numpages === 'number' ? r.numpages : 1));
+                        return { text: typeof r?.text === 'string' ? r.text : '', numpages: numpages || 1 };
+                    } finally {
+                        if (typeof parser.destroy === 'function') {
+                            await parser.destroy().catch(() => {});
+                        }
+                    }
+                };
+            } else {
+                const fn = typeof pdfModule?.default === 'function'
+                    ? pdfModule.default
+                    : (typeof pdfModule === 'function' ? pdfModule : null);
+                if (!fn) {
+                    throw new Error('Unsupported pdf-parse module export shape');
+                }
+                _pdfParse = async (b: Buffer) => {
+                    const r: any = await fn(b);
+                    return {
+                        text: typeof r?.text === 'string' ? r.text : '',
+                        numpages: typeof r?.numpages === 'number' ? r.numpages : (typeof r?.total === 'number' ? r.total : 1),
+                    };
+                };
+            }
         } catch {
             throw new Error('pdf-parse not installed. Run: npm install pdf-parse');
         }
@@ -4706,8 +4733,13 @@ let autoAuditRunning = false;
 export interface AutoAuditResult {
     verdict: 'GO' | 'CAUTION' | 'NO-GO';
     summary: string;
+    /** Security findings first, then logic findings. Nothing is discarded. */
     findings: string[];
     urgentIssues: string[];
+    /** Non-security notes, kept rather than deleted. Never drives the verdict. */
+    logicFindings?: string[];
+    /** Classification counts, so a reader can see what was downgraded or dropped. */
+    classified?: { security: number; logic: number; dropped: number };
 }
 
 /**
@@ -4800,9 +4832,15 @@ Return a JSON object with:
 
 ONLY return the JSON, no other text.`;
 
+        const selectedCollab = await resolveCollabModel(secrets);
+        const auditProvider: ProviderId = selectedCollab?.provider ?? 'deepseek';
+        const auditTier: Tier = selectedCollab?.tier === 'heavy' || selectedCollab?.tier === 'premium'
+            ? 'mid'
+            : (selectedCollab?.tier ?? 'mid');
+
         const result = await consult(secrets, {
-            provider: 'deepseek',
-            tier: 'mid',
+            provider: auditProvider,
+            tier: auditTier,
             question: prompt,
             system: 'You are a code safety auditor. Return only valid JSON. Be brief and precise.',
             maxTokens: 2048,
@@ -4823,52 +4861,60 @@ ONLY return the JSON, no other text.`;
 
         try {
             const parsed = JSON.parse(jsonMatch[0]);
-            let findings: string[] = Array.isArray(parsed.findings) ? parsed.findings.slice(0, 5) : [];
-            let urgentIssues: string[] = Array.isArray(parsed.urgentIssues) ? parsed.urgentIssues.slice(0, 3) : [];
 
-            // ── Post-filter: ALLOWLIST approach (future-proof) ──
-            // When checkProviderSync() passed, the LLM will STILL hallucinate
-            // model ID mismatches using ever-new vocabulary ("inconsistent",
-            // "need alignment", "region naming ambiguity", etc.). A denylist
-            // regex can never catch every phrasing.
+            // ── Post-filter: CLASSIFY, never delete ──
+            // When checkProviderSync() passed, the LLM will STILL hallucinate model
+            // ID mismatches using ever-new vocabulary ("inconsistent", "need
+            // alignment", "region naming ambiguity", etc.), so a denylist regex can
+            // never catch every phrasing.
             //
-            // FLIP THE LOGIC: only KEEP findings that mention genuine security
-            // or privacy concerns. Everything else is stripped as non-actionable
-            // noise from truncated file slices.
-            const noSecretsPattern = /no secrets|secrets?\s+found|secrets?\s+detected|no\s+secrets\s+found/i;
+            // So security findings DRIVE THE VERDICT and non-security notes are KEPT
+            // and labelled. Nothing meaningful is discarded, which means tightening
+            // the security pattern can only change RANK, never EXISTENCE — the
+            // quiet-vs-complete trade-off is removed rather than merely monitored.
+            const classifiedResult = classifyAuditFindings(parsed.findings, parsed.urgentIssues);
+            const findings = classifiedResult.findings;
+            const logicFindings = classifiedResult.logicFindings;
+            const classified = classifiedResult.counts;
+            const echoNote = classified.dropped > 0
+                ? ` ${classified.dropped} "no secrets" echo line(s) ignored.`
+                : '';
+
+            let summaryText: string = typeof parsed.summary === 'string' && parsed.summary.trim()
+                ? parsed.summary.trim()
+                : 'Audit complete.';
+
             if (providerSyncOk) {
-                // Only genuine security/privacy findings survive.
-                const securityPattern = /secret|api\s*key|password|passwd|token|credential|private\s*key|\.env|leak|expose|hardcod|pii|personal\s*(data|info)/i;
-                const before = findings.length + urgentIssues.length;
-                findings = findings.filter(f => securityPattern.test(f) && !noSecretsPattern.test(f));
-                urgentIssues = urgentIssues.filter(f => securityPattern.test(f) && !noSecretsPattern.test(f));
-                const removed = before - (findings.length + urgentIssues.length);
-                if (removed > 0) {
-                    console.log(`[TripleCheckAutoAudit] Stripped ${removed} non-security finding(s) — deterministic check passed, allowlist applied.`);
-                }
-                // If we stripped everything, downgrade to clean GO with safe summary.
-                // Also scrub the summary if it mentions provider/model/registry terms.
-                const summaryHasModelTerms = /provider|model|registry|default|mismatch|sync|align|inconsistent|region|naming|secret/i.test(parsed.summary || '');
-                if (findings.length === 0 && urgentIssues.length === 0) {
+                // Nothing reached the security bar → quiet verdict, but the logic
+                // notes stay attached and retrievable. Hiding their existence would
+                // be the old destructive bug wearing a new coat.
+                if (classified.security === 0) {
                     return {
                         verdict: 'GO',
-                        summary: 'Audit complete (provider sync verified programmatically).',
-                        findings: [],
+                        summary: `No security findings (${AUDIT_SURFACE_LABEL}); provider sync verified.`
+                            + (classified.logic > 0 ? ` ${classified.logic} logic note(s) kept — see Show Details.` : '')
+                            + echoNote,
+                        findings,
                         urgentIssues: [],
+                        logicFindings,
+                        classified,
                     };
                 }
-                // Even if some security findings survived, scrub the summary
-                // so it doesn't carry hallucinated model/registry language.
-                if (summaryHasModelTerms && !securityPattern.test(parsed.summary || '')) {
-                    parsed.summary = 'Audit complete — review findings below.';
+                // Scrub hallucinated model/registry language from the summary, but
+                // never let the wording imply that a scanner ran.
+                const summaryHasModelTerms = /provider|model|registry|default|mismatch|sync|align|inconsistent|region|naming|secret/i.test(summaryText);
+                if (summaryHasModelTerms && !SECURITY_FINDING_PATTERN.test(summaryText)) {
+                    summaryText = 'Review the findings before acting.';
                 }
             }
 
             return {
                 verdict: ['GO', 'CAUTION', 'NO-GO'].includes(parsed.verdict) ? parsed.verdict : 'CAUTION',
-                summary: parsed.summary || 'Audit complete.',
+                summary: `${summaryText} (${AUDIT_SURFACE_LABEL})${echoNote}`,
                 findings,
-                urgentIssues,
+                urgentIssues: classifiedResult.urgentIssues,
+                logicFindings,
+                classified,
             };
         } catch (e: any) {
             console.error('[TripleCheckAutoAudit] JSON parse failed. Raw:', text.slice(0, 500), 'Error:', e?.message);
